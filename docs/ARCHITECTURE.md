@@ -64,7 +64,7 @@ Routing now uses a 3-stage pipeline before any paid model call:
 
 ### Tools (`mullet/core/tools/`) — 24 tools
 
-See `README.md` "Tools (24 built-in)" for the full list. Highlights:
+See "Built-in tools" in `README.md` for the full list. Highlights:
 
 | Toolset | Tools |
 |---|---|
