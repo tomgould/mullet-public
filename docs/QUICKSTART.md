@@ -16,11 +16,19 @@ pip install -e .
 
 ## 2. Set Up Claude Code Integration
 
+Register the MCP server for every project, then restart Claude Code:
+
+```bash
+claude mcp add --scope user mullet -- mullet mcp
+```
+
+Optionally, install Mullet's hooks and rules too. They change your global Claude Code setup, so run it with `--dry-run` first:
+
 ```bash
 mullet setup-claude
 ```
 
-Installs Mullet's hooks and rules globally so they fire in **any project directory**:
+It installs these globally, so they fire in **any project directory**:
 
 | What | Where | Effect |
 |------|-------|--------|

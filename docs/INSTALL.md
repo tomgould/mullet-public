@@ -126,19 +126,28 @@ If you see `X/Y checks passed` and at least one provider is green, you're good t
 
 ## 5. Wire into Claude Code (MCP)
 
-Mullet registers as an MCP server inside Claude Code. Once wired, you can ask Claude to delegate work via Mullet tools like `mullet_run`, `mullet_opencode`, and `trawl_search`.
+Mullet runs as an MCP server inside Claude Code. Once it's registered, you can ask Claude to use Mullet tools such as `mullet_run`, `mullet_opencode` and `trawl_search`.
 
-### Auto (recommended)
+### Register the MCP server
+
+```bash
+claude mcp add --scope user mullet -- mullet mcp
+```
+
+This makes the tools available in every project. Restart Claude Code, then check that `claude mcp list` shows `mullet`.
+
+### Hooks, rules and skills (optional)
 
 ```bash
 mullet setup-claude
 ```
 
+`setup-claude` changes your global Claude Code setup, so read the table below first, or run it with `--dry-run`. In a clone of this repository it skips the MCP server step and prints a warning, because the `.mcp.json` it copies from isn't included. Register the server with the command above instead.
+
 This is idempotent — safe to re-run. It installs:
 
 | What | Where | Effect |
 |:-----|:------|:-------|
-| **MCP server config** | `~/.claude/mcp.json` | Registers Mullet + Trawl knowledge tools globally |
 | **Hooks** | `~/.claude/settings.json` | Fires in **any** project directory you open with Claude Code |
 | **Delegation rules** | `~/.claude/CLAUDE.md` | Provider priority, AI-Bridge validation rules, filesystem guardrails |
 | **Skills** | `~/.claude/skills/` | `/delegate`, `/commit`, `/review`, `pool-config` |
@@ -157,19 +166,12 @@ This is idempotent — safe to re-run. It installs:
 
 After running `mullet setup-claude`, **restart Claude Code** so the MCP server and hooks load.
 
-### Manual (if you prefer)
+### Project only
 
-Add this to `~/.claude/mcp.json`, the file `mullet setup-claude` writes:
+To use Mullet in one project rather than all of them, run this in the project's directory:
 
-```json
-{
-  "mcpServers": {
-    "mullet": {
-      "command": "mullet",
-      "args": ["mcp"]
-    }
-  }
-}
+```bash
+claude mcp add --scope project mullet -- mullet mcp
 ```
 
 Then restart Claude Code.
@@ -332,7 +334,7 @@ Or for code-specific queries:
 |:--------|:----|
 | `mullet: command not found` | Run `pip install -e .` from the repo root. If it's still missing, add `~/.local/bin` to your `PATH` (common on Linux). |
 | `mullet doctor` shows no providers | Add `KIMI_API_KEY` or `GOOGLE_API_KEY` to your `.env` file, or start LM Studio and load a model. An `ANTHROPIC_API_KEY` also works, but the Anthropic API bills it per token. |
-| MCP tools not appearing in Claude Code | Run `mullet setup-claude`, then **fully restart** Claude Code. Check Settings → MCP → `mullet` is listed. |
+| MCP tools not appearing in Claude Code | Run `claude mcp add --scope user mullet -- mullet mcp`, then **fully restart** Claude Code. Check that `claude mcp list` shows `mullet`. |
 | `mullet mcp: server ready` not seen | In Claude Code, go to Settings → MCP → `mullet` → **View logs**. Look for Python tracebacks or missing dependencies. |
 | Kimi API key rejected | Ensure the key starts with `sk-` and has active credits at [platform.moonshot.cn](https://platform.moonshot.cn). If you have a coding-specific key (`sk-kimi-...`), Mullet auto-routes to the coding endpoint. |
 | `mullet doctor` warns about missing hooks | You probably did a non-editable install. Run `pip install -e .` from the repo root, then re-run `mullet setup-claude`. |
