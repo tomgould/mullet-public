@@ -1,0 +1,138 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mullet"
+version = "1.9.0"
+description = "Cloud in the front, Local GPU in the back. AI coding orchestrator with intelligent compute routing."
+readme = "README.md"
+license = {text = "BSL-1.1"}
+requires-python = ">=3.10"
+authors = [{ name = "Tom Gould" }]
+keywords = ["ai", "llm", "agent", "orchestration", "coding-assistant", "local-gpu"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Code Generators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    "openai>=1.0",
+    "anthropic>=0.30",
+    "pyyaml>=6.0",
+    "aiohttp>=3.9",
+    "chromadb>=0.4",
+    "sentence-transformers>=2.0",
+    "networkx>=3.0",
+    "psutil>=5.9",
+    "rank-bm25>=0.2.2",
+    "nltk>=3.8",
+    "python-dotenv>=1.0",
+    "tree-sitter>=0.21.0,<0.22.0",
+    "tree-sitter-languages>=1.10.0",
+    "unstructured>=0.12.0",
+    "mcp>=1.0",
+    "wcwidth>=0.2",
+    "click>=8.0",
+    "pydantic>=2.0",
+    "prompt_toolkit>=3.0",
+    "rich>=13.0",
+    "textual>=0.80",
+    "pypdf>=3.0",
+    "pyperclip>=1.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/tomgould/mullet-public"
+Repository = "https://github.com/tomgould/mullet-public"
+Issues = "https://github.com/tomgould/mullet-public/issues"
+Documentation = "https://github.com/tomgould/mullet-public/blob/main/docs/ARCHITECTURE.md"
+Changelog = "https://github.com/tomgould/mullet-public/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+gemini = [
+    "google-genai>=1.0",
+]
+bedrock = [
+    "boto3>=1.28",
+]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+gpu = [
+    "pynvml>=11.0",
+    "torch>=2.0",
+]
+all = [
+    "google-genai>=1.0",
+    "boto3>=1.28",
+    "psycopg2-binary>=2.9",
+    "pynvml>=11.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-aiohttp>=1.0",
+]
+[project.scripts]
+mullet = "mullet.cli.main:main"
+mullet-mcp = "mullet.server.mcp:run_mcp_server"
+mullet-hud = "mullet.hud.cli:main"
+mullet-statusline = "mullet.hud.statusline:main"
+mullet-claude-hud = "mullet.hud.claude_style:main"
+mullet-onboard = "scripts.onboard:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mullet"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"mullet/autopilot_templates" = "mullet/autopilot_templates"
+"mullet/core/skills/builtin" = "mullet/core/skills/builtin"
+"mullet/templates/init" = "mullet/templates/init"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = ["-m", "not live"]
+norecursedirs = ["_archive", ".git", "__pycache__", "*.egg-info", ".venv", "node_modules"]
+markers = [
+    "live: tests that hit real LLM endpoints, spawn CLI subprocesses, or require a loaded local model. Flaky/slow by nature — opt in with -m live.",
+]
+
+[tool.ruff]
+# These directories hold v1-era / vendored / generated code we don't want
+# to lint or hold to current standards.
+extend-exclude = [
+    "tests/_archive",
+    "site",
+    ".venv",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Entry points that intentionally run setup code (dotenv loading, monkey-patching,
+# logger configuration) before the bulk of their imports — E402 is the
+# correct lint rule but the wrong choice here.
+"mullet/cli/main.py" = ["E402"]
+"mullet/cli/pool_audit.py" = ["E402"]
+"mullet/core/providers/anthropic.py" = ["E402"]
+"mullet/core/providers/openai_compat.py" = ["E402"]
+"mullet/core/skills/registry.py" = ["E402"]
+"mullet/hud/guard.py" = ["E402"]
+"mullet/knowledge/sources/web_converter.py" = ["E402"]
+"mullet/server/mcp.py" = ["E402"]
+"scripts/reindex.py" = ["E402"]
+"scripts/sync_prompts.py" = ["E402"]
+# Tests use lambdas as inline callbacks and `l` as a list-comp loop var
+# all over the place — neither matters for test code clarity. Also they
+# commonly run try/except aiohttp-style probes before their main imports.
+# F841 (unused-variable) in tests is usually a captured-but-unread result
+# value or a placeholder for fixture wiring — not worth chasing per-file.
+"tests/**" = ["E731", "E741", "E402", "F841"]

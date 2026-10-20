@@ -1,0 +1,1026 @@
+models:
+  claude-haiku-4-5-20251001:
+    input_per_1k: 0.001
+    output_per_1k: 0.005
+    context_window: 200000
+  claude-haiku-4-5:
+    input_per_1k: 0.001
+    output_per_1k: 0.005
+    context_window: 200000
+  claude-sonnet-4-6:
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+    context_window: 1000000
+  claude-sonnet-5:
+    input_per_1k: 0.002
+    output_per_1k: 0.01
+    context_window: 1000000
+  claude-opus-4-6:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 1000000
+  claude-opus-4-7:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 1000000
+  claude-opus-4-8:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 1000000
+  claude-fable-5:
+    input_per_1k: 0.01
+    output_per_1k: 0.05
+    context_window: 1000000
+    notes: Mythos-class tier, 128K max output, released 2026-06-09
+  anthropic/claude-opus-4.1:
+    input_per_1k: 0.015
+    output_per_1k: 0.075
+    context_window: 200000
+  anthropic/claude-sonnet-4.5:
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+    context_window: 1000000
+  claude-sonnet-4-5:
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+    context_window: 1000000
+  gpt-5:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 400000
+  gpt-5-mini:
+    input_per_1k: 0.00025
+    output_per_1k: 0.002
+    context_window: 400000
+  gpt-4o:
+    input_per_1k: 0.0025
+    output_per_1k: 0.01
+    context_window: 128000
+  gpt-4o-mini:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 128000
+  gpt-4-turbo:
+    input_per_1k: 0.01
+    output_per_1k: 0.03
+    context_window: 128000
+  o1:
+    input_per_1k: 0.015
+    output_per_1k: 0.06
+    context_window: 200000
+  o1-mini:
+    input_per_1k: 0.003
+    output_per_1k: 0.012
+    context_window: 128000
+  o3-mini:
+    input_per_1k: 0.0011
+    output_per_1k: 0.0044
+    context_window: 200000
+  openai/gpt-5:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 400000
+  kimi-k2.6:
+    input_per_1k: 0.00095
+    output_per_1k: 0.004
+    cache_hit_per_1k: 0.00016
+    context_window: 262144
+  kimi-k2.5:
+    input_per_1k: 0.0006
+    output_per_1k: 0.003
+    cache_hit_per_1k: 0.0001
+    context_window: 262144
+  kimi-k2.7-code:
+    input_per_1k: 0.00095
+    output_per_1k: 0.004
+    cache_hit_per_1k: 0.00019
+    context_window: 262144
+    notes: released 2026-06-12; code-first; thinking always on
+  kimi-k2.7-code-highspeed:
+    input_per_1k: 0.0019
+    output_per_1k: 0.008
+    cache_hit_per_1k: 0.00038
+    context_window: 262144
+    notes: 5-6x faster, ~2x price; thinking always on
+  kimi-k2-0905-preview:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0025
+    cache_hit_per_1k: 0.0001
+    context_window: 262144
+    notes: deprecated 2026-05-25
+  kimi-k2-0711-preview:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0025
+    cache_hit_per_1k: 0.0001
+    context_window: 131072
+    notes: deprecated 2026-05-25
+  kimi-k2-turbo-preview:
+    input_per_1k: 0.00115
+    output_per_1k: 0.008
+    cache_hit_per_1k: 0.00016
+    context_window: 262144
+    notes: deprecated 2026-05-25
+  kimi-k2-thinking:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0025
+    cache_hit_per_1k: 0.0001
+    context_window: 262144
+    notes: deprecated 2026-05-25
+  kimi-k2-thinking-turbo:
+    input_per_1k: 0.00115
+    output_per_1k: 0.008
+    cache_hit_per_1k: 0.00016
+    context_window: 262144
+    notes: deprecated 2026-05-25
+  kimi-latest:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0025
+    context_window: 256000
+    notes: deprecated 2026-01-28
+  gemini-2.5-flash-lite:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0004
+    context_window: 1000000
+    notes: $0.10/$0.40 per 1M
+  gemini-2.5-flash:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0025
+    context_window: 1000000
+    notes: $0.30/$2.50 per 1M
+  gemini-2.5-pro:
+    input_per_1k: 0.002
+    output_per_1k: 0.012
+    context_window: 1000000
+    notes: $2.00/$12.00 per 1M
+  gemini-3.5-flash:
+    input_per_1k: 0.0015
+    output_per_1k: 0.009
+    context_window: 1048576
+  gemini-3.1-pro:
+    input_per_1k: 0.002
+    output_per_1k: 0.012
+    context_window: 2000000
+  gemini-2.0-flash:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0004
+    context_window: 1000000
+  google/gemini-2.5-flash:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0025
+    context_window: 1000000
+  google/gemini-2.5-pro:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 1048576
+  llama-3.1-8b:
+    input_per_1k: 5.0e-05
+    output_per_1k: 5.0e-05
+    context_window: 128000
+  llama-3.3-70b:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0003
+    context_window: 128000
+  llama-4-scout:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 512000
+  llama-4-maverick:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0012
+    context_window: 1000000
+  mistral-large:
+    input_per_1k: 0.002
+    output_per_1k: 0.006
+    context_window: 128000
+  mistral-small:
+    input_per_1k: 0.0002
+    output_per_1k: 0.0006
+    context_window: 128000
+  codestral:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0009
+    context_window: 256000
+  deepseek-v3:
+    input_per_1k: 0.00027
+    output_per_1k: 0.0011
+    context_window: 128000
+
+  deepseek/deepseek-v3.2-exp:
+    input_per_1k: 0.00027
+    output_per_1k: 0.00041
+    context_window: 163840
+  qwen-turbo:
+    input_per_1k: 0.0002
+    output_per_1k: 0.0006
+    context_window: 1000000
+  qwen-plus:
+    input_per_1k: 0.0004
+    output_per_1k: 0.0012
+    context_window: 131072
+  qwen-max:
+    input_per_1k: 0.0016
+    output_per_1k: 0.0064
+    context_window: 32768
+  qwen-long:
+    input_per_1k: 5.0e-05
+    output_per_1k: 0.0002
+    context_window: 10000000
+  qwen2.5-72b-instruct:
+    input_per_1k: 0.0005
+    output_per_1k: 0.002
+    context_window: 131072
+  qwen2.5-32b-instruct:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0012
+    context_window: 131072
+  qwen2.5-coder-32b-instruct:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0012
+    context_window: 131072
+  qwq-32b:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0024
+    context_window: 131072
+  qwen/qwen3-coder:
+    input_per_1k: 0.00022
+    output_per_1k: 0.0018
+    context_window: 1048576
+  qwen/qwen3-coder:free:
+    input_per_1k: 0
+    output_per_1k: 0
+    context_window: 1048576
+  tencent/hy3:free:
+    input_per_1k: 0
+    output_per_1k: 0
+    context_window: 262144
+  deepseek/deepseek-chat:
+    input_per_1k: 0.0002002
+    output_per_1k: 0.0008001
+    context_window: 163840
+
+  deepseek/deepseek-v4-flash:
+    input_per_1k: 9.0e-05
+    output_per_1k: 0.00018
+    context_window: 1000000
+  deepseek/deepseek-v4-pro:
+    input_per_1k: 0.000435
+    output_per_1k: 0.00087
+    context_window: 1000000
+  z-ai/glm-5.1:
+    input_per_1k: 0.000966
+    output_per_1k: 0.003036
+    context_window: 202752
+  minimax/minimax-m3:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0012
+    context_window: 1048576
+  qwen/qwen3-coder-next:
+    input_per_1k: 0.00011
+    output_per_1k: 0.0008
+    context_window: 203000
+  meta-llama/llama-4-scout:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0003
+    context_window: 512000
+  meta-llama/llama-4-maverick:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 1000000
+  qwen/qwen-2.5-coder-32b-instruct:
+    input_per_1k: 0.00066
+    output_per_1k: 0.001
+    context_window: 131072
+  qwen/qwen3-30b-a3b:
+    input_per_1k: 0.00012
+    output_per_1k: 0.0005
+    context_window: 131072
+  mistralai/devstral-small:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0003
+    context_window: 131072
+  x-ai/grok-3-mini-beta:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0005
+    context_window: 131072
+  x-ai/grok-4.20:
+    input_per_1k: 0.00125
+    output_per_1k: 0.0025
+    context_window: 2000000
+  z-ai/glm-4.6:
+    input_per_1k: 0.00043
+    output_per_1k: 0.00174
+    context_window: 202752
+  anthropic/claude-sonnet-5:
+    input_per_1k: 0.002
+    output_per_1k: 0.01
+    context_window: 1000000
+  z-ai/glm-5.2:
+    input_per_1k: 0.00084
+    output_per_1k: 0.00264
+    context_window: 1048576
+  anthropic/claude-fable-5:
+    input_per_1k: 0.01
+    output_per_1k: 0.05
+    context_window: 1000000
+  qwen/qwen3.7-plus:
+    input_per_1k: 0.00032
+    output_per_1k: 0.00128
+    context_window: 1000000
+  anthropic/claude-opus-4.8-fast:
+    input_per_1k: 0.01
+    output_per_1k: 0.05
+    context_window: 1000000
+  anthropic/claude-opus-4.8:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 1000000
+  qwen/qwen3.7-max:
+    input_per_1k: 0.00125
+    output_per_1k: 0.00375
+    context_window: 1000000
+  x-ai/grok-build-0.1:
+    input_per_1k: 0.001
+    output_per_1k: 0.002
+    context_window: 256000
+  google/gemini-3.5-flash:
+    input_per_1k: 0.0015
+    output_per_1k: 0.009
+    context_window: 1048576
+  anthropic/claude-opus-4.7-fast:
+    input_per_1k: 0.03
+    output_per_1k: 0.15
+    context_window: 1000000
+  google/gemini-3.1-flash-lite:
+    input_per_1k: 0.00025
+    output_per_1k: 0.0015
+    context_window: 1048576
+  openai/gpt-chat-latest:
+    input_per_1k: 0.005
+    output_per_1k: 0.03
+    context_window: 400000
+  x-ai/grok-4.3:
+    input_per_1k: 0.00125
+    output_per_1k: 0.0025
+    context_window: 1000000
+  mistralai/mistral-medium-3-5:
+    input_per_1k: 0.0015
+    output_per_1k: 0.0075
+    context_window: 262144
+  qwen/qwen3.5-plus-20260420:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0018
+    context_window: 1000000
+  qwen/qwen3.6-flash:
+    input_per_1k: 0.0001875
+    output_per_1k: 0.001125
+    context_window: 1000000
+  qwen/qwen3.6-35b-a3b:
+    input_per_1k: 0.00014
+    output_per_1k: 0.001
+    context_window: 262144
+  qwen/qwen3.6-max-preview:
+    input_per_1k: 0.00104
+    output_per_1k: 0.00624
+    context_window: 262144
+  qwen/qwen3.6-27b:
+    input_per_1k: 0.000285
+    output_per_1k: 0.0024
+    context_window: 262144
+  openai/gpt-5.5-pro:
+    input_per_1k: 0.03
+    output_per_1k: 0.18
+    context_window: 1050000
+  openai/gpt-5.5:
+    input_per_1k: 0.005
+    output_per_1k: 0.03
+    context_window: 1050000
+  anthropic/claude-opus-4.7:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 1000000
+  google/gemma-4-26b-a4b-it:
+    input_per_1k: 6.0e-05
+    output_per_1k: 0.00033
+    context_window: 262144
+  google/gemma-4-31b-it:
+    input_per_1k: 0.00012
+    output_per_1k: 0.00035
+    context_window: 262144
+  qwen/qwen3.6-plus:
+    input_per_1k: 0.000325
+    output_per_1k: 0.00195
+    context_window: 1000000
+  z-ai/glm-5v-turbo:
+    input_per_1k: 0.0012
+    output_per_1k: 0.004
+    context_window: 202752
+  x-ai/grok-4.20-multi-agent:
+    input_per_1k: 0.00125
+    output_per_1k: 0.0025
+    context_window: 2000000
+  minimax/minimax-m2.7:
+    input_per_1k: 0.00018
+    output_per_1k: 0.00072
+    context_window: 204800
+  openai/gpt-5.4-nano:
+    input_per_1k: 0.0002
+    output_per_1k: 0.00125
+    context_window: 400000
+  openai/gpt-5.4-mini:
+    input_per_1k: 0.00075
+    output_per_1k: 0.0045
+    context_window: 400000
+  mistralai/mistral-small-2603:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 262144
+  z-ai/glm-5-turbo:
+    input_per_1k: 0.0012
+    output_per_1k: 0.004
+    context_window: 262144
+  qwen/qwen3.5-9b:
+    input_per_1k: 0.0001
+    output_per_1k: 0.00015
+    context_window: 262144
+  openai/gpt-5.4-pro:
+    input_per_1k: 0.03
+    output_per_1k: 0.18
+    context_window: 1050000
+  openai/gpt-5.4:
+    input_per_1k: 0.0025
+    output_per_1k: 0.015
+    context_window: 1050000
+  openai/gpt-5.3-chat:
+    input_per_1k: 0.00175
+    output_per_1k: 0.014
+    context_window: 128000
+  google/gemini-3.1-flash-lite-preview:
+    input_per_1k: 0.00025
+    output_per_1k: 0.0015
+    context_window: 1048576
+  qwen/qwen3.5-35b-a3b:
+    input_per_1k: 0.00014
+    output_per_1k: 0.001
+    context_window: 262144
+  qwen/qwen3.5-27b:
+    input_per_1k: 0.000195
+    output_per_1k: 0.00156
+    context_window: 262144
+  qwen/qwen3.5-122b-a10b:
+    input_per_1k: 0.00026
+    output_per_1k: 0.00208
+    context_window: 262144
+  qwen/qwen3.5-flash-02-23:
+    input_per_1k: 6.5e-05
+    output_per_1k: 0.00026
+    context_window: 1000000
+  google/gemini-3.1-pro-preview-customtools:
+    input_per_1k: 0.002
+    output_per_1k: 0.012
+    context_window: 1048756
+  openai/gpt-5.3-codex:
+    input_per_1k: 0.00175
+    output_per_1k: 0.014
+    context_window: 400000
+  google/gemini-3.1-pro-preview:
+    input_per_1k: 0.002
+    output_per_1k: 0.012
+    context_window: 1048576
+  anthropic/claude-sonnet-4.6:
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+    context_window: 1000000
+  qwen/qwen3.5-plus-02-15:
+    input_per_1k: 0.00026
+    output_per_1k: 0.00156
+    context_window: 1000000
+  qwen/qwen3.5-397b-a17b:
+    input_per_1k: 0.000385
+    output_per_1k: 0.00245
+    context_window: 256000
+  minimax/minimax-m2.5:
+    input_per_1k: 0.00012
+    output_per_1k: 0.00048
+    context_window: 204800
+  z-ai/glm-5:
+    input_per_1k: 0.0006
+    output_per_1k: 0.00192
+    context_window: 202752
+  qwen/qwen3-max-thinking:
+    input_per_1k: 0.00078
+    output_per_1k: 0.0039
+    context_window: 262144
+  anthropic/claude-opus-4.6:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 1000000
+  minimax/minimax-m2-her:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0012
+    context_window: 65536
+  z-ai/glm-4.7-flash:
+    input_per_1k: 6.0e-05
+    output_per_1k: 0.0004
+    context_window: 202752
+  openai/gpt-5.2-codex:
+    input_per_1k: 0.00175
+    output_per_1k: 0.014
+    context_window: 400000
+  minimax/minimax-m2.1:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0012
+    context_window: 204800
+  z-ai/glm-4.7:
+    input_per_1k: 0.0004
+    output_per_1k: 0.00175
+    context_window: 202752
+  google/gemini-3-flash-preview:
+    input_per_1k: 0.0005
+    output_per_1k: 0.003
+    context_window: 1048576
+  openai/gpt-5.2-chat:
+    input_per_1k: 0.00175
+    output_per_1k: 0.014
+    context_window: 128000
+  openai/gpt-5.2-pro:
+    input_per_1k: 0.021
+    output_per_1k: 0.168
+    context_window: 400000
+  openai/gpt-5.2:
+    input_per_1k: 0.00175
+    output_per_1k: 0.014
+    context_window: 400000
+  mistralai/devstral-2512:
+    input_per_1k: 0.0004
+    output_per_1k: 0.002
+    context_window: 262144
+  z-ai/glm-4.6v:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0009
+    context_window: 131072
+  openai/gpt-5.1-codex-max:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 400000
+  mistralai/ministral-14b-2512:
+    input_per_1k: 0.0002
+    output_per_1k: 0.0002
+    context_window: 262144
+  mistralai/ministral-8b-2512:
+    input_per_1k: 0.00015
+    output_per_1k: 0.00015
+    context_window: 262144
+  mistralai/ministral-3b-2512:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0001
+    context_window: 131072
+  mistralai/mistral-large-2512:
+    input_per_1k: 0.0005
+    output_per_1k: 0.0015
+    context_window: 262144
+  deepseek/deepseek-v3.2:
+    input_per_1k: 0.0002288
+    output_per_1k: 0.0003432
+    context_window: 131072
+  anthropic/claude-opus-4.5:
+    input_per_1k: 0.005
+    output_per_1k: 0.025
+    context_window: 200000
+  openai/gpt-5.1:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 400000
+  openai/gpt-5.1-chat:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 128000
+  openai/gpt-5.1-codex:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 400000
+  openai/gpt-5.1-codex-mini:
+    input_per_1k: 0.00025
+    output_per_1k: 0.002
+    context_window: 400000
+  mistralai/voxtral-small-24b-2507:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0003
+    context_window: 32000
+  openai/gpt-oss-safeguard-20b:
+    input_per_1k: 7.5e-05
+    output_per_1k: 0.0003
+    context_window: 131072
+  minimax/minimax-m2:
+    input_per_1k: 0.000255
+    output_per_1k: 0.00102
+    context_window: 204800
+  qwen/qwen3-vl-32b-instruct:
+    input_per_1k: 0.000104
+    output_per_1k: 0.000416
+    context_window: 262144
+  anthropic/claude-haiku-4.5:
+    input_per_1k: 0.001
+    output_per_1k: 0.005
+    context_window: 200000
+  qwen/qwen3-vl-8b-thinking:
+    input_per_1k: 0.000117
+    output_per_1k: 0.001365
+    context_window: 256000
+  qwen/qwen3-vl-8b-instruct:
+    input_per_1k: 0.000117
+    output_per_1k: 0.000455
+    context_window: 256000
+  openai/o3-deep-research:
+    input_per_1k: 0.01
+    output_per_1k: 0.04
+    context_window: 200000
+  openai/o4-mini-deep-research:
+    input_per_1k: 0.002
+    output_per_1k: 0.008
+    context_window: 200000
+  qwen/qwen3-vl-30b-a3b-thinking:
+    input_per_1k: 0.00013
+    output_per_1k: 0.00156
+    context_window: 131072
+  qwen/qwen3-vl-30b-a3b-instruct:
+    input_per_1k: 0.00013
+    output_per_1k: 0.00052
+    context_window: 262144
+  openai/gpt-5-pro:
+    input_per_1k: 0.015
+    output_per_1k: 0.12
+    context_window: 400000
+  google/gemini-2.5-flash-lite-preview-09-2025:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0004
+    context_window: 1048576
+  qwen/qwen3-vl-235b-a22b-thinking:
+    input_per_1k: 0.00026
+    output_per_1k: 0.0026
+    context_window: 131072
+  qwen/qwen3-vl-235b-a22b-instruct:
+    input_per_1k: 0.0002
+    output_per_1k: 0.00088
+    context_window: 262144
+  qwen/qwen3-max:
+    input_per_1k: 0.00078
+    output_per_1k: 0.0039
+    context_window: 262144
+  qwen/qwen3-coder-plus:
+    input_per_1k: 0.00065
+    output_per_1k: 0.00325
+    context_window: 1000000
+  openai/gpt-5-codex:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 400000
+  deepseek/deepseek-v3.1-terminus:
+    input_per_1k: 0.00027
+    output_per_1k: 0.00095
+    context_window: 163840
+  qwen/qwen3-coder-flash:
+    input_per_1k: 0.000195
+    output_per_1k: 0.000975
+    context_window: 1000000
+  qwen/qwen3-next-80b-a3b-thinking:
+    input_per_1k: 9.75e-05
+    output_per_1k: 0.00078
+    context_window: 262144
+  qwen/qwen3-next-80b-a3b-instruct:
+    input_per_1k: 9.0e-05
+    output_per_1k: 0.0011
+    context_window: 262144
+  qwen/qwen-plus-2025-07-28:thinking:
+    input_per_1k: 0.00026
+    output_per_1k: 0.00078
+    context_window: 1000000
+  qwen/qwen-plus-2025-07-28:
+    input_per_1k: 0.00026
+    output_per_1k: 0.00078
+    context_window: 1000000
+  qwen/qwen3-30b-a3b-thinking-2507:
+    input_per_1k: 0.00013
+    output_per_1k: 0.00156
+    context_window: 131072
+  deepseek/deepseek-chat-v3.1:
+    input_per_1k: 0.00021
+    output_per_1k: 0.00079
+    context_window: 163840
+  mistralai/mistral-medium-3.1:
+    input_per_1k: 0.0004
+    output_per_1k: 0.002
+    context_window: 131072
+  z-ai/glm-4.5v:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0018
+    context_window: 65536
+  openai/gpt-5-chat:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 128000
+  openai/gpt-5-mini:
+    input_per_1k: 0.00025
+    output_per_1k: 0.002
+    context_window: 400000
+  openai/gpt-5-nano:
+    input_per_1k: 5.0e-05
+    output_per_1k: 0.0004
+    context_window: 400000
+  openai/gpt-oss-120b:
+    input_per_1k: 3.0e-05
+    output_per_1k: 0.00015
+    context_window: 131072
+  openai/gpt-oss-20b:
+    input_per_1k: 2.9e-05
+    output_per_1k: 0.00014
+    context_window: 131072
+  mistralai/codestral-2508:
+    input_per_1k: 0.0003
+    output_per_1k: 0.0009
+    context_window: 256000
+  qwen/qwen3-coder-30b-a3b-instruct:
+    input_per_1k: 7.0e-05
+    output_per_1k: 0.00027
+    context_window: 160000
+  qwen/qwen3-30b-a3b-instruct-2507:
+    input_per_1k: 4.815e-05
+    output_per_1k: 0.00019305
+    context_window: 131072
+  z-ai/glm-4.5:
+    input_per_1k: 0.0006
+    output_per_1k: 0.0022
+    context_window: 131072
+  z-ai/glm-4.5-air:
+    input_per_1k: 0.00013
+    output_per_1k: 0.00085
+    context_window: 131072
+  qwen/qwen3-235b-a22b-thinking-2507:
+    input_per_1k: 0.0001495
+    output_per_1k: 0.001495
+    context_window: 262144
+  google/gemini-2.5-flash-lite:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0004
+    context_window: 1048576
+  qwen/qwen3-235b-a22b-2507:
+    input_per_1k: 9.0e-05
+    output_per_1k: 0.0001
+    context_window: 262144
+  mistralai/mistral-small-3.2-24b-instruct:
+    input_per_1k: 7.5e-05
+    output_per_1k: 0.0002
+    context_window: 128000
+  minimax/minimax-m1:
+    input_per_1k: 0.0004
+    output_per_1k: 0.0022
+    context_window: 1000000
+  openai/o3-pro:
+    input_per_1k: 0.02
+    output_per_1k: 0.08
+    context_window: 200000
+  google/gemini-2.5-pro-preview:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 1048576
+
+  anthropic/claude-opus-4:
+    input_per_1k: 0.015
+    output_per_1k: 0.075
+    context_window: 200000
+  anthropic/claude-sonnet-4:
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+    context_window: 1000000
+  google/gemma-3n-e4b-it:
+    input_per_1k: 6.0e-05
+    output_per_1k: 0.00012
+    context_window: 32768
+  mistralai/mistral-medium-3:
+    input_per_1k: 0.0004
+    output_per_1k: 0.002
+    context_window: 131072
+  google/gemini-2.5-pro-preview-05-06:
+    input_per_1k: 0.00125
+    output_per_1k: 0.01
+    context_window: 1048576
+  meta-llama/llama-guard-4-12b:
+    input_per_1k: 0.00018
+    output_per_1k: 0.00018
+    context_window: 163840
+  qwen/qwen3-8b:
+    input_per_1k: 0.000117
+    output_per_1k: 0.000455
+    context_window: 131072
+  qwen/qwen3-14b:
+    input_per_1k: 0.0001
+    output_per_1k: 0.00024
+    context_window: 131702
+  qwen/qwen3-32b:
+    input_per_1k: 8.0e-05
+    output_per_1k: 0.00028
+    context_window: 131072
+  qwen/qwen3-235b-a22b:
+    input_per_1k: 0.000455
+    output_per_1k: 0.00182
+    context_window: 131072
+  openai/o4-mini-high:
+    input_per_1k: 0.0011
+    output_per_1k: 0.0044
+    context_window: 200000
+  openai/o3:
+    input_per_1k: 0.002
+    output_per_1k: 0.008
+    context_window: 200000
+  openai/o4-mini:
+    input_per_1k: 0.0011
+    output_per_1k: 0.0044
+    context_window: 200000
+  openai/gpt-4.1:
+    input_per_1k: 0.002
+    output_per_1k: 0.008
+    context_window: 1047576
+  openai/gpt-4.1-mini:
+    input_per_1k: 0.0004
+    output_per_1k: 0.0016
+    context_window: 1047576
+  openai/gpt-4.1-nano:
+    input_per_1k: 0.0001
+    output_per_1k: 0.0004
+    context_window: 1047576
+  deepseek/deepseek-chat-v3-0324:
+    input_per_1k: 0.00024
+    output_per_1k: 0.0009
+    context_window: 163840
+  openai/o1-pro:
+    input_per_1k: 0.15
+    output_per_1k: 0.6
+    context_window: 200000
+  mistralai/mistral-small-3.1-24b-instruct:
+    input_per_1k: 0.000351
+    output_per_1k: 0.000555
+    context_window: 128000
+  google/gemma-3-4b-it:
+    input_per_1k: 5.0e-05
+    output_per_1k: 0.0001
+    context_window: 131072
+  google/gemma-3-12b-it:
+    input_per_1k: 5.0e-05
+    output_per_1k: 0.00015
+    context_window: 131072
+  openai/gpt-4o-mini-search-preview:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 128000
+  openai/gpt-4o-search-preview:
+    input_per_1k: 0.0025
+    output_per_1k: 0.01
+    context_window: 128000
+  google/gemma-3-27b-it:
+    input_per_1k: 8.0e-05
+    output_per_1k: 0.00016
+    context_window: 131072
+  mistralai/mistral-saba:
+    input_per_1k: 0.0002
+    output_per_1k: 0.0006
+    context_window: 32768
+  openai/o3-mini-high:
+    input_per_1k: 0.0011
+    output_per_1k: 0.0044
+    context_window: 200000
+  qwen/qwen2.5-vl-72b-instruct:
+    input_per_1k: 0.0008
+    output_per_1k: 0.001
+    context_window: 131072
+  qwen/qwen-plus:
+    input_per_1k: 0.00026
+    output_per_1k: 0.00078
+    context_window: 1000000
+  openai/o3-mini:
+    input_per_1k: 0.0011
+    output_per_1k: 0.0044
+    context_window: 200000
+  mistralai/mistral-small-24b-instruct-2501:
+    input_per_1k: 5.0e-05
+    output_per_1k: 8.0e-05
+    context_window: 32768
+
+  minimax/minimax-01:
+    input_per_1k: 0.0002
+    output_per_1k: 0.0011
+    context_window: 1000192
+  openai/o1:
+    input_per_1k: 0.015
+    output_per_1k: 0.06
+    context_window: 200000
+  meta-llama/llama-3.3-70b-instruct:
+    input_per_1k: 0.0001
+    output_per_1k: 0.00032
+    context_window: 131072
+  openai/gpt-4o-2024-11-20:
+    input_per_1k: 0.0025
+    output_per_1k: 0.01
+    context_window: 128000
+  mistralai/mistral-large-2407:
+    input_per_1k: 0.002
+    output_per_1k: 0.006
+    context_window: 131072
+  qwen/qwen-2.5-7b-instruct:
+    input_per_1k: 4.0e-05
+    output_per_1k: 0.0001
+    context_window: 131072
+  meta-llama/llama-3.2-3b-instruct:
+    input_per_1k: 5.09e-05
+    output_per_1k: 0.000335
+    context_window: 131072
+  meta-llama/llama-3.2-1b-instruct:
+    input_per_1k: 2.7e-05
+    output_per_1k: 0.000201
+    context_window: 131072
+  meta-llama/llama-3.2-11b-vision-instruct:
+    input_per_1k: 0.000345
+    output_per_1k: 0.000345
+    context_window: 131072
+  qwen/qwen-2.5-72b-instruct:
+    input_per_1k: 0.00036
+    output_per_1k: 0.0004
+    context_window: 131072
+  openai/gpt-4o-2024-08-06:
+    input_per_1k: 0.0025
+    output_per_1k: 0.01
+    context_window: 128000
+  meta-llama/llama-3.1-8b-instruct:
+    input_per_1k: 2.0e-05
+    output_per_1k: 3.0e-05
+    context_window: 131072
+  meta-llama/llama-3.1-70b-instruct:
+    input_per_1k: 0.0004
+    output_per_1k: 0.0004
+    context_window: 131072
+  mistralai/mistral-nemo:
+    input_per_1k: 2.0e-05
+    output_per_1k: 3.0e-05
+    context_window: 131072
+  openai/gpt-4o-mini:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 128000
+  openai/gpt-4o-mini-2024-07-18:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+    context_window: 128000
+  google/gemma-2-27b-it:
+    input_per_1k: 0.00065
+    output_per_1k: 0.00065
+    context_window: 8192
+  openai/gpt-4o:
+    input_per_1k: 0.0025
+    output_per_1k: 0.01
+    context_window: 128000
+  openai/gpt-4o-2024-05-13:
+    input_per_1k: 0.005
+    output_per_1k: 0.015
+    context_window: 128000
+  meta-llama/llama-3-8b-instruct:
+    input_per_1k: 0.00014
+    output_per_1k: 0.00014
+    context_window: 8192
+  mistralai/mixtral-8x22b-instruct:
+    input_per_1k: 0.002
+    output_per_1k: 0.006
+    context_window: 65536
+  openai/gpt-4-turbo:
+    input_per_1k: 0.01
+    output_per_1k: 0.03
+    context_window: 128000
+  anthropic/claude-3-haiku:
+    input_per_1k: 0.00025
+    output_per_1k: 0.00125
+    context_window: 200000
+  mistralai/mistral-large:
+    input_per_1k: 0.002
+    output_per_1k: 0.006
+    context_window: 128000
+  openai/gpt-3.5-turbo-0613:
+    input_per_1k: 0.001
+    output_per_1k: 0.002
+    context_window: 4095
+  openai/gpt-4-turbo-preview:
+    input_per_1k: 0.01
+    output_per_1k: 0.03
+    context_window: 128000
+  openai/gpt-3.5-turbo-instruct:
+    input_per_1k: 0.0015
+    output_per_1k: 0.002
+    context_window: 4095
+  openai/gpt-3.5-turbo-16k:
+    input_per_1k: 0.003
+    output_per_1k: 0.004
+    context_window: 16385
+  openai/gpt-4:
+    input_per_1k: 0.03
+    output_per_1k: 0.06
+    context_window: 8191
+  openai/gpt-3.5-turbo:
+    input_per_1k: 0.0005
+    output_per_1k: 0.0015
+    context_window: 16385

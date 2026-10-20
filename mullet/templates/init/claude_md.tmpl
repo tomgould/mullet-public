@@ -1,0 +1,52 @@
+# Project Instructions
+
+> Delegation rules, provider priority, and The Loop are in `~/.claude/CLAUDE.md`.
+> This file adds project-specific overrides only.
+
+## Mullet pool
+
+This project uses pool: `{{pool}}`
+
+Reindex command: `mullet reindex --pool {{pool}}`
+
+## Delegation ladder (mandatory — follow in order, no skipping)
+
+Before any file edit, analysis, or generation task, pick the **lowest tier that can handle it**:
+
+| Tier | When to use | How |
+|---|---|---|
+| **1. Local LLM** | Free. Simple analysis, short edits, small context | `mullet_opencode` (auto-selects) or `mullet_run --providers local` |
+| **2. OpenRouter** | Pay-per-token. Default cloud — cheap and reliable | `mullet_opencode` (default) or `mullet_run --providers openrouter` |
+| **3. Anthropic Haiku** | Prepaid (Max plan). Substitute OpenRouter when pressure <60% | Direct in-context or `mullet_run --providers haiku` |
+| **4. Anthropic Sonnet** | Prepaid (Max plan). Complex tasks; substitute when pressure <60% | Direct in-context or `mullet_run --providers sonnet` |
+| **5. Kimi K2** | Pay-per-token. Large context; OpenRouter fallback | `mullet_opencode` or `mullet_run --providers kimi` |
+| **6. Gemini** | Last resort — pay-per-token, expensive for large contexts | `mullet_run --providers gemini` |
+| **7. Opus** | Orchestration and commit decisions only | Direct in-context |
+
+**Hard rules:**
+- File edits >5 lines → `mullet_opencode` always — never in-context Opus writing code
+- Check `check_budget()` — if Anthropic pressure <60%, use Haiku/Sonnet (already paid for)
+- Fall back to OpenRouter/Kimi only when pressure >60%
+- Mullet's routing matrix (`routing_matrix.py`) enforces this automatically for API delegation calls
+
+## Delegation defaults
+
+- Default provider: {{providers_str}}
+- Default model: {{model}}
+- OpenRouter models available: deepseek/deepseek-v3.2-exp (default), deepseek/deepseek-v4-pro (reasoning), qwen/qwen3-coder (large context code)
+
+## The Loop — project additions
+
+After every commit:
+1. Update `docs/TODO.md` (or equivalent) — mark done, add new items
+2. Update `.mullet/progress.txt` — what shipped, current state, next step
+
+## Testing policy
+
+- **During incremental dev: run only the new/modified test file(s).**
+  - Added `tests/test_foo.py`? Run `pytest tests/test_foo.py -q`.
+  - Modified one existing test file? Run that file alone.
+- **Run the full suite ONLY when:**
+  - The user explicitly asks.
+  - You finish a large todo batch (≥5 tasks) before committing.
+  - You're about to commit a multi-file refactor.

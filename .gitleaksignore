@@ -1,0 +1,22 @@
+# Fake credentials in the tests (redaction, credential-guard and config
+# tests). Each one was checked: sequential or placeholder values, or the
+# public jwt.io example token. Format: path:rule-id:line.
+tests/test_credential_guard.py:generic-api-key:44
+tests/test_credential_guard.py:jwt:76
+tests/test_data_models.py:generic-api-key:134
+tests/test_data_models.py:generic-api-key:136
+tests/test_knowledge_small_modules_batch4.py:generic-api-key:99
+tests/test_live_test_pure.py:generic-api-key:90
+tests/test_credential_guard_token_viz_web_converter_helpers.py:jwt:130
+tests/test_knowledge_sources_github_webcache.py:generic-api-key:280
+tests/test_opencode_tool_helpers.py:generic-api-key:70
+tests/test_project_detect_credential_guard_web_cache_helpers.py:generic-api-key:310
+tests/test_project_detect_credential_guard_web_cache_helpers.py:generic-api-key:330
+tests/test_project_detect_credential_guard_web_cache_helpers.py:jwt:318
+tests/test_redact.py:github-pat:41
+tests/test_redact.py:stripe-access-token:65
+tests/test_redact.py:generic-api-key:41
+tests/test_redact.py:generic-api-key:83
+tests/test_security_and_budget_helpers.py:jwt:116
+tests/test_redact_trace_budget_notify_balance_helpers.py:stripe-access-token:106
+tests/test_redact_trace_budget_notify_balance_helpers.py:stripe-access-token:108

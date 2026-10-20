@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include scripts/install.sh
+include mullet.yaml.example
+include .env.example
+recursive-include mullet/core/skills/builtin *.md
+recursive-include mullet/knowledge/engine *.py
+recursive-include mullet/autopilot_templates *.md

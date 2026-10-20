@@ -1,0 +1,34 @@
+# Prompt injection threat patterns loaded by injection_guard.py
+# Edit this file to add/remove patterns without changing source code.
+
+threat_patterns:
+  - pattern: "ignore\\s+(?:(?:all|the)\\s+)?(?:previous|prior|above|your\\s+)?(?:previous\\s+)?instructions"
+    category: prompt_injection
+  - pattern: "do\\s+not\\s+tell\\s+the\\s+user"
+    category: deception
+  - pattern: "system\\s+prompt\\s+override"
+    category: sys_prompt_override
+  - pattern: "disregard\\s+(?:\\w+\\s+){0,3}(?:instructions|rules|guidelines)"
+    category: disregard_rules
+  - pattern: "act\\s+as\\s+(if|though)\\s+you\\s+(have\\s+no|don't\\s+have)\\s+(restrictions|limits|rules)"
+    category: bypass_restrictions
+  - pattern: "<!--[^>]*(?:ignore|override|system|secret|hidden)[^>]*-->"
+    category: html_comment_injection
+  - pattern: "<\\s*div\\s+style\\s*=\\s*[\"'].*display\\s*:\\s*none"
+    category: hidden_div
+  - pattern: "curl\\s+[^\\n]*\\$\\{?\\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)"
+    category: exfil_curl
+  - pattern: "cat\\s+[^\\n]*(\\.env|credentials|\\.netrc|\\.pgpass)"
+    category: read_secrets
+
+invisible_chars:
+  - "200b"
+  - "200c"
+  - "200d"
+  - "2060"
+  - "feff"
+  - "202a"
+  - "202b"
+  - "202c"
+  - "202d"
+  - "202e"

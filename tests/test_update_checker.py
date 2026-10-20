@@ -1,0 +1,120 @@
+"""Tests for mullet.cli.update_checker."""
+
+import json
+from unittest.mock import MagicMock, patch
+
+
+from mullet.cli.update_checker import (
+    _version_gt,
+    check_for_update,
+    get_installed_version,
+    get_latest_pypi_version,
+    maybe_print_update_notice,
+)
+
+
+def test_get_installed_version():
+    version = get_installed_version()
+    assert isinstance(version, str)
+    assert len(version) > 0
+
+
+def test_version_gt_true():
+    assert _version_gt("1.7.2", "1.7.1") is True
+
+
+def test_version_gt_false():
+    assert _version_gt("1.7.1", "1.7.2") is False
+
+
+def test_version_gt_equal():
+    assert _version_gt("1.7.1", "1.7.1") is False
+
+
+def test_get_latest_pypi_success():
+    payload = json.dumps({"info": {"version": "1.8.0"}}).encode()
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = payload
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        result = get_latest_pypi_version()
+
+    assert result == "1.8.0"
+
+
+def test_get_latest_pypi_network_error():
+    from urllib.error import URLError
+
+    with patch("urllib.request.urlopen", side_effect=URLError("timeout")):
+        result = get_latest_pypi_version()
+
+    assert result is None
+
+
+def test_check_for_update_available():
+    with patch("mullet.cli.update_checker.get_latest_pypi_version", return_value="99.0.0"):
+        result = check_for_update()
+
+    assert result["update_available"] is True
+    assert result["latest"] == "99.0.0"
+    assert "99.0.0" in result["message"]
+    assert "pip install -U mullet" in result["message"]
+
+
+def test_check_for_update_uptodate():
+    with patch("mullet.cli.update_checker.get_latest_pypi_version", return_value="0.0.1"):
+        result = check_for_update()
+
+    assert result["update_available"] is False
+    assert result["latest"] == "0.0.1"
+
+
+def test_version_gt_import_error_fallback():
+    """Patch packaging import to fail; fallback tuple comparison must still work."""
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "packaging.version":
+            raise ImportError("no packaging")
+        return real_import(name, *args, **kwargs)
+
+    with patch.object(builtins, "__import__", side_effect=fake_import):
+        assert _version_gt("2.0.0", "1.0.0") is True
+        assert _version_gt("1.0.0", "2.0.0") is False
+        assert _version_gt("1.0.0", "1.0.0") is False
+
+
+def test_check_for_update_pypi_fails():
+    with patch("mullet.cli.update_checker.get_latest_pypi_version", return_value=None):
+        result = check_for_update()
+    assert result["latest"] is None
+    assert result["update_available"] is False
+    assert "PyPI check failed" in result["message"]
+
+
+def test_maybe_print_update_notice_prints_when_update_available(capsys):
+    with patch(
+        "mullet.cli.update_checker.check_for_update",
+        return_value={
+            "installed": "1.0.0",
+            "latest": "2.0.0",
+            "update_available": True,
+            "message": "update available",
+        },
+    ):
+        maybe_print_update_notice()
+    captured = capsys.readouterr()
+    assert "2.0.0 available" in captured.err
+
+
+def test_maybe_print_update_notice_silent_on_error(capsys):
+    """maybe_print_update_notice must never raise, even on unexpected errors."""
+    with patch("mullet.cli.update_checker.check_for_update", side_effect=RuntimeError("boom")):
+        maybe_print_update_notice()  # must not raise
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""

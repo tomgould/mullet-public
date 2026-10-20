@@ -1,0 +1,30 @@
+name: Lint
+
+on:
+  push:
+    branches: [master, feat/*]
+  pull_request:
+    branches: [master, feat/*]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e ".[dev]"
+      - name: Ruff check
+        run: |
+          if python -c "import ruff" 2>/dev/null; then
+            ruff check .
+          else
+            echo "ruff not available, falling back to flake8"
+            flake8 mullet/ tests/
+          fi
+      - name: Black check
+        run: black --check .
+      - name: Mypy check
+        continue-on-error: true
+        run: mypy mullet/ --ignore-missing-imports

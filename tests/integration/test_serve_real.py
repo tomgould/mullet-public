@@ -1,0 +1,94 @@
+"""Integration test: mullet serve as subprocess.
+
+Starts the server, hits endpoints, verifies responses.
+"""
+
+import json
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
+
+def _wait_for_server(port, timeout=30):
+    """Wait until server responds."""
+    # First wait for TCP port to be accepting connections
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("localhost", port), timeout=1)
+            break
+        except Exception:
+            time.sleep(0.2)
+    else:
+        return False
+    
+    # Then wait for HTTP 200 with longer timeout for slow handlers
+    try:
+        req = urllib.request.Request(f"http://localhost:{port}/health")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def test_serve_health():
+    """Server should start and respond to health check."""
+    port = 19876
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mullet.cli.main", "serve", "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert _wait_for_server(port), "Server did not start"
+
+        req = urllib.request.Request(f"http://localhost:{port}/health")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            assert data["status"] == "ok"
+            assert "version" in data
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_serve_info():
+    """Server should return system info."""
+    port = 19877
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mullet.cli.main", "serve", "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert _wait_for_server(port), "Server did not start"
+
+        req = urllib.request.Request(f"http://localhost:{port}/api/v1/info")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            assert data["tool_count"] >= 13
+            assert data["skill_count"] >= 7
+            assert "providers" in data
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_serve_models():
+    """Server should list models."""
+    port = 19878
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mullet.cli.main", "serve", "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert _wait_for_server(port), "Server did not start"
+
+        req = urllib.request.Request(f"http://localhost:{port}/v1/models")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            assert data["object"] == "list"
+            assert len(data["data"]) >= 1
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)

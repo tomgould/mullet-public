@@ -1,0 +1,38 @@
+# Mullet Configuration
+
+# Providers
+providers:
+  # Configuration for a single provider
+  provider_name:
+    type: "openai_compatible" # Type of provider
+    base_url: "" # Base URL for the provider
+    api_key_env: "" # Environment variable for API key
+    models: {}
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+
+# Routing
+routing:
+  enabled: true # Whether routing is enabled
+  default_tier: "MEDIUM" # Default routing tier
+  local_only: false # Whether to route locally only
+  thresholds:
+    low_max: 20
+    medium_max: 50
+  budget:
+    per_task_max_tokens: 100000
+    session_max_tokens: 1000000
+    daily_max_dollars: 10.0
+
+# Knowledge
+knowledge:
+  max_knowledge_age: 30 # Max age of knowledge in days
+  max_knowledge_count: 100 # Max number of knowledge items
+
+# Modes
+modes:
+  # Define modes here
+
+# HUD
+hud:
+  # Define HUD configurations here

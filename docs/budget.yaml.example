@@ -1,0 +1,10 @@
+# Per-provider spend caps for mullet budget enforcement.
+# Copy to .mullet/budget.yaml and adjust values.
+
+# openrouter:
+#   cap_usd: 10.0    # stop using OpenRouter after $10 spent
+
+# kimi:
+#   cap_usd: 20.0    # stop using Kimi after $20 spent
+
+# monthly_total_cap_usd: 50.0  # total across all paid providers
