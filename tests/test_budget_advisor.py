@@ -19,6 +19,20 @@ from mullet.core.budget_advisor import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _no_live_balance_probes():
+    """Keep recommend_lane() off the network and the machine's provider config.
+
+    _get_provider_balances() calls budget_probe.get_all_balances(), which
+    probes every provider's real balance API and local LLM. Without this, the
+    lane tests pass or fail depending on which keys and local models happen to
+    be set up (and fail in CI, which has none). Tests that exercise balances
+    patch them explicitly, which overrides this.
+    """
+    with patch("mullet.core.providers.budget_probe.get_all_balances", return_value={}):
+        yield
+
+
 def _mock_budget(pressure: float, five_pct: float = 10.0, weekly_pct: float = 20.0):
     """Return a MagicMock that looks like BudgetCheck."""
     bc = MagicMock()

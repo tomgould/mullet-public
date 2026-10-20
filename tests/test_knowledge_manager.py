@@ -186,8 +186,11 @@ def test_get_engine_module_vendored_fail_external_success():
     FakePath = _fake_path_class(existing_dir=fake_path, has_client_py=True)
 
     with patch.dict(os.environ, {"TRAWL_PATH": fake_path}):
-        with patch("builtins.__import__") as mock_import:
-            with patch("mullet.core.knowledge.manager.Path", FakePath):
+        # Patch Path before __import__: patch() resolves its target with
+        # __import__, so the other order patches a MagicMock instead of the
+        # module and the test only passed next to a real trove checkout.
+        with patch("mullet.core.knowledge.manager.Path", FakePath):
+            with patch("builtins.__import__") as mock_import:
                 mock_mod = MagicMock()
 
                 def side_effect(name, **kwargs):
@@ -208,8 +211,11 @@ def test_get_engine_module_vendored_fail_external_import_error():
     FakePath = _fake_path_class(existing_dir=fake_path, has_client_py=True)
 
     with patch.dict(os.environ, {"TRAWL_PATH": fake_path}):
-        with patch("builtins.__import__") as mock_import:
-            with patch("mullet.core.knowledge.manager.Path", FakePath):
+        # Patch Path before __import__: patch() resolves its target with
+        # __import__, so the other order patches a MagicMock instead of the
+        # module and the test only passed next to a real trove checkout.
+        with patch("mullet.core.knowledge.manager.Path", FakePath):
+            with patch("builtins.__import__") as mock_import:
                 mock_import.side_effect = ImportError("all fail")
                 with pytest.raises(ImportError, match="Knowledge engine module 'client' not found"):
                     _get_engine_module("client")
@@ -220,8 +226,11 @@ def test_get_engine_module_path_exists_no_client_py():
     FakePath = _fake_path_class(existing_dir=fake_path, has_client_py=False)
 
     with patch.dict(os.environ, {"TRAWL_PATH": fake_path}):
-        with patch("builtins.__import__") as mock_import:
-            with patch("mullet.core.knowledge.manager.Path", FakePath):
+        # Patch Path before __import__: patch() resolves its target with
+        # __import__, so the other order patches a MagicMock instead of the
+        # module and the test only passed next to a real trove checkout.
+        with patch("mullet.core.knowledge.manager.Path", FakePath):
+            with patch("builtins.__import__") as mock_import:
                 mock_import.side_effect = ImportError("no vendored")
                 with pytest.raises(ImportError, match="Knowledge engine module 'client' not found"):
                     _get_engine_module("client")
@@ -231,8 +240,11 @@ def test_get_engine_module_all_fail_no_paths():
     FakePath = _fake_path_class(existing_dir=None, has_client_py=False)
 
     with patch.dict(os.environ, {"TRAWL_PATH": ""}):
-        with patch("builtins.__import__") as mock_import:
-            with patch("mullet.core.knowledge.manager.Path", FakePath):
+        # Patch Path before __import__: patch() resolves its target with
+        # __import__, so the other order patches a MagicMock instead of the
+        # module and the test only passed next to a real trove checkout.
+        with patch("mullet.core.knowledge.manager.Path", FakePath):
+            with patch("builtins.__import__") as mock_import:
                 mock_import.side_effect = ImportError("no vendored")
                 with pytest.raises(ImportError, match="Knowledge engine module"):
                     _get_engine_module("client")

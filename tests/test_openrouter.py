@@ -30,10 +30,13 @@ def test_openrouter_constructor_extra_headers():
         expected_headers = {
             "HTTP-Referer": "https://github.com/tomgould/mullet-public",
             "X-Title": "Mullet",
-            "Authorization": "Bearer test_api_key"  # OpenAI client adds this
         }
         # The OpenAI client might add other headers, so we check for presence
         assert all(item in provider.client.default_headers.items() for item in expected_headers.items())
+        # openai 3.x applies the key per request through auth_headers rather
+        # than listing Authorization in default_headers, as 2.x did; both
+        # expose it here.
+        assert provider.client.auth_headers["Authorization"] == "Bearer test_api_key"
 
 
 def test_openrouter_list_models_method_exists():

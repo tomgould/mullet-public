@@ -587,7 +587,10 @@ class TestForceRmtree:
         monkeypatch.setattr(os, "unlink", flaky_unlink)
         ok, err = _force_rmtree(d)
         assert ok is False
-        assert "mock readonly" in str(err)
+        # Python 3.12+ reports the directory it then couldn't remove instead
+        # of the file's own error, so accept either message.
+        assert "mock readonly" in str(err) or "not empty" in str(err)
+        assert d.exists()
 
     def test_path_is_symlink(self, tmp_path: Path) -> None:
         target = tmp_path / "real"

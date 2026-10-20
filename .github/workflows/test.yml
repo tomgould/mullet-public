@@ -12,6 +12,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # No test needs a real embedding model; without this, code that tries
+      # to load one pulls an ~90 MB model from Hugging Face during the run.
+      HF_HUB_OFFLINE: "1"
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']

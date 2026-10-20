@@ -7,6 +7,15 @@ import pytest
 from mullet.knowledge.sources import web_converter as wc
 
 
+def _fake_trafilatura(**extract_kwargs):
+    """Stand in for the optional trafilatura package, installed or not.
+
+    web_converter only binds `trafilatura` when the import succeeds, so
+    create=True lets these fallback tests run without it.
+    """
+    return patch.object(wc, "trafilatura", MagicMock(extract=MagicMock(**extract_kwargs)), create=True)
+
+
 class TestRemoveJunkElements:
     """Tests for _remove_junk_elements."""
 
@@ -97,9 +106,7 @@ class TestHtmlToMarkdown:
         words = " ".join(f"word{i}" for i in range(60))
         html = "<html><body><p>short</p></body></html>"
         with patch.object(wc, "HAS_TRAFILATURA", True):
-            with patch.object(
-                wc.trafilatura, "extract", return_value=f"# Title\n\n{words}"
-            ):
+            with _fake_trafilatura(return_value=f"# Title\n\n{words}"):
                 result = wc.html_to_markdown(html)
         assert result is not None
         assert "word0" in result
@@ -111,9 +118,7 @@ class TestHtmlToMarkdown:
             + "</p></div></body></html>"
         )
         with patch.object(wc, "HAS_TRAFILATURA", True):
-            with patch.object(
-                wc.trafilatura, "extract", side_effect=RuntimeError("boom")
-            ):
+            with _fake_trafilatura(side_effect=RuntimeError("boom")):
                 with patch.object(wc.logger, "warning") as mock_warn:
                     result = wc.html_to_markdown(html)
         mock_warn.assert_called_once()
@@ -133,14 +138,14 @@ class TestHtmlToMarkdown:
     def test_trafilatura_memoryerror_reraised(self):
         html = "<html><body><div><p>" + " ".join(f"word{i}" for i in range(60)) + "</p></div></body></html>"
         with patch.object(wc, "HAS_TRAFILATURA", True):
-            with patch.object(wc.trafilatura, "extract", side_effect=MemoryError("oom")):
+            with _fake_trafilatura(side_effect=MemoryError("oom")):
                 with pytest.raises(MemoryError):
                     wc.html_to_markdown(html)
 
     def test_trafilatura_importerror_reraised(self):
         html = "<html><body><div><p>" + " ".join(f"word{i}" for i in range(60)) + "</p></div></body></html>"
         with patch.object(wc, "HAS_TRAFILATURA", True):
-            with patch.object(wc.trafilatura, "extract", side_effect=ImportError("missing")):
+            with _fake_trafilatura(side_effect=ImportError("missing")):
                 with pytest.raises(ImportError):
                     wc.html_to_markdown(html)
 

@@ -118,9 +118,12 @@ def test_discover_plugins_mixed(tmp_path):
     expected = sorted([plugin_file, package_dir])
     assert discover_plugins(tmp_path) == expected
 
+# patch.dict keeps sys.modules intact and removes the plugin module afterwards.
+# Replacing sys.modules with {} (as these tests used to) made patch() re-import
+# a fresh importlib.util on Python 3.11+, so the loader kept the real one.
 @patch("importlib.util.spec_from_file_location")
 @patch("importlib.util.module_from_spec")
-@patch("sys.modules", new={})
+@patch.dict("sys.modules")
 def test_load_plugin_success_file(mock_module_from_spec, mock_spec_from_file_location, tmp_path):
     plugin_path = tmp_path / "my_plugin.py"
     plugin_path.write_text("def register(registry): registry.registered = True")
@@ -144,9 +147,12 @@ def test_load_plugin_success_file(mock_module_from_spec, mock_spec_from_file_loc
     mock_module.register.assert_called_once_with(registry)
     assert sys.modules["trove_plugin_my_plugin"] == mock_module
 
+# patch.dict keeps sys.modules intact and removes the plugin module afterwards.
+# Replacing sys.modules with {} (as these tests used to) made patch() re-import
+# a fresh importlib.util on Python 3.11+, so the loader kept the real one.
 @patch("importlib.util.spec_from_file_location")
 @patch("importlib.util.module_from_spec")
-@patch("sys.modules", new={})
+@patch.dict("sys.modules")
 def test_load_plugin_success_package(mock_module_from_spec, mock_spec_from_file_location, tmp_path):
     plugin_dir = tmp_path / "my_package"
     plugin_dir.mkdir()

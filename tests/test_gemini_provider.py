@@ -259,11 +259,24 @@ def test_raises_after_max_retries_gemini(provider):
 # --------------------------------------------------------------------------
 
 
-def _build_constraint_provider():
-    """Build a GeminiProvider with mocked google-genai client + success response."""
-    with patch("google.genai.Client") as MockClient:
+@pytest.fixture
+def constraint_provider():
+    """A GeminiProvider with a mocked google-genai SDK and a canned success response.
+
+    The SDK stays mocked for the whole test, because create() imports
+    google.genai.types itself, so these tests don't need the optional
+    `gemini` extra installed.
+    """
+    mock_genai = MagicMock()
+    mock_google = MagicMock()
+    mock_google.genai = mock_genai
+    with patch.dict(sys.modules, {
+        "google": mock_google,
+        "google.genai": mock_genai,
+        "google.genai.types": mock_genai.types,
+    }):
         mock_client = MagicMock()
-        MockClient.return_value = mock_client
+        mock_genai.Client.return_value = mock_client
         mock_response = MagicMock()
         mock_candidate = MagicMock()
         mock_part = MagicMock()
@@ -278,16 +291,16 @@ def _build_constraint_provider():
         mock_client.models.generate_content.return_value = mock_response
         from mullet.core.providers.gemini import GeminiProvider
         p = GeminiProvider(api_key="test-key", model="gemini-2.5-flash")
-        return p, mock_client
+        yield p, mock_client
 
 
-def test_gemini_name_is_set():
-    p, _ = _build_constraint_provider()
+def test_gemini_name_is_set(constraint_provider):
+    p, _ = constraint_provider
     assert p.name == "gemini"
 
 
-def test_gemini_shape_request_is_called():
-    p, _ = _build_constraint_provider()
+def test_gemini_shape_request_is_called(constraint_provider):
+    p, _ = constraint_provider
     with patch("mullet.core.providers.gemini.shape_request") as mock_shape:
         mock_shape.side_effect = lambda model, kwargs: kwargs
         p.create(messages=[{"role": "user", "content": "hi"}])
@@ -296,17 +309,17 @@ def test_gemini_shape_request_is_called():
         assert args[0] == "gemini-2.5-flash"
 
 
-def test_gemini_wire_log_emitted(caplog):
+def test_gemini_wire_log_emitted(caplog, constraint_provider):
     import logging as _lg
-    p, _ = _build_constraint_provider()
+    p, _ = constraint_provider
     caplog.set_level(_lg.INFO, logger="mullet.core.providers.gemini")
     p.create(messages=[{"role": "user", "content": "hi"}])
     wire_logs = [r for r in caplog.records if "wire:" in r.message and "provider=gemini" in r.message]
     assert wire_logs
 
 
-def test_gemini_constraint_error_heals_and_retries():
-    p, mock_client = _build_constraint_provider()
+def test_gemini_constraint_error_heals_and_retries(constraint_provider):
+    p, mock_client = constraint_provider
     call_count = {"n": 0}
     success_response = mock_client.models.generate_content.return_value
 
