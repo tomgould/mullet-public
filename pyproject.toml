@@ -7,7 +7,7 @@ name = "mullet"
 version = "1.9.0"
 description = "Cloud in the front, Local GPU in the back. AI coding orchestrator with intelligent compute routing."
 readme = "README.md"
-license = {text = "BSL-1.1"}
+license = {text = "BUSL-1.1"}
 requires-python = ">=3.10"
 authors = [{ name = "Tom Gould" }]
 keywords = ["ai", "llm", "agent", "orchestration", "coding-assistant", "local-gpu"]
@@ -48,6 +48,7 @@ dependencies = [
     "textual>=0.80",
     "pypdf>=3.0",
     "pyperclip>=1.8",
+    "markdownify>=0.11",
 ]
 
 [project.urls]
@@ -81,6 +82,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-aiohttp>=1.0",
+    "colorama>=0.4",
 ]
 [project.scripts]
 mullet = "mullet.cli.main:main"
@@ -88,15 +90,12 @@ mullet-mcp = "mullet.server.mcp:run_mcp_server"
 mullet-hud = "mullet.hud.cli:main"
 mullet-statusline = "mullet.hud.statusline:main"
 mullet-claude-hud = "mullet.hud.claude_style:main"
-mullet-onboard = "scripts.onboard:main"
+mullet-onboard = "mullet.cli.onboard:main"
 
 [tool.hatch.build.targets.wheel]
+# The template and skill folders sit inside the package, so this already ships
+# them; listing them again under force-include breaks a non-editable build.
 packages = ["mullet"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"mullet/autopilot_templates" = "mullet/autopilot_templates"
-"mullet/core/skills/builtin" = "mullet/core/skills/builtin"
-"mullet/templates/init" = "mullet/templates/init"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -115,6 +114,11 @@ extend-exclude = [
     "site",
     ".venv",
 ]
+
+[tool.ruff.lint]
+# Ruff's long-standing default rule set, named here so that newer ruff
+# releases with wider defaults don't change what `ruff check` reports.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 # Entry points that intentionally run setup code (dotenv loading, monkey-patching,

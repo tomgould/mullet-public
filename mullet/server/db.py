@@ -221,8 +221,7 @@ def _init_postgres(url: str) -> PostgresWrapper:
         import psycopg2
     except ImportError as exc:
         raise ImportError(
-            "PostgreSQL support requires psycopg2: pip install mullet[postgres] "
-            "or pip install psycopg2-binary"
+            "PostgreSQL support requires psycopg2: pip install psycopg2-binary"
         ) from exc
 
     conn = psycopg2.connect(url)

@@ -82,9 +82,11 @@ OPENROUTER_API_KEY=sk-...     # Optional — 8 curated models, OpenAI-compatible
 GOOGLE_API_KEY=AIza...        # Optional — cheap fallback
 ```
 
-> **Do not add `ANTHROPIC_API_KEY`.** Mullet integrates with Claude Code via your
-> existing Max or Pro subscription — it does not call the Anthropic API directly.
-> Adding a key won't improve anything and will confuse the routing.
+> **`ANTHROPIC_API_KEY` is optional.** Without it, Mullet never calls the Anthropic
+> API: over MCP it hands Anthropic-only work back to Claude Code, and on the command
+> line it uses the official `claude` CLI if that's installed, so the work runs under
+> your Claude subscription through Anthropic's own tools. Set the key only if you
+> want Mullet to call Anthropic models through the API, billed per token.
 
 > **Minimum viable setup:** `KIMI_API_KEY` alone is enough to get started.
 > Alternatively, a local LLM running in LM Studio requires no key at all.
@@ -151,7 +153,7 @@ After running `mullet setup-claude`, **restart Claude Code** so the MCP server a
 
 ### Manual (if you prefer)
 
-Add to `~/.claude/settings.json` under `mcpServers`:
+Add this to `~/.claude/mcp.json`, the file `mullet setup-claude` writes:
 
 ```json
 {
@@ -194,11 +196,10 @@ ollama serve
 
 Mullet auto-detects Ollama on port `11434`.
 
-If your local server is on a non-standard port, set:
-
-```bash
-export LOCAL_BASE_URL=http://localhost:8080/v1
-```
+Mullet probes ports `1234` (LM Studio), `11434` (Ollama) and `8000` (any other
+OpenAI-compatible server). For a server on another port, pass `--base-url` on the
+command line, or add it as a provider with its `base_url` in `mullet.yaml` (see the
+README's Configuration section).
 
 > **Mac warning:** Do not run `pip install -e ".[gpu]"` on Apple Silicon — the `[gpu]` extra pulls `pynvml` (NVIDIA GPU monitoring) which does nothing on Mac and may error on install.
 
@@ -324,20 +325,20 @@ Or for code-specific queries:
 | Problem | Fix |
 |:--------|:----|
 | `mullet: command not found` | Run `pip install -e .` from the repo root. If it's still missing, add `~/.local/bin` to your `PATH` (common on Linux). |
-| `mullet doctor` shows no providers | Add `KIMI_API_KEY` or `GOOGLE_API_KEY` to your `.env` file, or start LM Studio and load a model. Do not add `ANTHROPIC_API_KEY` — it is not used. |
+| `mullet doctor` shows no providers | Add `KIMI_API_KEY` or `GOOGLE_API_KEY` to your `.env` file, or start LM Studio and load a model. An `ANTHROPIC_API_KEY` also works, but the Anthropic API bills it per token. |
 | MCP tools not appearing in Claude Code | Run `mullet setup-claude`, then **fully restart** Claude Code. Check Settings → MCP → `mullet` is listed. |
 | `mullet mcp: server ready` not seen | In Claude Code, go to Settings → MCP → `mullet` → **View logs**. Look for Python tracebacks or missing dependencies. |
 | Kimi API key rejected | Ensure the key starts with `sk-` and has active credits at [platform.moonshot.cn](https://platform.moonshot.cn). If you have a coding-specific key (`sk-kimi-...`), Mullet auto-routes to the coding endpoint. |
 | `mullet doctor` warns about missing hooks | You probably did a non-editable install. Run `pip install -e .` from the repo root, then re-run `mullet setup-claude`. |
 | Local LLM detected but model shows "very small context" | Load a larger model in LM Studio (7B+) or increase the context slider in the model settings. |
-| `mullet_run` returns empty or garbled output | The delegated model may not support tool calling. Try forcing a different provider: `mullet_run(task="...", tier="STANDARD")`. |
+| `mullet_run` returns empty or garbled output | The delegated model may not support tool calling. Try forcing a different provider: `mullet_run(task="...", providers="kimi")`. |
 
 ---
 
 ## Next Steps
 
-- **Quick reference:** See [`docs/QUICKSTART.md`](QUICKSTART.md) for common commands and orchestration modes (`#ralph`, `#ultrawork`, `#autopilot`).
-- **opencode deep-dive:** See [`docs/opencode_integration.md`](opencode_integration.md) for filesystem-agent setup and ACP protocol details.
+- **Quick reference:** See [`docs/QUICKSTART.md`](QUICKSTART.md) for common commands and orchestration modes (`mullet ralph`, `mullet ultrawork`, `mullet autopilot`).
+- **opencode deep-dive:** See [`docs/opencode_integration.md`](opencode_integration.md) for filesystem-agent setup and troubleshooting.
 - **Architecture:** See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) for routing tiers, fallback chains, and system design.
 - **Preset management:** `mullet preset use <name>` switches routing policy. Built-ins: `balanced-mix` (default), `local-only`, `claude-only`, `cheap-cloud`. See README.md § "Provider Presets" for details.
 

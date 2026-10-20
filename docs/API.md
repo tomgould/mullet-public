@@ -233,8 +233,8 @@ Available when running `mullet mcp`:
 | `task` | string | required | The task to execute |
 | `tier` | string | auto | Force routing tier: `LOW`, `STANDARD`, `ADVANCED`, `CRITICAL`, `PREMIUM` |
 | `mode` | string | `"standard"` | Execution mode: `standard`, `ultrawork`, `ralph` |
-| `files` | array | `[]` | File paths to include as context (exported as FILE blocks for the delegate) |
-| `apply` | boolean | `false` | Apply EDIT/FILE/DELETE blocks from the delegate response to disk |
+| `files` | array | `[]` | Ignored: `mullet_run` has no file access. Use `mullet_opencode` for file edits |
+| `apply` | boolean | `false` | Deprecated: `true` returns an error. Use `mullet_opencode` for file edits |
 | `target_dir` | string | cwd | Base directory to resolve file paths against |
 | `providers` | string | auto | Comma-separated provider allowlist: `"kimi,haiku"`. If omitted, the active preset's `allowed_providers` is applied; passing `providers` explicitly overrides it. |
 | `force_single` | boolean | `false` | Disable auto-swarm routing; always use a single provider call |
@@ -244,9 +244,7 @@ Available when running `mullet mcp`:
 
 ```json
 {
-  "task": "add type hints to utils.py",
-  "files": ["src/utils.py"],
-  "apply": true,
+  "task": "summarise the trade-offs between REST and gRPC for an internal API",
   "force_single": true
 }
 ```
@@ -258,9 +256,8 @@ Available when running `mullet mcp`:
 | `task` | string | required | Coding task to perform (natural language) |
 | `cwd` | string | cwd | Project directory |
 | `model` | string | auto | Model override, e.g. `"moonshot/kimi-k2.7-code"`. If omitted, the active preset's `opencode_model` is used; if the preset is `native_only` (e.g. `claude-only`), `mullet_opencode` refuses and defers to Claude Code. |
-| `timeout` | integer | `300` | Max seconds to wait |
-| `apply` | boolean | `false` | Git add + commit changes after completion |
-| `commit_message` | string | auto | Custom git commit message when `apply=true` |
+
+`mullet_opencode` edits files in place and never stages or commits; there is no `timeout`, `apply` or `commit_message` parameter. See [opencode_integration.md](opencode_integration.md) for the return value.
 
 ### `mullet_swarm` Parameters
 

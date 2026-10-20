@@ -1,5 +1,7 @@
 #!/bin/bash
-# Release helper: bump version, tag, build, publish to PyPI test.
+# Release helper: bump version, tag and build.
+# Mullet is distributed from GitHub, not PyPI: the "mullet" name on PyPI
+# belongs to an unrelated project, so don't upload these builds there.
 set -e
 NEW_VERSION="$1"
 [ -z "$NEW_VERSION" ] && { echo "usage: $0 <version>"; exit 1; }
@@ -17,4 +19,4 @@ git commit -m "chore(release): v$NEW_VERSION"
 git tag "v$NEW_VERSION"
 
 echo "Built dist/mullet-$NEW_VERSION-*.whl"
-echo "Next: twine upload dist/* (or twine upload --repository testpypi dist/*)"
+echo "Next: git push && git push --tags"

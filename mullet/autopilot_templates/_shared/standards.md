@@ -25,4 +25,3 @@ Delegated agents: read this file before writing any code.
 - Conventional Commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`.
 - Each commit is one logical change that compiles and passes tests.
 - Commit messages explain WHY. The diff shows WHAT.
-- No `Co-Authored-By` trailers on this project.

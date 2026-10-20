@@ -26,12 +26,29 @@ _GITIGNORE_PATTERNS = [
 ]
 
 _MEMORY_FILES = [
-    "feedback_coauthored_by.md",
     "feedback_prefer_concurrent.md",
     "feedback_measure_before_delegate.md",
     "feedback_opencode_for_edits.md",
     "feedback_test_writing_delegation.md",
 ]
+
+
+# delegation_reminder.py imports its budget thresholds from these modules in its
+# own folder, so they are copied alongside it; without them the hook fails.
+_HOOK_HELPERS = ("_delegation_gate.py",)
+
+
+def _copy_hook_helpers(source_hook: Path, hook_dest: Path, dry_run: bool, log) -> None:
+    for name in _HOOK_HELPERS:
+        src = source_hook.with_name(name)
+        dest = hook_dest.with_name(name)
+        if not src.exists():
+            log(f"⚠ scripts/hooks/{name} not found; delegation_reminder.py needs it")
+        elif dry_run:
+            log(f"Would copy {name} → {dest}")
+        else:
+            shutil.copy2(src, dest)
+            log(f"✓ Copied {name} → {dest}")
 
 
 def _render_template(path: Path, **kwargs: str) -> str:
@@ -234,6 +251,7 @@ def run_init(args: argparse.Namespace) -> None:
                     hook_dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source_hook, hook_dest)
                     _log(f"✓ Copied delegation_reminder.py → {hook_dest}")
+                _copy_hook_helpers(source_hook, hook_dest, dry_run, _log)
             else:
                 _log("⚠ scripts/hooks/delegation_reminder.py not found, skipping")
     else:
@@ -381,6 +399,7 @@ def run_update(args: argparse.Namespace) -> None:
                 hook_dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source_hook, hook_dest)
                 _log(f"✓ Updated .claude/hooks/delegation_reminder.py")
+            _copy_hook_helpers(source_hook, hook_dest, dry_run, _log)
             updated += 1
         else:
             _log("⚠ scripts/hooks/delegation_reminder.py not found — skipping")

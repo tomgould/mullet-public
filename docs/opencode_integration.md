@@ -69,7 +69,7 @@ For a non-interactive install (CI, dotfiles bootstrap):
 
 ```bash
 mullet setup-claude --yes        # auto-accept all prompts
-mullet setup-claude --dry-run    # preview without writing anything
+mullet setup-claude --check      # preview without writing anything
 ```
 
 ---

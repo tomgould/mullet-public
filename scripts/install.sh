@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Mullet one-liner installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
+#
+# Installs from the GitHub repository https://github.com/tomgould/mullet-public
+# into its own virtualenv. It never installs from PyPI: the "mullet" package
+# there is an unrelated project. Run it again to update.
 set -euo pipefail
+REPO_URL="https://github.com/tomgould/mullet-public.git"
 echo "Installing Mullet..."
+command -v git >/dev/null 2>&1 || { echo "Error: git is required. Install it first (e.g. apt install git / xcode-select --install)." >&2; exit 1; }
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$OS" in linux|darwin) ;; *) echo "Error: unsupported OS '$OS' — Linux or macOS required." >&2; exit 1 ;; esac
 PYTHON_CMD=""
@@ -23,20 +29,16 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 SRC_DIR="$HOME/.local/share/mullet-src"
 if [ -d "$SRC_DIR/.git" ]; then
-    echo "Updating existing source clone..."
-    git -C "$SRC_DIR" pull --quiet
-    "$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
+    echo "Updating existing source clone in $SRC_DIR..."
+    git -C "$SRC_DIR" pull --quiet --ff-only
 else
-    if "$VENV_DIR/bin/pip" install --quiet mullet 2>/dev/null; then
-        echo "Installed mullet from PyPI."
-    else
-        echo "Cloning source repo..."
-        git clone --quiet https://github.com/tomgould/mullet-public.git "$SRC_DIR"
-        "$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
-    fi
+    echo "Cloning $REPO_URL into $SRC_DIR..."
+    git clone --quiet "$REPO_URL" "$SRC_DIR"
 fi
+# Editable install: the Claude Code hooks run from the clone's scripts/ folder.
+"$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
 mkdir -p "$HOME/.local/bin"
-for bin in mullet mullet-mcp mullet-hud mullet-statusline; do
+for bin in mullet mullet-mcp mullet-hud mullet-statusline mullet-onboard; do
     src="$VENV_DIR/bin/$bin"
     [ -f "$src" ] && ln -sf "$src" "$HOME/.local/bin/$bin"
 done

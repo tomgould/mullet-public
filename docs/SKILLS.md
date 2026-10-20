@@ -82,8 +82,10 @@ The orchestration system handles skill chaining based on the selected mode.
 
 1. **Project skills** (`.mullet/skills/`) — highest priority
 2. **User skills** (`~/.mullet/skills/`)
-3. **External dirs** (from `mullet.yaml` skills.external_dirs)
-4. **Built-in skills** (bundled with mullet)
+3. **Built-in skills** (bundled with mullet)
+
+`mullet.yaml` accepts `skills.external_dirs`, but the CLI and MCP server don't load
+skills from those folders yet.
 
 Project skills override user skills with the same name.
 
@@ -98,6 +100,7 @@ Project skills override user skills with the same name.
 | plan | "plan", "design" | — |
 | pool-improve | "improve pool", "fix pool config" | — |
 | ralph | "ralph", "don't stop" | ralph |
+| session-review | "session review", "wrap up", "end session" | — |
 | team | "team", "coordinated" | team |
 | ultrawork | "ultrawork", "parallel" | ultrawork |
 

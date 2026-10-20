@@ -348,14 +348,14 @@ def resolve_provider(args, allowed_providers: frozenset[str] | None = None) -> P
                 from mullet.core.providers.gemini import GeminiProvider
                 return GeminiProvider(api_key=api_key, model=args.model or "gemini-2.5-flash")
             except ImportError:
-                print("Error: google-genai not installed. Run: pip install mullet[gemini]", file=sys.stderr)
+                print("Error: google-genai not installed. Run: pip install google-genai", file=sys.stderr)
                 return None
         elif provider_name == "bedrock":
             try:
                 from mullet.core.providers.bedrock import BedrockProvider
                 return BedrockProvider(model_id=args.model or "anthropic.claude-sonnet-4-6-20250514-v1:0")
             except ImportError:
-                print("Error: boto3 not installed. Run: pip install mullet[bedrock]", file=sys.stderr)
+                print("Error: boto3 not installed. Run: pip install boto3", file=sys.stderr)
                 return None
         elif provider_name == "gemini-cli":
             from mullet.core.providers.gemini_cli import GeminiCLIProvider, is_gemini_cli_available
@@ -1687,6 +1687,25 @@ def main():
         sys.exit(1)
 
 
+_INSTALL_HELP = """\
+Install Mullet from GitHub (needs Python 3.10+ and git):
+
+  git clone https://github.com/tomgould/mullet-public.git
+  cd mullet-public
+  pip install -e .
+
+Optional extras, installed with pip install -e ".[EXTRA]" in the clone:
+  gemini    Google Gemini provider
+  bedrock   AWS Bedrock provider
+  postgres  PostgreSQL backend
+  all       gemini, bedrock and postgres, plus NVIDIA GPU monitoring
+
+Or run the installer, which does the same in its own virtualenv:
+  curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
+
+Mullet is not on PyPI: the "mullet" package there is an unrelated project."""
+
+
 def _main_inner():
     if len(sys.argv) >= 2 and sys.argv[1] == "preset":
         from mullet.cli.preset_cli import cmd_preset
@@ -1694,6 +1713,10 @@ def _main_inner():
 
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.install_help:
+        print(_INSTALL_HELP)
+        return
 
     if args.version:
         if args.banner:
@@ -1768,7 +1791,7 @@ def _main_inner():
 
     if command == "setup-claude":
         from mullet.cli.setup_claude import run_setup_claude
-        dry_run = "--check" in sys.argv
+        dry_run = "--check" in sys.argv or "--dry-run" in sys.argv
         yes = "--yes" in sys.argv
         force = "--force" in sys.argv
         run_setup_claude(dry_run=dry_run, yes=yes, force=force)

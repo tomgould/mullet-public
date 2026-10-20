@@ -1,10 +1,25 @@
-"""Version update checker — queries PyPI for latest mullet release."""
+"""Version update checker: compares the installed mullet with the latest on GitHub.
+
+Mullet is installed from https://github.com/tomgould/mullet-public, not from
+PyPI (the "mullet" package on PyPI is an unrelated project), so the latest
+version is read from ``mullet/__init__.py`` on the repository's main branch.
+That is the same place the installed version comes from, so the two always
+compare like with like.
+"""
 
 from __future__ import annotations
 
-import json
+import re
 import sys
 import urllib.request
+
+REPO_URL = "https://github.com/tomgould/mullet-public"
+VERSION_URL = (
+    "https://raw.githubusercontent.com/tomgould/mullet-public/main/mullet/__init__.py"
+)
+UPDATE_HINT = "git pull in your Mullet clone, then pip install -e . (or re-run scripts/install.sh)"
+
+_VERSION_RE = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 
 
 def get_installed_version() -> str:
@@ -24,19 +39,20 @@ def _version_gt(a: str, b: str) -> bool:
         return _parts(a) > _parts(b)
 
 
-def get_latest_pypi_version(timeout: float = 5.0) -> str | None:
-    """Query PyPI JSON API for latest mullet release version.
+def get_latest_version(timeout: float = 5.0) -> str | None:
+    """Return the version on the public repository's main branch.
 
-    Returns version string like "1.7.1" or None on any error.
-    Uses urllib.request — no extra deps.
+    Returns a version string like "1.9.0", or None on any error (offline,
+    repository unreachable, or no version line found). Uses urllib.request,
+    so it needs no extra dependencies.
     """
-    url = "https://pypi.org/pypi/mullet/json"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            return data["info"]["version"]
+        with urllib.request.urlopen(VERSION_URL, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
     except Exception:
         return None
+    match = _VERSION_RE.search(text)
+    return match.group(1) if match else None
 
 
 def check_for_update(timeout: float = 5.0) -> dict:
@@ -44,19 +60,19 @@ def check_for_update(timeout: float = 5.0) -> dict:
 
     Returns dict with keys:
       - installed: str — current installed version
-      - latest: str | None — latest PyPI version (None if check failed)
+      - latest: str | None — latest version on GitHub (None if check failed)
       - update_available: bool — True when latest > installed (semver)
       - message: str — human-readable status line
     """
     installed = get_installed_version()
-    latest = get_latest_pypi_version(timeout=timeout)
+    latest = get_latest_version(timeout=timeout)
 
     if latest is None:
         return {
             "installed": installed,
             "latest": None,
             "update_available": False,
-            "message": f"mullet {installed} installed (PyPI check failed)",
+            "message": f"mullet {installed} installed (GitHub version check failed)",
         }
 
     update_available = _version_gt(latest, installed)
@@ -64,7 +80,7 @@ def check_for_update(timeout: float = 5.0) -> dict:
     if update_available:
         message = (
             f"mullet {latest} available (installed: {installed})."
-            f" Update: pip install -U mullet"
+            f" Update: {UPDATE_HINT}"
         )
     else:
         message = f"mullet {installed} is up to date"
@@ -80,13 +96,13 @@ def check_for_update(timeout: float = 5.0) -> dict:
 def maybe_print_update_notice(timeout: float = 3.0) -> None:
     """Print a one-line update notice if a newer version is available.
 
-    Prints nothing if up to date, if PyPI is unreachable, or if latest <= installed.
+    Prints nothing if up to date, if GitHub is unreachable, or if latest <= installed.
     Handles all exceptions silently — never crashes the calling command.
     """
     try:
         result = check_for_update(timeout=timeout)
         if result["update_available"]:
             print(f"  mullet {result['latest']} available (installed: {result['installed']})."
-                  f" Update: pip install -U mullet", file=sys.stderr)
+                  f" Update: {UPDATE_HINT}", file=sys.stderr)
     except Exception:
         pass

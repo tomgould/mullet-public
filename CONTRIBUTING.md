@@ -35,12 +35,14 @@ pytest tests/integration/ -v
 ## Code Style
 
 ```bash
-# Format
-black .
-
-# Lint
-ruff check
+pip install "ruff==0.17.1"
+ruff check --select E9,F63,F7,F82 mullet scripts   # what CI requires to pass
+ruff check mullet scripts                          # the full rule set (advisory)
 ```
+
+CI also runs Black and mypy as advisory checks. Most of the code base isn't
+Black-formatted yet, so don't run `black .` over the whole tree; keep
+formatting-only changes in a PR of their own.
 
 We target **Python >= 3.10** and require type hints on all public APIs.
 No placeholder TODOs or commented-out code in production paths.

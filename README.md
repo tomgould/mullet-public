@@ -16,7 +16,7 @@ It also exposes an OpenAI-compatible REST + WebSocket API via `mullet serve`.
 
 - 🎯 **Multi-provider native** — Kimi K2.7-Code / K2.6, Claude (Fable 5 / Opus 4.8 / Sonnet 5 / Sonnet 4.6 / Haiku), GPT-5, Gemini 2.5, DeepSeek V4 (Flash/Pro), Qwen3-Coder-Next, GLM 5.1, MiniMax M3, Ollama, LM Studio, OpenRouter, Bedrock, Claude/Gemini CLI subscriptions. Smart routing picks the cheapest model that can handle the task.
 - 🔌 **MCP-server-first** — `mullet mcp` exposes tools to Claude Code and any MCP client. `mullet serve` provides an OpenAI-compatible REST + WebSocket API.
-- ⭐ **30+ subsystems** — skills, plugins, hooks, knowledge engine (semantic search + graph), swarm, voice transcription, multimodal images, PDF reading, browser automation, Prometheus metrics, secret redaction, auto-compaction.
+- ⭐ **Batteries included** — skills, plugins, hooks, knowledge engine (semantic search + graph, PDF and document ingestion), swarm, image analysis, web browsing, Prometheus metrics, secret redaction, context compression.
 
 ---
 
@@ -52,28 +52,27 @@ mullet preset list               # see the 4 built-in presets
 
 ## What's Inside
 
-17,700+ tests. 30+ subsystems. Pure Python, no JS runtime. Here's the full taxonomy:
+17,700+ tests. Pure Python, no JS runtime. Here's what's in the box:
 
 ### Core Runtime
 
 | Capability | Detail |
 |:-----------|:-------|
-| **AgentRunner** | Async agent loop with tool execution, streaming, and fallback retry |
-| **Streaming** | Token-by-token via `assistant_chunk` events; tool-call deltas; `thinking_delta` for Claude reasoning |
-| **Auto-compaction** | Summarises older messages when context window exceeds 70% |
-| **Auto-context** | Trawl-backed `AutoContextResolver` injects relevant code chunks |
-| **IntentGate** | Keyword classifier biases routing |
-| **Named subagents** | Sisyphus, Hephaestus, Oracle, Librarian — primary + fallback provider chains |
-| **Memory auto-discovery** | Walks up to git root collecting `CLAUDE.md` / `AGENTS.md` / `MEMORY.md` |
-| **Multimodal** | `ImageAttachment` + `MultimodalMessageBuilder` via `--image PATH` / `--image-url URL` |
+| **AgentRunner** | Async agent loop with tool execution, an iteration budget, streaming and fallback providers |
+| **Streaming** | Tool-call arguments that arrive in fragments are held until they parse |
+| **Context compression** | Summarises older messages once the conversation passes half the model's context window |
+| **Reasoning blocks** | Extracts thinking output from Claude, DeepSeek-R1, Qwen and OpenRouter responses |
+| **Context references** | `@file:path`, `@folder:path`, `@git:N`, `@diff`, `@staged` and `@url:url` in a prompt pull that content in |
+| **Agent memory** | Durable facts (preferences, environment details, conventions) injected into every turn |
+| **Agent profiles** | YAML profiles in `mullet/agents/` (see [Agent Profiles](#agent-profiles)) |
 
 ### Coordinator / Workflows
 
 | Capability | Detail |
 |:-----------|:-------|
 | **Swarm** | `mullet_swarm` MCP tool — fan out a goal across parallel Kimi K2 calls, synthesize results, configurable concurrency |
-| **Workflows** | Durable SQLite 3-table state (`WorkflowRun` + `WorkflowEvent` + `WorkflowMessage`); `replay_events()` for corruption recovery |
-| **Auto-swarm** | Detects parallelisable tasks and routes to swarm automatically |
+| **Orchestration modes** | `mullet ultrawork`, `ralph`, `autopilot`, `team` and `eco` (see [Orchestration Modes](#orchestration-modes)) |
+| **Auto-swarm** | Detects parallelisable tasks and routes to swarm automatically (`mullet_run` with `force_single` turns it off) |
 
 ### CLI commands
 
@@ -91,8 +90,8 @@ mullet preset list               # see the 4 built-in presets
 | `mullet search` | Semantic search across indexed knowledge pools |
 | `mullet pool` | Manage knowledge pools (list, audit, prune, tune, validate) |
 | `mullet reindex` | Rebuild pool index |
-| `mullet ingest` | Ingest files/URLs into a knowledge pool |
-| `mullet graph` | Knowledge graph operations (build, stats, export) |
+| `mullet ingest` | Preview the chunks a directory would produce (writes nothing; use `mullet reindex` to index a pool) |
+| `mullet graph` | Knowledge graph operations (build, search, stats) |
 | `mullet logs` | View LLM interaction history (tail/stats/suggest) |
 | `mullet history` | Show recent sessions or search past conversations |
 | `mullet stats` | Show usage statistics from session history |
@@ -102,16 +101,18 @@ mullet preset list               # see the 4 built-in presets
 | `mullet completion` | Generate shell completion scripts (bash/zsh) |
 | `mullet override` | Toggle budget override (mullet override on/off) |
 
-### Tools (25+ built-in)
+### Tools (24 built-in)
 
 | Category | Tools |
 |:---------|:------|
-| **Filesystem** | `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep` |
-| **Shell** | `Bash`, `Terminal`, `RunBash`, `RunTests`, `RunPython`, `code_exec` |
-| **Code intelligence** | `View`, `ViewCode`, `SearchCode`, `trawl_search_code`, `trawl_find_symbol` |
-| **Web / browser** | `WebSearch`, `WebFetch`, `WebScrape`, `Browse` (Playwright multi-session: goto/extract/click/fill/screenshot/links/text) |
-| **Agent / orchestration** | `TodoWrite`, `Task`, `SwarmDispatch`, `MCPCall` |
-| **Multimodal** | `ImageView`, `Image` (attach + process), `ReadPDF` (pypdf-backed), `VoiceTranscribe`, `Clipboard`, `MetricsQuery` |
+| **Files and code** | `file_ops`, `patch`, `git`, `lsp` |
+| **Shell and execution** | `terminal`, `code_exec`, `python_repl`, `run_tests`, `docker` |
+| **Web** | `web_search`, `fetch_page`, `browse` (fetch pages, extract content, follow links, fill forms) |
+| **Agent / orchestration** | `delegate`, `todo`, `clarify`, `skill_invoke`, `skill_mgr` |
+| **Memory and sessions** | `memory`, `notepad`, `shared_mem`, `session_search`, `session_list` |
+| **Images** | `analyze_image` (needs a vision-capable provider), `image_gen` |
+
+Tools from external MCP servers (stdio) can be added through the MCP client in `mullet/core/tools/mcp_client.py`.
 
 ### REPL commands
 
@@ -123,25 +124,16 @@ Type `/` followed by a skill name to invoke it (e.g. `/code-review`).
 
 ### Hooks
 
-| Hook | Detail |
-|:-----|:-------|
-| **5 tool guards** | `writeExistingFileGuard`, `hashlineReadEnhancer`, `directoryAgentsInjector`, `bashFileReadGuard`, `toolOutputTruncator` |
-| **Secret redaction** | `PreToolUse` guard with 12 patterns: AWS, GitHub, OpenAI, Anthropic, JWT, Slack, private keys, generic password |
-| **IntentGate** | Message hook keyword classifier biases routing |
-| **Memory injection** | `AGENTS.md` / `CLAUDE.md` auto-injected into prompts |
-| **Auto-compaction** | Transform hook summarises when context > 70% |
-| **Per-session fallback** | Event hook with cooldown map, error classifier, retry signal extraction |
+`mullet setup-claude` installs Claude Code hooks from `scripts/hooks/`, such as the
+delegation reminder (UserPromptSubmit), the provider/tier rewriter (PreToolUse on
+`mullet_run`) and observation capture (PostToolUse).
 
 ### Sessions
 
 | Capability | Detail |
 |:-----------|:-------|
-| **Conversation search** | Full-text grep across `messages.jsonl` with role filter + recency scoring |
-| **Tags + Pin** | `/tag pin/unpin/add/remove`, `list_pinned`, `list_by_tag` |
-| **Undo** | Rewind to any prior point, restoring previous state |
-| **Branch** | `fork_session` at any index with `parent_session_id` genealogy |
-| **Storage** | Append-only event log with `project_hash` isolation at `~/.config/mullet/sessions/{hash}-{cwd}/` |
-| **Resume** | Interactive picker via `/resume` |
+| **Storage** | Each session is saved as JSON in `~/.mullet/sessions/` |
+| **Search** | A SQLite FTS5 index (`~/.mullet/sessions.db`) backs `mullet history` and the `session_search` tool |
 
 ### Servers
 
@@ -152,25 +144,23 @@ Type `/` followed by a skill name to invoke it (e.g. `/code-review`).
 
 ### Polish
 
-- 🧠 **Thinking blocks** — Anthropic reasoning stream
-- 🔄 **Auto-update checker** — PyPI version check on `mullet doctor`; `maybe_print_update_notice()` warns when a newer version is available
-- 💬 **FriendlyError** — actionable messages with install hints and docs links
-- 🎨 **ASCII banner** — startup banner with version info via `mullet --banner`
+- 🧠 **Reasoning blocks** — thinking output from reasoning models is kept apart from the answer
+- 🔄 **Auto-update checker** — `mullet doctor` compares your version with the latest on the public GitHub repository and says when a newer one is available
+- 💬 **Helpful errors** — common exceptions come with a suggested fix, such as the package to install
+- 🎨 **ASCII banner** — version banner via `mullet --version --banner`
 
 ### Security
 
-- 🔒 **Secret scanner** — 12 regex patterns covering AWS keys, GitHub tokens, OpenAI/Anthropic keys, JWT, Slack webhooks, private keys, generic passwords
-- 🛡️ **Redactor** — automatic redaction in tool inputs, outputs, and session exports
-- 🚫 **PreToolUse guard** — blocks or masks secrets before tool execution
-- 🔐 **Permissions** — `default` / `auto` / `plan` modes; `path_rules`; `denied_commands`; `denied_tools`; `allowed_tools` whitelist
+- 🛡️ **Redactor** — masks API keys, tokens and credentials in logs and tool-result previews
+- 🚫 **Injection guard** — the terminal tool blocks commands that match known prompt-injection patterns, and content pulled in by `@` context references is sanitised
+- 🌐 **URL safety** — URL ingestion into knowledge pools refuses non-HTTP schemes, localhost and private-network addresses
 - 🔍 **Diff-risk classifier** — deterministic, zero-LLM-cost heuristic scans every `mullet_opencode` diff for risky changes (literal edits, quote flattening, new control flow, tampered assertions) delegates won't self-report
 
 ### Observability
 
-- 📊 **MetricsRegistry** — counters, gauges, histograms with dimensional tags (thread-safe)
-- 📝 **LogAggregator** — structured log collection, filtering by level/source/since, FIFO eviction
-- 📈 **Prometheus export** — `/metrics` endpoint for external monitoring stacks
-- 📡 **Opt-in telemetry** — privacy-first session analytics, zero PII / paths / code, jcode-style disclosure banner
+- 📈 **Prometheus metrics** — `mullet serve` exposes `/metrics` with request, token, latency and tool-call counters
+- 📝 **LLM interaction log** — `mullet logs tail|stats|suggest` inspects the history the provider routing layer writes
+- 🧭 **Routing history** — `mullet routing` shows provider outcomes, quality history and insights
 
 ---
 
@@ -180,19 +170,14 @@ Type `/` followed by a skill name to invoke it (e.g. `/code-review`).
 |:-----------|:----------:|:-----:|:--------:|:-----------:|
 | Self-hosted, no cloud account required | ✅ | ✅ | ✅ | ❌ |
 | Multi-provider native (Kimi/Claude/OpenAI/Gemini/Local) | ✅ | ✅ | ✅ | partial |
-| Hooks (PreToolUse / PostToolUse / Message / Event / Transform / Params) | ✅ | ❌ | ❌ | ✅ |
 | Swarm / parallel delegation | ✅ | ❌ | ❌ | partial |
-| Voice input (whisper.cpp / OpenAI / Groq) | ✅ | ❌ | ❌ | ❌ |
 | Knowledge engine (semantic search + graph) | ✅ | ❌ | ❌ | ❌ |
 | Multimodal (image + PDF) | ✅ | partial | partial | ✅ |
-| Browser automation (Playwright) | ✅ | ❌ | ❌ | ❌ |
 | One-line install | ✅ | ✅ | ✅ | ✅ |
-| Skills marketplace | ✅ | ❌ | ❌ | ✅ |
-| Plugin manifest (`plugin.json`) | ✅ | ❌ | ❌ | ✅ |
-| MCP client (stdio + HTTP/SSE) | ✅ | ❌ | partial | ✅ |
+| MCP client (stdio) | ✅ | ❌ | partial | ✅ |
 | Pure Python (no JS runtime) | ✅ | ✅ | ❌ | ❌ |
 | Token-cost router with budget guard | ✅ | partial | ❌ | ❌ |
-| Secret redaction in tool args + exports | ✅ | ❌ | ❌ | partial |
+| Secret redaction in logs and tool output | ✅ | ❌ | ❌ | partial |
 
 ---
 
@@ -232,17 +217,17 @@ Opus is excluded from automatic fallback. It only runs when explicitly authorise
 
 ### Orchestration Modes
 
-| Mode | Behaviour | Trigger |
+| Mode | Behaviour | Command |
 |:-----|:----------|:--------|
-| `standard` | Single agent call | Default |
-| `ultrawork` | Decomposes task, spawns up to 3 parallel workers via `delegate_batch`, merges results | `#ultrawork` or `--mode ultrawork` |
-| `ralph` | Wraps ultrawork in a persistence loop — re-runs until all PRD user stories pass, up to 10 iterations | `#ralph` |
-| `autopilot` | Full lifecycle: plan → ralph → verify. Runs unsupervised. | `#autopilot` |
-| `team` | N coordinated agents with non-overlapping file ownership boundaries | `#team` |
-| `eco` | Modifier: forces all calls to local LLM for the session | `#eco` |
+| `standard` | Single agent call | `mullet "<task>"` |
+| `ultrawork` | Decomposes task, spawns up to 3 parallel workers via `delegate_batch`, merges results | `mullet ultrawork "<task>"` |
+| `ralph` | Wraps ultrawork in a persistence loop — re-runs until all PRD user stories pass, up to 10 iterations | `mullet ralph "<task>"` |
+| `autopilot` | Full lifecycle: plan → ralph → verify. Runs unsupervised. | `mullet autopilot "<task>"` |
+| `team` | N coordinated agents with non-overlapping file ownership boundaries | `mullet team N "<task>"` |
+| `eco` | Modifier: runs ralph, ultrawork or autopilot on cheaper tiers to cut token cost | `mullet eco <mode> "<task>"` |
 
-Magic keywords (`#ralph`, `#ultrawork`, etc.) in any prompt trigger the mode inline
-without changing global config.
+Over MCP, `mullet_run` takes the mode as its `mode` parameter (`standard`, `ultrawork`
+or `ralph`).
 
 ---
 
@@ -287,21 +272,20 @@ without changing global config.
 | Sonnet 4.6 | $0.180 | 6× more |
 | Opus 4.8 | $0.300 | 10× more |
 
-Mullet routes >90% of coding tasks to Kimi K2, OpenRouter, or local LLMs. Anthropic tokens are
-reserved for orchestration and final commit review.
-
 > **Note:** Alibaba Cloud / DashScope is configured but not yet available on international accounts — pending future activation.
 
 ### Budget Guard
 
 ```python
 from mullet.hud.guard import check_budget
-r = check_budget()
-# → {'status': 'GO', '5h_pressure': 0.10, '7d_pressure': 0.11}
+r = check_budget()   # a BudgetCheck
+print(r.status.value, r.five_hour_pct, r.weekly_pct, r.recommended_provider)
 ```
 
-Three states: **GO** (green, <50% pressure) → **THROTTLE** (yellow, >50%, downgrade
-tier) → **PAUSE** (red, >90%, block calls).
+Three states: **go**; **throttle** once 5-hour usage reaches 70% (55% when weekly
+usage is 85% or more) or the daily share of the weekly allowance drops below 8%,
+which steers work to a cheaper provider; and **pause** when 5-hour usage is at least
+95% and weekly usage at least 90%.
 
 ### Provider Presets
 
@@ -345,12 +329,12 @@ Code once `mullet setup-claude` has run.
 
 | Tool | What it does | Key params |
 |:-----|:-------------|:-----------|
-| `mullet_run` | Route task to cheapest capable model | `task`, `tier`, `files`, `apply`, `providers`, `mode` |
+| `mullet_run` | Route task to cheapest capable model (no file access) | `task`, `tier`, `providers`, `mode`, `force_single` |
 | `mullet_swarm` | Fan-out across parallel Kimi K2 workers | `goal`, `items`, `concurrency`, `output_shape` |
-| `mullet_delegate` | Child agent with explicit provider control | `task`, `provider`, `tier` |
-| `mullet_opencode` | opencode — native filesystem access, returns git diff | `task`, `apply`, `commit_message`, `timeout` |
-| `mullet_search` | Semantic search via Trawl knowledge engine | `query` |
-| `mullet_remember` | Store memory in project knowledge base | `memory` |
+| `mullet_delegate` | Child agent with explicit provider control | `goal`, `context`, `providers` |
+| `mullet_opencode` | opencode — native filesystem access, edits files in place and lists what changed | `task`, `cwd`, `model` |
+| `mullet_search` | Semantic search via Trawl knowledge engine | `query`, `client` |
+| `mullet_remember` | Store memory in project knowledge base | `key`, `content`, `client` |
 | `mullet_analyze` | Complexity score + routing decision for a task | `task` |
 | `mullet_status` | Provider health, resource info | — |
 | `mullet_providers` | Live health check per provider | — |
@@ -361,20 +345,18 @@ Plus **42 Trawl knowledge tools** covering pool management, graph search, and co
 ### Typical Claude Code Workflow
 
 ```python
-# Delegate to Kimi — paste files in, get EDIT blocks back, apply to disk
+# Delegate a self-contained task. mullet_run has no file access, so put
+# everything the model needs into the task text.
 mullet_run(
-    task="refactor auth module to use OAuth2",
-    files=["src/auth.py", "src/tokens.py"],
-    apply=True,   # writes EDIT blocks directly to disk
+    task="write a regex that matches UK postcodes, with five test cases",
     tier="STANDARD",
 )
 
-# Or give Kimi full filesystem access via opencode
-mullet_opencode(task="add type hints to all public APIs", apply=False)
-# → returns {"response": "...", "diff": "--- a/src/auth.py\n+++ ..."}
-# Review the diff, then commit:
-mullet_opencode(task="add type hints to all public APIs", apply=True,
-                commit_message="feat: add type hints to public APIs")
+# For code changes, give the delegate filesystem access via opencode
+mullet_opencode(task="add type hints to all public APIs")
+# → returns {"response": "...", "files_changed": ["src/auth.py", ...], ...}
+# opencode edits files in place and never commits: review with git diff,
+# then commit yourself.
 ```
 
 ---
@@ -497,7 +479,7 @@ mullet setup-claude
 ```
 
 `setup-claude` is idempotent and handles:
-1. Writes `~/.mcp.json` registering Mullet + Trawl MCP servers
+1. Writes `~/.claude/mcp.json` registering Mullet + Trawl MCP servers
 2. Installs global Claude Code hooks into `~/.claude/settings.json` — fires in **any project directory**, not just this repo: delegation reminder (UserPromptSubmit), provider/tier rewriter (PreToolUse on mullet_run), observation capture (PostToolUse)
 3. Appends Mullet delegation rules to `~/.claude/CLAUDE.md`
 4. Installs skills (`/delegate`, `/commit`, `/review`) and agents (`patch-writer`, `test-runner`, `verifier`) into `~/.claude/`
@@ -505,8 +487,8 @@ mullet setup-claude
 
 > **Note:** The hook scripts live in `scripts/hooks/` inside the source tree.
 > `.claude/settings.json` references them via Claude Code's `${CLAUDE_PROJECT_DIR}`
-> variable, so the path itself is portable — but a regular `pip install mullet`
-> still won't ship the `scripts/` directory, so an editable install
+> variable, so the path itself is portable — but a regular (non-editable)
+> `pip install .` still won't ship the `scripts/` directory, so an editable install
 > (`pip install -e .` after cloning) is required either way. Run `mullet doctor`
 > to verify hooks are active.
 
@@ -537,27 +519,26 @@ mullet models
 ## Orchestration Modes In Practice
 
 ```bash
-# Standard: single Kimi call
+# Standard: a single routed call
 mullet "add a retry decorator to the API client"
 
 # Ultrawork: parallel decomposition
-mullet "#ultrawork add error handling to every endpoint in api/"
+mullet ultrawork "add error handling to every endpoint in api/"
 
 # Ralph: persistence loop — keeps going until tests pass
-mullet "#ralph implement OAuth2 login flow with full test coverage"
+mullet ralph "implement OAuth2 login flow with full test coverage"
 
 # Autopilot: plan, execute, verify unsupervised
-mullet "#autopilot migrate database from SQLite to PostgreSQL"
+mullet autopilot "migrate database from SQLite to PostgreSQL"
 
-# Team: coordinated agents with file ownership
-mullet "#team refactor the entire auth subsystem"
+# Team: 3 coordinated agents with file ownership
+mullet team 3 "refactor the entire auth subsystem"
 
-# Eco: local LLM only, zero cloud cost
-mullet "#eco add docstrings to all files in utils/"
-
-# Swarm: parallel fan-out (via MCP)
-mullet_swarm(goal="summarise each file in src/", items=[...])
+# Eco: ralph on cheaper tiers
+mullet eco ralph "add docstrings to all files in utils/"
 ```
+
+Swarm runs over MCP: `mullet_swarm(goal="summarise each file in src/", items=[...])`.
 
 ---
 
@@ -676,10 +657,18 @@ mullet doctor                     # system health check
 
 ## License
 
-[BSL 1.1](LICENSE) — solo/internal use unrestricted. Production multi-tenant
-deployment requires a commercial license. Converts to Apache 2.0 on 2030-04-03.
+[Business Source License 1.1](LICENSE). You may copy, modify and redistribute
+Mullet and use it outside production. The licence's Additional Use Grant also
+allows production use, free of charge, by one individual developer using it
+themselves on one running instance. It does not cover providing Mullet, or a
+service based on it, to anyone else. Any other production use needs a
+commercial licence.
 
-For commercial licensing, contact the Licensor named in [LICENSE](LICENSE).
+Each version of Mullet becomes available under the Apache License, Version 2.0
+on 2030-04-03, or on the fourth anniversary of that version's first public
+release if that comes sooner.
+
+For other licences, contact the Licensor as described in [LICENSE](LICENSE).
 
 ---
 

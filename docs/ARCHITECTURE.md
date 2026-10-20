@@ -62,9 +62,9 @@ Routing now uses a 3-stage pipeline before any paid model call:
 
 `KNOWN_PRICING`, `KNOWN_CACHE_HIT_PRICING`, and `KNOWN_DEPRECATIONS` in `model_registry.py` hold corrected official pricing. All `moonshot-v1-*` models removed.
 
-### Tools (`mullet/core/tools/`) — 25 tools across 15 toolsets
+### Tools (`mullet/core/tools/`) — 24 tools
 
-See `README.md` "Agent Tools" for the full list. Highlights:
+See `README.md` "Tools (24 built-in)" for the full list. Highlights:
 
 | Toolset | Tools |
 |---|---|
@@ -89,13 +89,13 @@ See `README.md` "Agent Tools" for the full list. Highlights:
 
 ### Knowledge — Trawl (`mullet/knowledge/` + `mullet/server/mcp_knowledge.py`)
 
-Trawl knowledge engine. 41 MCP tools covering pools, search, graphs, ingest, sources, memory, workflows, agents, prompts. Pool directory layout: `config.yaml` + `index/` (ChromaDB + graph) + `documents/` + `.pool_metadata.json` (usage tracking).
+Trawl knowledge engine. Over 40 MCP tools covering pools, search, graphs, ingest, sources, memory, workflows, agents, prompts. Pool directory layout: `config.yaml` + `index/` (ChromaDB + graph) + `documents/` + `.pool_metadata.json` (usage tracking).
 
 - **engine/** — vendored knowledge engine: client/searcher/indexer/splitter/reranker/query_transform/extract.
 - **engine/pool_metadata.py** — per-pool `.pool_metadata.json`: `created_at`, `last_indexed_at`, `last_searched_at`, `search_count`. Atomic writes, best-effort failure mode.
 - **graph/extractor.py** — LLM-based entity/relationship extraction. Circuit breaker + garbage-response detection (SPECIAL_* spam, low token diversity) to bail early on broken models.
 - **graph/store.py** — SQLite + NetworkX backed graph. Tracks `processed_chunk_ids` for incremental extraction.
-- **predigest.py** — Local LLM pre-processes heavy content → stores summary → cloud reasons over it.
+- **`mullet/core/knowledge/predigest.py`** — Local LLM pre-processes heavy content → stores summary → cloud reasons over it.
 
 ### Orchestration (`mullet/core/orchestration/`)
 - **ultrawork** — Decompose → parallel children → merge results.
@@ -107,7 +107,7 @@ Trawl knowledge engine. 41 MCP tools covering pools, search, graphs, ingest, sou
 - **eco** — Downtier modifier (CRITICAL→ADVANCED→STANDARD→LOCAL). Tier names: LOCAL (<30) / STANDARD (30-75) / ADVANCED (76-89) / CRITICAL (90+).
 - **swarm** — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
 
-### Skills (`mullet/core/skills/`) — 7 built-in
+### Skills (`mullet/core/skills/`) — 10 built-in
 - **loader.py** — Discovers SKILL.md files across builtin/user/project scopes.
 - **registry.py** — Trigger matching (slash commands + keywords + learned).
 - **invoker.py** — Pipeline context, requirements, handoff artifacts.
@@ -117,7 +117,7 @@ Trawl knowledge engine. 41 MCP tools covering pools, search, graphs, ingest, sou
 - **app.py** — aiohttp with CORS, auth, rate limiting, error handling, graceful shutdown.
 - **api.py** — REST: /health, /v1/chat/completions (SSE), /api/v1/projects, search, memory.
 - **websocket.py** — Real-time task execution with full tool parity.
-- **mcp.py** + **mcp_handlers.py** — 10 mullet_* MCP tools + 41 trawl_* knowledge tools for Claude Code integration.
+- **mcp.py** + **mcp_handlers.py** — 10 mullet_* MCP tools + over 40 trawl_* knowledge tools for Claude Code integration.
 - **admin.py** — User/project/access/usage CRUD.
 - **auth.py** — PAT generation, verification, 0600 permissions.
 - **db.py** — SQLite schema (6 tables), solo bootstrap.
@@ -134,7 +134,7 @@ Trawl knowledge engine. 41 MCP tools covering pools, search, graphs, ingest, sou
 
 > **Removed 2026-07.** The harness layer and its interactive TUI (`mullet shell`, `mullet cli`, `mullet web`, `mullet acp`, etc.) have been deleted from the codebase.
 >
-> Mullet is now **MCP-server-first**. The core runtime is consumed through the MCP layer rather than a standalone interactive shell. The harness code is preserved in git history for reference.
+> Mullet is now **MCP-server-first**. The core runtime is mostly consumed through the MCP layer; bare `mullet` still starts a small REPL (`mullet/cli/repl.py`). The harness code is preserved in git history for reference.
 
 ## CLI Surface
 
@@ -169,7 +169,7 @@ Live subcommands:
 
 `mullet/server/` exposes two protocol surfaces:
 
-- **mcp.py** + **mcp_handlers.py** + **mcp_knowledge.py** — stdio MCP server. 10 `mullet_*` orchestration tools (run, delegate, opencode, swarm, etc.) and 41 `trawl_*` knowledge tools (pools, search, graphs, ingest, etc.) for Claude Code and other MCP clients.
+- **mcp.py** + **mcp_handlers.py** + **mcp_knowledge.py** — stdio MCP server. 10 `mullet_*` orchestration tools (run, delegate, opencode, swarm, etc.) and over 40 `trawl_*` knowledge tools (pools, search, graphs, ingest, etc.) for Claude Code and other MCP clients.
 - **app.py** + **api.py** + **websocket.py** — OpenAI-compatible REST + WebSocket API (`mullet serve`). SSE streaming, CORS, auth, rate limiting.
 
 ## Data Flow
@@ -186,10 +186,10 @@ Live subcommands:
 ```
 
 ### Agent Enhancements
-- **prompt_cache.py** — Anthropic prompt caching (~75% cost savings).
+- **prompt_cache.py** (`mullet/core/providers/`) — Anthropic prompt caching (~75% cost savings).
 - **reasoning.py** — Thinking block extraction (DeepSeek-R1, Claude, QwQ).
 - **redact.py** — Secret redaction (20+ API key patterns, DB connstrings).
-- **verification.py** — Standardized BUILD/TEST/LINT checks for orchestration.
+- **verification.py** (`mullet/core/orchestration/`) — Standardized BUILD/TEST/LINT checks for orchestration.
 
 ## Dependencies
 

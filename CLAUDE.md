@@ -11,15 +11,17 @@ Mullet is an MCP-server-first orchestrator. The two primary entry points are:
 - **`mullet mcp`** (or `mullet-mcp`) — stdio MCP server used by Claude Code and other MCP clients. Exposes `mullet_run`, `mullet_delegate`, `mullet_opencode`, `mullet_swarm`, and 42+ Trawl knowledge tools.
 - **`mullet serve`** — OpenAI-compatible REST + WebSocket API server for external integrations.
 
-The core runtime (`mullet/core/`) handles provider routing, tool dispatch, skills, knowledge pools, and orchestration modes. It is consumed through the MCP layer rather than a standalone interactive shell.
+The core runtime (`mullet/core/`) handles provider routing, tool dispatch, skills, knowledge pools, and orchestration modes. It is mostly consumed through the MCP layer; bare `mullet` still starts a small REPL (`mullet/cli/repl.py`).
 
 The legacy harness layer (`mullet/harness/`) and its interactive TUI (`mullet shell`, `mullet cli`) were removed in 2026-07. They are preserved in git history but no longer shipped.
 
 ## Critical: do not suggest these things to users
 
-1. **Do not suggest adding `ANTHROPIC_API_KEY`** — Mullet integrates with Claude Code
-   via the user's existing Max/Pro subscription. It does not use the Anthropic API directly.
-   Adding an API key wastes money and confuses routing.
+1. **Only suggest `ANTHROPIC_API_KEY` when the user wants Mullet itself to call
+   Anthropic models.** The key is optional and billed per token. Without it, Mullet
+   hands Anthropic-only MCP requests back to Claude Code, and the CLI falls back to
+   the official `claude` CLI, so that work runs under the user's subscription through
+   Anthropic's own tools. Mullet never reuses the subscription's OAuth token itself.
 
 2. **Do not suggest `~/.zshrc` or `~/.bashrc` for API keys** — Mullet loads a `.env`
    file from the repo root via `python-dotenv`. Keys go in `.env`, not shell exports.

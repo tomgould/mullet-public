@@ -1,14 +1,14 @@
 """Tests for mullet.cli.update_checker."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 
 from mullet.cli.update_checker import (
     _version_gt,
     check_for_update,
+    VERSION_URL,
     get_installed_version,
-    get_latest_pypi_version,
+    get_latest_version,
     maybe_print_update_notice,
 )
 
@@ -31,40 +31,56 @@ def test_version_gt_equal():
     assert _version_gt("1.7.1", "1.7.1") is False
 
 
-def test_get_latest_pypi_success():
-    payload = json.dumps({"info": {"version": "1.8.0"}}).encode()
+def _mock_response(body: bytes) -> MagicMock:
     mock_resp = MagicMock()
-    mock_resp.read.return_value = payload
+    mock_resp.read.return_value = body
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
 
-    with patch("urllib.request.urlopen", return_value=mock_resp):
-        result = get_latest_pypi_version()
+
+def test_get_latest_version_success():
+    body = b'"""Mullet."""\n\n__version__ = "1.8.0"\n'
+
+    with patch("urllib.request.urlopen", return_value=_mock_response(body)) as mock_open:
+        result = get_latest_version()
 
     assert result == "1.8.0"
+    assert mock_open.call_args[0][0] == VERSION_URL
 
 
-def test_get_latest_pypi_network_error():
+def test_version_url_is_the_public_github_repo_not_pypi():
+    assert VERSION_URL.startswith("https://raw.githubusercontent.com/tomgould/mullet-public/")
+    assert "pypi" not in VERSION_URL
+
+
+def test_get_latest_version_no_version_line():
+    with patch("urllib.request.urlopen", return_value=_mock_response(b"no version here")):
+        assert get_latest_version() is None
+
+
+def test_get_latest_version_network_error():
     from urllib.error import URLError
 
     with patch("urllib.request.urlopen", side_effect=URLError("timeout")):
-        result = get_latest_pypi_version()
+        result = get_latest_version()
 
     assert result is None
 
 
 def test_check_for_update_available():
-    with patch("mullet.cli.update_checker.get_latest_pypi_version", return_value="99.0.0"):
+    with patch("mullet.cli.update_checker.get_latest_version", return_value="99.0.0"):
         result = check_for_update()
 
     assert result["update_available"] is True
     assert result["latest"] == "99.0.0"
     assert "99.0.0" in result["message"]
-    assert "pip install -U mullet" in result["message"]
+    assert "git pull" in result["message"]
+    assert "pip install -U mullet" not in result["message"]
 
 
 def test_check_for_update_uptodate():
-    with patch("mullet.cli.update_checker.get_latest_pypi_version", return_value="0.0.1"):
+    with patch("mullet.cli.update_checker.get_latest_version", return_value="0.0.1"):
         result = check_for_update()
 
     assert result["update_available"] is False
@@ -87,12 +103,12 @@ def test_version_gt_import_error_fallback():
         assert _version_gt("1.0.0", "1.0.0") is False
 
 
-def test_check_for_update_pypi_fails():
-    with patch("mullet.cli.update_checker.get_latest_pypi_version", return_value=None):
+def test_check_for_update_github_fails():
+    with patch("mullet.cli.update_checker.get_latest_version", return_value=None):
         result = check_for_update()
     assert result["latest"] is None
     assert result["update_available"] is False
-    assert "PyPI check failed" in result["message"]
+    assert "check failed" in result["message"]
 
 
 def test_maybe_print_update_notice_prints_when_update_available(capsys):
@@ -118,3 +134,13 @@ def test_maybe_print_update_notice_silent_on_error(capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
+
+
+def test_install_help_points_at_github_not_pypi(capsys, monkeypatch):
+    from mullet.cli import main as cli_main
+
+    monkeypatch.setattr("sys.argv", ["mullet", "--install-help"])
+    cli_main._main_inner()
+    out = capsys.readouterr().out
+    assert "git clone https://github.com/tomgould/mullet-public.git" in out
+    assert "pip install mullet" not in out

@@ -129,7 +129,7 @@ If unsure, err toward the more ceremonious mode. Escalating mid-cycle is fine; d
   - Did peer review add value or just re-state the tests?
   - Token cost: how many delegate calls, roughly how many tokens, any runaway?
 - **Output:** if there's an actionable process improvement, add a line to `docs/PROCESS_IMPROVEMENTS.md`. That file aggregates learnings across cycles — read it at the start of every new overnight loop.
-- **Session-end:** run the `/session-review` skill (or `python3 scripts/session_review.py --apply`). It measures adherence against `docs/DESIGN_PRINCIPLES.md`, applies improvements via `mullet_opencode` (local LLM first), and evolves the principles document. This is how design principles improve over time — retros feed directly back into the principles doc.
+- **Session-end:** run the `/session-review` skill (or `python3 scripts/session_review.py --apply`). It measures adherence against `docs/DESIGN_PRINCIPLES.md` (if the project has one) and prints a numbered list of improvements; `--apply` doesn't change anything itself, so apply them by hand or with `mullet_opencode`. This is how design principles improve over time — retros feed directly back into the principles doc.
 - Pick next task. Back to 4.1.
 
 ---
@@ -230,7 +230,6 @@ When `TODO.md` and `ROADMAP.md` are both empty:
 - No self-review on the same rung.
 - No prompts dispatched to models that will blow their context window.
 - Conventional Commits only.
-- No Co-Authored-By lines (project convention).
 
 ---
 

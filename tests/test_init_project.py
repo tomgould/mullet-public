@@ -1,6 +1,8 @@
 """Tests for `mullet init` project scaffolding."""
 
 import argparse
+import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -119,6 +121,32 @@ def test_init_installs_hook(mock_pool, tmp_path, mock_args):
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")
+def test_init_copies_hook_with_its_gate_module(mock_pool, tmp_path, mock_args):
+    """delegation_reminder.py imports _delegation_gate from its own folder."""
+    run_init(mock_args)
+    hooks = tmp_path / ".claude" / "hooks"
+    assert (hooks / "_delegation_gate.py").exists()
+    result = subprocess.run(
+        [sys.executable, str(hooks / "delegation_reminder.py")],
+        input=json.dumps({"prompt": "hello"}), capture_output=True, text=True,
+        cwd=tmp_path, timeout=60,
+    )
+    assert "ModuleNotFoundError" not in result.stderr
+    assert result.returncode == 0
+
+
+def test_update_copies_hook_with_its_gate_module(tmp_path):
+    args = argparse.Namespace(
+        target_dir=str(tmp_path), dry_run=False, no_claude=False,
+        remaining=["update", str(tmp_path)],
+    )
+    run_update(args)
+    hooks = tmp_path / ".claude" / "hooks"
+    assert (hooks / "delegation_reminder.py").exists()
+    assert (hooks / "_delegation_gate.py").exists()
+
+
+@patch("mullet.cli.create_pool.create_pool_silent")
 def test_init_seeds_memory(mock_pool, tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -144,13 +172,15 @@ def test_init_seeds_memory(mock_pool, tmp_path, monkeypatch):
     assert mem_dir.exists()
     assert (mem_dir / "MEMORY.md").exists()
     for fname in (
-        "feedback_coauthored_by.md",
         "feedback_prefer_concurrent.md",
         "feedback_measure_before_delegate.md",
         "feedback_opencode_for_edits.md",
         "feedback_test_writing_delegation.md",
     ):
         assert (mem_dir / fname).exists(), f"missing {fname}"
+    # No personal commit-trailer preference is written into the user's project.
+    assert not (mem_dir / "feedback_coauthored_by.md").exists()
+    assert "Co-Authored-By" not in (mem_dir / "MEMORY.md").read_text()
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")
@@ -335,11 +365,11 @@ def test_init_memory_file_exists(mock_pool, tmp_path, mock_args, capsys, monkeyp
     encoded = "-" + str(tmp_path).replace("/", "-")
     mem_dir = home / ".claude" / "projects" / encoded / "memory"
     mem_dir.mkdir(parents=True, exist_ok=True)
-    (mem_dir / "feedback_coauthored_by.md").write_text("existing")
+    (mem_dir / "feedback_prefer_concurrent.md").write_text("existing")
 
     run_init(mock_args)
     captured = capsys.readouterr()
-    assert "Memory file feedback_coauthored_by.md exists, skipping" in captured.out
+    assert "Memory file feedback_prefer_concurrent.md exists, skipping" in captured.out
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")
@@ -360,7 +390,7 @@ def test_init_memory_template_not_found(mock_pool, tmp_path, mock_args, capsys, 
     monkeypatch.setattr(Path, "exists", fake_exists)
     run_init(mock_args)
     captured = capsys.readouterr()
-    assert "Memory template feedback_coauthored_by.md not found, skipping" in captured.out
+    assert "Memory template feedback_prefer_concurrent.md not found, skipping" in captured.out
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")

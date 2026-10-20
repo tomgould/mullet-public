@@ -1,6 +1,9 @@
 """License key validation for enterprise mode.
 
-BSL 1.1: solo use unrestricted, production multi-tenant requires license.
+Business Source License 1.1: production use is free for one individual
+developer on one running instance (the Additional Use Grant in LICENSE); any
+other production use, including providing Mullet to others as a service,
+needs a commercial licence.
 License keys are signed JWTs validated offline using an embedded public key.
 """
 

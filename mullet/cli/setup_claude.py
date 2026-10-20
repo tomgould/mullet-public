@@ -415,7 +415,7 @@ After writing the config:
 2. Run `git log --oneline -5` to match commit style
 3. Draft commit message: imperative mood, under 72 chars, focus on "why" not "what"
 4. Stage files by name only — NEVER `git add -A` or `git add .`
-5. Commit using HEREDOC — never append Co-Authored-By or attribution lines
+5. Commit using a HEREDOC so the message keeps its formatting; follow the repository's own conventions for trailers
 6. Run `git status` after to verify
 7. Do NOT push unless user explicitly asks
 

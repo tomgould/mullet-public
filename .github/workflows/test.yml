@@ -2,9 +2,12 @@ name: Test
 
 on:
   push:
-    branches: [master, feat/*]
+    branches: [main, master]
   pull_request:
-    branches: [master, feat/*]
+    branches: [main, master]
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -17,5 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
-      - run: python -m pytest tests/ -q --tb=short -k "not delegation_safety_d2"
+      # The CPU build of PyTorch is enough for the tests and far smaller than
+      # the CUDA build that sentence-transformers would otherwise pull in.
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[dev]" pytest-xdist
+      - run: python -m pytest tests/ -n auto -q --tb=short -k "not delegation_safety_d2"
