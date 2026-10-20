@@ -69,6 +69,37 @@ def _memory_dir(target_dir: Path) -> Path:
     return Path.home() / ".claude" / "projects" / encoded / "memory"
 
 
+# Seeded only when MULLET_NO_AI_ATTRIBUTION is on: a personal commit-trailer
+# preference, not something every project should inherit.
+_NO_AI_ATTRIBUTION_MEMORY = "feedback_coauthored_by.md"
+_NO_AI_ATTRIBUTION_INDEX_LINE = (
+    "- [No Co-Authored-By in commits](feedback_coauthored_by.md)"
+    " — Never append Co-Authored-By to git commits"
+)
+
+
+def _memory_files() -> list[str]:
+    from mullet.core.env import no_ai_attribution
+
+    files = list(_MEMORY_FILES)
+    if no_ai_attribution():
+        files.insert(0, _NO_AI_ATTRIBUTION_MEMORY)
+    return files
+
+
+def _memory_index_text(template: Path) -> str:
+    """MEMORY.md for a new project, listing the opt-in note when it's seeded."""
+    from mullet.core.env import no_ai_attribution
+
+    text = template.read_text(encoding="utf-8")
+    if no_ai_attribution() and _NO_AI_ATTRIBUTION_MEMORY not in text:
+        head, sep, rest = text.partition("\n\n")
+        text = f"{head}{sep}{_NO_AI_ATTRIBUTION_INDEX_LINE}\n{rest}" if sep else (
+            text.rstrip("\n") + "\n" + _NO_AI_ATTRIBUTION_INDEX_LINE + "\n"
+        )
+    return text
+
+
 def _flag_from_remaining(remaining: list[str] | None, flag: str) -> bool:
     return bool(remaining and flag in remaining)
 
@@ -285,7 +316,7 @@ def run_init(args: argparse.Namespace) -> None:
         else:
             mem_dir.mkdir(parents=True, exist_ok=True)
 
-            for fname in _MEMORY_FILES:
+            for fname in _memory_files():
                 src = _TEMPLATES_ROOT / "memory" / fname
                 dst = mem_dir / fname
                 if dst.exists():
@@ -301,7 +332,7 @@ def run_init(args: argparse.Namespace) -> None:
             if not memory_index.exists():
                 src = _TEMPLATES_ROOT / "memory" / "MEMORY.md"
                 if src.exists():
-                    shutil.copy2(src, memory_index)
+                    memory_index.write_text(_memory_index_text(src), encoding="utf-8")
                     _log("✓ Seeded memory: MEMORY.md")
             else:
                 _log("⚠ MEMORY.md exists, skipping")

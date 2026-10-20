@@ -251,6 +251,13 @@ class WebSocketHandler:
                 """Queue a tool result event for async streaming."""
                 token_queue.put_nowait(("tool_result", name, preview))
 
+            from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
+            if not delegation_enabled():
+                await ws.send_json({"type": "task_error", "data": {
+                    "task_id": task_id, "error": DELEGATION_OFF_MESSAGE,
+                }})
+                return
+
             agent, provider = _build_server_agent(
                 prompt, opts,
                 on_token=on_token,

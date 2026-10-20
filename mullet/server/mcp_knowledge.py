@@ -263,6 +263,9 @@ def _load_pool(pool_name: str) -> tuple:
         code_priority_boost=client.search_config.get("code_priority_boost", 0.5),
         cross_reference_code=client.search_config.get("cross_reference_code", False),
         cross_reference_top_k=client.search_config.get("cross_reference_top_k", 3),
+        recency_boost=client.search_config.get("recency_boost", 0.0),
+        recency_half_life_days=client.search_config.get("recency_half_life_days", 180),
+        prioritize_data=client.search_config.get("prioritize_data", True),
         reranker_backend=client.search_config.get("reranker", "local"),
         reranker_endpoint=client.search_config.get("reranker_endpoint"),
         bm25_k1=client.search_config.get("bm25_k1", 1.5),
@@ -305,6 +308,10 @@ def _format_results(results: list[dict], max_results: int = 20, include_content:
         if source_client:
             result_lines.append(f"**Client:** {source_client}")
         result_lines.append(f"**Source:** {source}")
+        if metadata.get("source_url"):
+            result_lines.append(f"**URL:** {metadata['source_url']}")
+        if metadata.get("published_at"):
+            result_lines.append(f"**Published:** {metadata['published_at']}")
         result_lines.append(f"**Score:** {score:.3f}")
         result_lines.append(f"**Type:** {chunk_type}")
 
@@ -427,6 +434,24 @@ MCP_KNOWLEDGE_TOOLS = [
                 "top_k": {"type": "integer", "description": "Number of results (default: 20)"},
             },
             "required": ["pool_name", "query"],
+        },
+    },
+    {
+        "name": "trawl_recent",
+        "description": (
+            "List a pool's documents newest first, by the best date known for each: "
+            "a page's own published date, a PDF's creation date, when the web crawler "
+            "first saw it, or when its text last changed. Use this, not search, for "
+            "'what's new' / 'recent news' questions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pool_name": {"type": "string", "description": "Pool to list"},
+                "limit": {"type": "integer", "description": "Number of documents (default: 20, max: 100)"},
+                "since": {"type": "string", "description": "Only documents dated on or after this ISO date, e.g. 2026-09-01"},
+            },
+            "required": ["pool_name"],
         },
     },
     {
@@ -1100,6 +1125,78 @@ def handle_search_pool(args: dict) -> str:
     """Search a specific Trawl pool (alias for handle_search)."""
     args["pool_name"] = args.get("pool_name", "")
     return handle_search(args)
+
+
+_RECENCY_LABELS = {
+    "published": "published",
+    "pdf_created": "PDF created",
+    "first_seen": "first seen by crawler",
+    "updated": "page updated",
+}
+
+
+def _recent_documents(collection, since_ts: int | None) -> list[dict]:
+    """One metadata dict per dated document, newest first."""
+    metadatas: list = []
+    # published_ts covers indexes built before recency_ts existed
+    for key in ("recency_ts", "published_ts"):
+        where = {key: {"$gte": since_ts}} if since_ts is not None else {key: {"$gt": 0}}
+        metadatas = collection.get(where=where, include=["metadatas"]).get("metadatas") or []
+        if metadatas:
+            break
+    docs: dict[str, dict] = {}
+    for meta in metadatas:
+        key = meta.get("source_path") or meta.get("source_file")
+        if key and key not in docs:
+            docs[key] = meta
+    return sorted(
+        docs.values(),
+        key=lambda m: m.get("recency_ts", m.get("published_ts", 0)),
+        reverse=True,
+    )
+
+
+def handle_recent(args: dict) -> str:
+    """List a pool's documents newest first by their best-known date."""
+    from datetime import datetime, timezone
+
+    pool_name = _resolve_pool_name(args)
+    if not pool_name:
+        return "Error: No pool specified."
+    limit = max(1, min(int(args.get("limit", 20)), 100))
+    since_ts = None
+    if args.get("since"):
+        try:
+            since = datetime.fromisoformat(str(args["since"]).replace("Z", "+00:00"))
+        except ValueError:
+            return "Error: since must be an ISO date, e.g. 2026-09-01."
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        since_ts = int(since.timestamp())
+
+    try:
+        _client, searcher = _load_pool(pool_name)
+        docs = _recent_documents(searcher.collection, since_ts)
+    except Exception as e:
+        return f"Recent documents error: {e}"
+    if not docs:
+        return (
+            f"No dated documents in **{pool_name}**"
+            + (f" since {args['since']}." if since_ts is not None else ".")
+            + " Dates come from published dates, PDF metadata and the web crawler; "
+            "reindex the pool if it was built before these were recorded."
+        )
+
+    lines = [f"Newest documents in **{pool_name}** ({len(docs)} dated):\n"]
+    for i, meta in enumerate(docs[:limit], 1):
+        ts = meta.get("recency_ts", meta.get("published_ts"))
+        day = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
+        source = _RECENCY_LABELS.get(meta.get("recency_source", "published"), "dated")
+        name = meta.get("doc_title") or Path(meta.get("source_file", "")).name
+        lines.append(f"{i}. {day} | {source} | {name}")
+        if meta.get("source_url"):
+            lines.append(f"   {meta['source_url']}")
+    return "\n".join(lines)
 
 
 def handle_search_code(args: dict) -> str:
@@ -2808,6 +2905,7 @@ MCP_KNOWLEDGE_HANDLERS = {
     "trawl_pool_delete": handle_delete_pool,
     "trawl_search": handle_search,
     "trawl_search_pool": handle_search_pool,
+    "trawl_recent": handle_recent,
     "trawl_search_code": handle_search_code,
     "trawl_search_multi": handle_search_multi,
     "trawl_find_symbol": handle_find_symbol,

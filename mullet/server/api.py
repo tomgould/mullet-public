@@ -92,6 +92,10 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     except json.JSONDecodeError:
         return web.json_response({"error": "Invalid JSON"}, status=400)
 
+    from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
+    if not delegation_enabled():
+        return web.json_response({"error": DELEGATION_OFF_MESSAGE, "delegation": "off"}, status=503)
+
     messages = body.get("messages", [])
     stream = body.get("stream", False)
     mullet_opts = body.get("mullet", {})

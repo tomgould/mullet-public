@@ -74,6 +74,8 @@ def run_autopilot_init(argv: list[str], cwd: Path | None = None) -> int:
             skipped.append(dest)
             continue
         content = _load_template(template, name)
+        if name == "standards.md":
+            content = _with_commit_rules(content)
         dest.write_text(content, encoding="utf-8")
         created.append(dest)
 
@@ -93,6 +95,24 @@ def run_autopilot_init(argv: list[str], cwd: Path | None = None) -> int:
         print(f"  2. Edit {target.relative_to(cwd)}/plans.md — flesh out milestones/tasks")
         print( "  3. Run:  mullet autopilot --require-goal \"<your task>\"")
     return 0
+
+
+_NO_AI_ATTRIBUTION_RULE = "- No `Co-Authored-By` or other AI attribution trailers in commits."
+
+
+def _with_commit_rules(standards: str) -> str:
+    """Add the no-attribution rule to standards.md when MULLET_NO_AI_ATTRIBUTION is on."""
+    from mullet.core.env import no_ai_attribution
+
+    if not no_ai_attribution() or "Co-Authored-By" in standards:
+        return standards
+    if "## Git" in standards:
+        head, _, tail = standards.partition("## Git")
+        # Append to the end of the Git section (up to the next heading).
+        section, sep, rest = tail.partition("\n## ")
+        section = section.rstrip("\n") + "\n" + _NO_AI_ATTRIBUTION_RULE + "\n"
+        return head + "## Git" + section + (("\n## " + rest) if sep else "")
+    return standards.rstrip("\n") + "\n\n## Git\n" + _NO_AI_ATTRIBUTION_RULE + "\n"
 
 
 def _load_template(template: str, filename: str) -> str:

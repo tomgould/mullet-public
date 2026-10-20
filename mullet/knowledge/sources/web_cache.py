@@ -91,15 +91,77 @@ class CrawlCache:
         headers: dict,
         content: str,
         links: list[str] | None = None,
+        text_hash: str | None = None,
+        changed: bool = False,
     ) -> None:
-        """Store cache entry for a page using response headers + content hash."""
-        self._data["pages"][url_path] = {
+        """Store cache entry for a page using response headers + content hash.
+
+        ``text_hash`` fingerprints the converted page text, which stays stable
+        when the raw HTML only differs by per-request noise (script nonces).
+        ``changed`` records now as the time that text last changed.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        entry = {
             "etag": _get_header(headers, "etag"),
             "last_modified": _get_header(headers, "last-modified"),
             "content_hash": f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
             "links": links or [],
+            "timestamp": now,
+        }
+        entry.update(self._tracking(url_path))
+        if text_hash is not None:
+            entry["text_hash"] = text_hash
+        if changed:
+            entry["changed_at"] = now
+        self._data["pages"][url_path] = entry
+
+    def update_file(self, url_path: str, headers: dict, filename: str) -> None:
+        """Record a downloaded document so later crawls can skip re-fetching it."""
+        entry = {
+            "etag": _get_header(headers, "etag"),
+            "last_modified": _get_header(headers, "last-modified"),
+            "file": filename,
+            "links": [],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        entry.update(self._tracking(url_path))
+        self._data["pages"][url_path] = entry
+
+    def _tracking(self, url_path: str) -> dict:
+        """Fields that survive an entry being rewritten: first-seen and change history."""
+        prev = self._data["pages"].get(url_path) or {}
+        return {k: prev[k] for k in ("first_seen", "baseline", "text_hash", "changed_at") if k in prev}
+
+    def mark_seen(self, url_path: str, new_is_baseline: bool) -> dict:
+        """Record when a URL was first seen, and return its entry.
+
+        A URL is a *baseline* entry — present before first-seen tracking began,
+        so its first-seen date says nothing about when it appeared on the site —
+        if it was already cached without tracking, or if ``new_is_baseline``
+        (set for every URL on a pool's very first crawl).
+        """
+        pages = self._data["pages"]
+        existed = bool(pages.get(url_path))
+        entry = pages.setdefault(url_path, {})
+        if "first_seen" not in entry:
+            entry["first_seen"] = datetime.now(timezone.utc).isoformat()
+            entry["baseline"] = existed or new_is_baseline
+        return entry
+
+    def get_entry(self, url_path: str) -> dict:
+        """Return the cache entry for a URL path (empty dict if none)."""
+        return self._data["pages"].get(url_path) or {}
+
+    def file_entries(self) -> dict[str, dict]:
+        """Return url_path -> entry for every downloaded document."""
+        return {p: e for p, e in self._data["pages"].items() if e.get("file")}
+
+    def get_file(self, url_path: str) -> str:
+        """Return the saved filename for a downloaded document, or empty string."""
+        entry = self._data["pages"].get(url_path)
+        if not entry:
+            return ""
+        return entry.get("file", "")
 
     def get_page_links(self, url_path: str) -> list[str]:
         """Return cached links for a page, or empty list."""

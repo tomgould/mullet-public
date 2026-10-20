@@ -14,6 +14,8 @@ one place.
 
 from __future__ import annotations
 
+import os
+
 # Suggest delegation only once the paced 5-hour pressure is this high. Pressure
 # is paced against the reset window rather than raw utilisation, so 0.80 means
 # "spending fast enough to exhaust the window early", not simply "80% used".
@@ -35,6 +37,21 @@ CONFIRM_LINE = (
     "explicit go-ahead. Delegation spends third-party tokens, which is real money, so an "
     "unasked-for delegation is a wasted spend."
 )
+
+
+def delegation_turned_off() -> bool:
+    """True when MULLET_DELEGATION=off, in the environment or Mullet's .env.
+
+    With delegation off, the MCP tools refuse to dispatch, so the hooks must
+    not suggest delegating (or block manual work until Claude delegates).
+    """
+    try:
+        from mullet.core.env import delegation_enabled
+
+        return not delegation_enabled()
+    except Exception:
+        value = os.environ.get("MULLET_DELEGATION", "").strip().lower()
+        return value in {"0", "off", "false", "no", "disabled"}
 
 
 def pressure_snapshot() -> dict | None:
@@ -67,7 +84,10 @@ def delegation_warranted(snapshot: dict | None = None) -> tuple[bool, str]:
 
     Fails closed: if the figures can't be read, the answer is no. Staying quiet
     costs nothing, whereas nudging toward a paid provider on a bad guess does.
+    Always no while delegation is turned off (MULLET_DELEGATION=off).
     """
+    if delegation_turned_off():
+        return False, "delegation is turned off (MULLET_DELEGATION=off)"
     snap = pressure_snapshot() if snapshot is None else snapshot
     if snap is None:
         return False, "budget figures unavailable"

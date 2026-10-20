@@ -77,6 +77,10 @@ DEFAULT_CONFIG = {
         "code_priority_boost": 0.5,  # Score boost for code chunks when code_priority=True
         "cross_reference_code": False,  # Auto-fetch related code when docs are found
         "cross_reference_top_k": 3,  # Number of related code chunks to fetch per doc
+        # Recency boost (news pools) — needs `published` dates from the web crawler
+        "recency_boost": 0.0,  # Max rerank-score bonus for a just-published page (0 = disabled)
+        "recency_half_life_days": 180,  # Days for the recency bonus to halve
+        "prioritize_data": True,  # Move list/table/spreadsheet chunks ahead of prose after ranking
         # Reranker backend
         "reranker": "local",  # "local" or "api"
         "reranker_model": None,  # None = use default cross-encoder
@@ -165,6 +169,7 @@ _KNOWN_SEARCH_KEYS = {
     "adaptive_rerank_depth", "merge_strategy", "rrf_k", "mmr_lambda",
     "code_priority", "code_priority_boost", "cross_reference_code",
     "cross_reference_top_k",
+    "recency_boost", "recency_half_life_days", "prioritize_data",
     "reranker", "reranker_model", "reranker_endpoint",
     "bm25_k1", "bm25_b",
     "score_normalization",

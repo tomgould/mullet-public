@@ -91,6 +91,12 @@ GOOGLE_API_KEY=AIza...        # Optional — cheap fallback
 > **Minimum viable setup:** `KIMI_API_KEY` alone is enough to get started.
 > Alternatively, a local LLM running in LM Studio requires no key at all.
 
+> **Turning delegation off:** set `MULLET_DELEGATION=off` in `.env` and Mullet sends
+> no work to any model provider. `mullet_run`, `mullet_delegate`, `mullet_swarm`,
+> `mullet_opencode`, CLI task runs, the REPL and `mullet serve`'s chat endpoints then
+> reply that delegation is turned off. Trawl search, knowledge pools, status, budget
+> and the other read-only tools work as normal. Unset or `on` (the default) delegates.
+
 ---
 
 ## 4. Verify Setup

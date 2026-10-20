@@ -1536,9 +1536,11 @@ class ModelRegistry:
 
         if complexity == "LOW" and not prefer_reasoning:
             try:
+                from mullet.core.providers.model_availability import without_unavailable
                 from mullet.core.providers.value_picker import pick_by_value
                 free_pick = pick_by_value(
-                    OPENROUTER_FREE_TIER_CANDIDATES, complexity, context_needed, "coding",
+                    without_unavailable("openrouter", OPENROUTER_FREE_TIER_CANDIDATES),
+                    complexity, context_needed, "coding",
                     context_tokens=context_tokens, prefer_reasoning=False,
                 )
                 if free_pick is not None:
@@ -1560,10 +1562,11 @@ class ModelRegistry:
             # break routing, only improve it. The reasoning/CRITICAL override
             # above always wins first, so domain here is always "coding" and
             # prefer_reasoning is always False.
-            candidates = OPENROUTER_VALUE_PICK_CANDIDATES
             value_pick = None
             try:
+                from mullet.core.providers.model_availability import without_unavailable
                 from mullet.core.providers.value_picker import pick_by_value
+                candidates = without_unavailable("openrouter", OPENROUTER_VALUE_PICK_CANDIDATES)
                 value_pick = pick_by_value(
                     candidates, complexity, context_needed, "coding",
                     context_tokens=context_tokens, prefer_reasoning=False,

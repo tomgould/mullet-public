@@ -245,14 +245,6 @@ models:
     input_per_1k: 0.00022
     output_per_1k: 0.0018
     context_window: 1048576
-  qwen/qwen3-coder:free:
-    input_per_1k: 0
-    output_per_1k: 0
-    context_window: 1048576
-  tencent/hy3:free:
-    input_per_1k: 0
-    output_per_1k: 0
-    context_window: 262144
   deepseek/deepseek-chat:
     input_per_1k: 0.0002002
     output_per_1k: 0.0008001

@@ -245,9 +245,11 @@ def select_openrouter_model(
     # add a cheaper option at the bottom tier.
     if preflight.complexity_tier == Tier.LOW and not preflight.needs_reasoning:
         try:
+            from mullet.core.providers.model_availability import without_unavailable
             from mullet.core.providers.value_picker import pick_by_value
             free_pick = pick_by_value(
-                OPENROUTER_FREE_TIER_CANDIDATES, "LOW", preflight.input_tokens, "coding",
+                without_unavailable("openrouter", OPENROUTER_FREE_TIER_CANDIDATES),
+                "LOW", preflight.input_tokens, "coding",
                 context_tokens=preflight.input_tokens, prefer_reasoning=False,
             )
             if free_pick is not None:
@@ -274,8 +276,9 @@ def select_openrouter_model(
         and not (is_premium and preflight.complexity_tier in (Tier.CRITICAL, Tier.ADVANCED))
     ):
         try:
+            from mullet.core.providers.model_availability import without_unavailable
             from mullet.core.providers.value_picker import pick_by_value
-            candidates = OPENROUTER_VALUE_PICK_CANDIDATES
+            candidates = without_unavailable("openrouter", OPENROUTER_VALUE_PICK_CANDIDATES)
             tier = preflight.complexity_tier.value
             value_pick = pick_by_value(
                 candidates, tier, preflight.input_tokens, "coding",

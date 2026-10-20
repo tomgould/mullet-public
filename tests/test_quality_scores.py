@@ -94,8 +94,6 @@ def test_no_extra_entries_beyond_expected() -> None:
         "deepseek/deepseek-v4-flash",
         "qwen/qwen3.7-max",
         "qwen/qwen3-coder",
-        "qwen/qwen3-coder:free",
-        "tencent/hy3:free",
         "openai/gpt-5",
         "anthropic/claude-opus-4.8",
         "anthropic/claude-sonnet-5",

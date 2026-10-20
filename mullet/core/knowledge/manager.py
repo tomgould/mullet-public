@@ -239,6 +239,7 @@ class KnowledgeManager:
         "merge_strategy", "adaptive_rerank", "mmr_lambda",
         "code_priority", "hyde", "multi_query",
         "cache_ttl", "cache_max_size",
+        "recency_boost", "recency_half_life_days", "prioritize_data",
     }
 
 

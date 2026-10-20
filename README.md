@@ -139,7 +139,7 @@ delegation reminder (UserPromptSubmit), the provider/tier rewriter (PreToolUse o
 
 | Server | Detail |
 |:-------|:-------|
-| **MCP server** | Registers as Claude Code MCP server — 10 Mullet tools + 42 Trawl knowledge tools |
+| **MCP server** | Registers as Claude Code MCP server — 10 Mullet tools + 43 Trawl knowledge tools |
 | **API server** | OpenAI-compatible `/v1/chat/completions`, `/v1/models`, `/health`, `/metrics` via `mullet serve` |
 
 ### Polish
@@ -340,7 +340,7 @@ Code once `mullet setup-claude` has run.
 | `mullet_providers` | Live health check per provider | — |
 | `mullet_budget` | Token spend and budget limits | — |
 
-Plus **42 Trawl knowledge tools** covering pool management, graph search, and code indexing.
+Plus **43 Trawl knowledge tools** covering pool management, graph search, code indexing, and `trawl_recent` (a pool's documents newest first).
 
 ### Typical Claude Code Workflow
 
@@ -621,6 +621,19 @@ ln -sfn /data/mullet-pools ~/.mullet/pools
 
 Pool data is never tracked in the Mullet repo — `mullet/knowledge/pools/` is
 gitignored, and the runtime never reads from inside the source tree.
+
+### Website pools
+
+A pool can scrape a website on every `mullet reindex`. It does this through a
+`sources.web` entry in the pool's `config.yaml`, which supports:
+
+- seeding the crawl from the sitemap
+- downloading linked PDFs and Office documents for indexing
+- capturing each article's published date
+- an optional `search.recency_boost` that ranks recent news higher
+
+See [docs/REINDEX.md](docs/REINDEX.md#web-sources-crawled-websites) for the
+options.
 
 ---
 

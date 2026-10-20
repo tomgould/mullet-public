@@ -4,9 +4,11 @@ CLI script for document and code ingestion.
 """
 
 import argparse
+import fcntl
 import logging
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 # Prevent tokenizers fork warnings when using multiprocessing
@@ -922,12 +924,52 @@ def build_graph(client_name: str, rebuild: bool = False, reporter: "PhaseReporte
         print(f"\r  {client.name:<22} GRAPH DONE  {s.get('entity_count', 0)} entities  {s.get('relationship_count', 0)} rels                    ")
 
 
-def _reindex_one(name: str, args, quiet: bool = False) -> float:
-    """Reindex a single pool. Returns total elapsed seconds.
+@contextmanager
+def _pool_lock(name: str):
+    """Hold an exclusive per-pool lock; yields False if another process holds it.
+
+    Two reindexes writing one Chroma index at once (e.g. the nightly timer and
+    a manual ``--all``) can corrupt it or duplicate chunks.
+    """
+    lock_path = Path(TRAWL_POOLS_DIR) / name / ".reindex.lock"
+    if not lock_path.parent.is_dir():
+        yield True  # unknown pool: let the reindex report its usual error
+        return
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _reindex_one(name: str, args, quiet: bool = False, sync_sources: bool = False) -> float:
+    """Reindex a single pool under its per-pool lock. Returns total elapsed seconds.
 
     quiet=True disables PhaseReporter's live ``\\r`` output (used in parallel
     mode where multiple pools would otherwise fight over stdout).
+    sync_sources=True syncs the pool's external sources first (``--sync-sources``).
     """
+    with _pool_lock(name) as locked:
+        if not locked:
+            reporter = PhaseReporter(name, enabled=not quiet)
+            return reporter.fail("skipped: another reindex of this pool is running")
+        if sync_sources:
+            sync_client_sources(name)
+        return _reindex_one_locked(name, args, quiet)
+
+
+def _reindex_one_locked(name: str, args, quiet: bool = False) -> float:
+    """Reindex a single pool; the caller holds its lock. Returns elapsed seconds."""
     reporter = PhaseReporter(name, enabled=not quiet)
     reporter.phase("starting")
     include_code = not getattr(args, 'no_code', False)
@@ -1207,10 +1249,7 @@ def main():
             print(f"No index for {args.pool}")
         return
 
-    if args.sync_sources:
-        sync_client_sources(args.pool)
-
-    _reindex_one(args.pool, args)
+    _reindex_one(args.pool, args, sync_sources=args.sync_sources)
 
 
 if __name__ == "__main__":

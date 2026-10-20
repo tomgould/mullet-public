@@ -135,8 +135,8 @@ def test_handler_dispatch_has_all_tools():
 
 
 def test_tool_count():
-    assert len(mcp_knowledge.MCP_KNOWLEDGE_TOOLS) == 42
-    assert len(mcp_knowledge.MCP_KNOWLEDGE_HANDLERS) == 42
+    assert len(mcp_knowledge.MCP_KNOWLEDGE_TOOLS) == 43
+    assert len(mcp_knowledge.MCP_KNOWLEDGE_HANDLERS) == 43
 
 
 def test_build_local_provider_returns_generate_interface():

@@ -100,6 +100,20 @@ def _rlog(msg: str) -> None:
     print(f"\033[2m[mullet] {msg}\033[0m", file=sys.stderr, flush=True)
 
 
+def _delegation_off_reply() -> str | None:
+    """The refusal message when MULLET_DELEGATION=off, else None.
+
+    Checked first by every handler that sends work to a model provider
+    (mullet_run, mullet_delegate, mullet_swarm, mullet_opencode), before any
+    routing, so nothing reaches a provider while delegation is turned off.
+    Trawl, status, budget and the other read-only tools don't check it.
+    """
+    from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
+    if delegation_enabled():
+        return None
+    return DELEGATION_OFF_MESSAGE
+
+
 def _active_preset():
     """Return the active Preset, or None if unavailable (fail-open)."""
     try:
@@ -386,7 +400,11 @@ def _provider_for_tier(tier: str, allowed: set[str] | None = None, preflight=Non
             openrouter_model = get_registry().get_best_model(
                 "openrouter", tier, allowed_providers=allowed, preflight=preflight, speed_mode=speed_mode
             )
-            return OpenRouterProvider(api_key=openrouter_key, model=openrouter_model)
+            prov = OpenRouterProvider(api_key=openrouter_key, model=openrouter_model)
+            # Lets the provider pick a same-tier replacement if OpenRouter
+            # says this model is unavailable.
+            prov.routing_tier = tier
+            return prov
         except Exception as e:
             logger.warning("OpenRouter unavailable: %s", e)
             return None
@@ -642,6 +660,10 @@ def handle_mullet_run(arguments: dict) -> dict:
     other MCP handlers) can rely on ``isinstance(result, dict)`` without
     a ``json.loads()`` round-trip.
     """
+    _off = _delegation_off_reply()
+    if _off:
+        return {"completed": False, "error": _off, "delegation": "off"}
+
     import time as _rh_time
     from mullet.core.routing_history import make_outcome, record as rh_record
 
@@ -1004,6 +1026,10 @@ def _handle_mullet_run_inner(arguments: dict) -> dict:
 
 def handle_mullet_delegate(arguments: dict) -> str:
     """Delegate a subtask to a child agent."""
+    _off = _delegation_off_reply()
+    if _off:
+        return json.dumps({"error": _off, "delegation": "off"})
+
     from mullet.cli.main import build_tool_registry
     from mullet.core.agent.runner import AgentRunner
     from mullet.core.agent.delegation import delegate_task
@@ -1301,6 +1327,10 @@ def handle_mullet_analyze(arguments: dict) -> str:
 
 def handle_mullet_swarm(arguments: dict) -> str:
     """MCP handler for mullet_swarm tool."""
+    _off = _delegation_off_reply()
+    if _off:
+        return json.dumps({"error": _off, "delegation": "off"})
+
     import asyncio
     import uuid
     from mullet.core.orchestration.swarm import run_swarm
@@ -1494,6 +1524,10 @@ def handle_mullet_opencode(arguments: dict) -> dict:
     model if local can't actually handle the task). ADVANCED/CRITICAL always
     use cloud models — local models aren't trusted for complex tasks.
     """
+    _off = _delegation_off_reply()
+    if _off:
+        return {"completed": False, "error": _off, "delegation": "off"}
+
     import uuid
     from mullet.tools.opencode_tool import opencode_run, _resolve_configured_model
     from mullet.core.router.complexity import is_reasoning_task

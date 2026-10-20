@@ -1249,8 +1249,28 @@ def _maybe_preflight(task: str, args) -> None:
         logger.debug("preflight skipped: %s", _exc)
 
 
+def _delegation_refused(args=None) -> bool:
+    """Say so and return True when MULLET_DELEGATION=off.
+
+    Every CLI path that sends work to a model provider (task runs, review,
+    watch, the orchestration modes, the REPL, live-test) checks this before
+    building a provider, so nothing is dispatched while delegation is off.
+    """
+    from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
+    if delegation_enabled():
+        return False
+    if args is not None and getattr(args, "json_output", False):
+        import json as _json
+        print(_json.dumps({"success": False, "error": DELEGATION_OFF_MESSAGE, "delegation": "off"}))
+    else:
+        print(DELEGATION_OFF_MESSAGE, file=sys.stderr)
+    return True
+
+
 def run_task(task: str, args) -> int:
     """Run a single task and return exit code."""
+    if _delegation_refused(args):
+        return 2
     args._last_task = task  # Store for quality scoring
 
     _maybe_preflight(task, args)
@@ -1398,6 +1418,8 @@ def run_task(task: str, args) -> int:
 
 def run_mode(mode_name: str, task: str, args) -> int:
     """Run a task in an orchestration mode."""
+    if _delegation_refused(args):
+        return 2
     # Check for --resume: load saved state and inject context
     if getattr(args, "resume", False):
         from mullet.core.orchestration.state import ModeState
@@ -1802,6 +1824,8 @@ def _main_inner():
         return
 
     if command == "live-test":
+        if task not in ("--help", "-h", "help") and _delegation_refused(args):
+            sys.exit(2)
         from mullet.cli.live_test import run_cli as _run_live_test_cli
         sys.exit(_run_live_test_cli(task_parts))
 
@@ -2218,6 +2242,8 @@ def _main_inner():
         if not task:
             print("Usage: mullet watch \"your task here\"", file=sys.stderr)
             sys.exit(1)
+        if _delegation_refused(args):
+            sys.exit(2)
         from mullet.cli.watch import run_watch
         run_watch(task, args)
         return
@@ -2624,7 +2650,10 @@ def _main_inner():
             print("  sources:")
             print("    web:")
             print(f"      - url: {url}")
-            print("        max_depth: 3")
+            print("        max_pages: 500")
+            print("        sync_on_ingest: true      # re-crawl on every reindex")
+            print("        # use_sitemap: true       # seed from /sitemap.xml")
+            print("        # download_types: [pdf, docx]  # index linked documents")
         elif sub == "list":
             print("Sources are configured in config.yaml. Example:")
             print("  sources:")
@@ -2794,6 +2823,8 @@ def _main_inner():
         sys.exit(run_task(task, args))
 
     # No task — REPL mode
+    if _delegation_refused(args):
+        sys.exit(2)
     provider = resolve_provider(args, allowed_providers=_parse_providers_allowlist(args))
     if not provider:
         print("Mullet — Cloud in the front, Local GPU in the back.\n")

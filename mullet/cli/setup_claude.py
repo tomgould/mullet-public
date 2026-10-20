@@ -271,6 +271,17 @@ def _merge_claude_settings_hooks(dry_run: bool):
         return False
 
 
+# Step 5 of the /commit skill. With MULLET_NO_AI_ATTRIBUTION on, the personal
+# no-attribution rule replaces the neutral wording.
+_COMMIT_STEP_NEUTRAL = (
+    "Commit using a HEREDOC so the message keeps its formatting; "
+    "follow the repository's own conventions for trailers"
+)
+_COMMIT_STEP_NO_AI_ATTRIBUTION = (
+    "Commit using HEREDOC — never append Co-Authored-By or attribution lines"
+)
+
+
 def _copy_claude_skill_files(dry_run: bool, force: bool):
     claude_skills_dir = _get_claude_skills_dir()
     claude_skills_dir.mkdir(parents=True, exist_ok=True)
@@ -447,6 +458,12 @@ If >5 files: delegate to `mullet_run --provider local` with Must/Should/Optional
 - For DB-touching changes: read schema file before assuming field names
 """
     }
+
+    from mullet.core.env import no_ai_attribution
+    if no_ai_attribution():
+        skills_to_copy["commit.md"] = skills_to_copy["commit.md"].replace(
+            _COMMIT_STEP_NEUTRAL, _COMMIT_STEP_NO_AI_ATTRIBUTION,
+        )
 
     results = {}
     for filename, content in skills_to_copy.items():

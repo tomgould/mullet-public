@@ -198,9 +198,12 @@ class IngestionPipeline:
             except ValueError:
                 rel_path = path.name
 
+            from mullet.knowledge.engine.ingest import document_metadata
+            doc_meta = document_metadata(path)
             for chunk in chunks:
                 chunk["metadata"]["source_file"] = str(rel_path)
                 chunk["metadata"]["source_path"] = str(path)
+                chunk["metadata"].update(doc_meta)
 
             return chunks
         except Exception as e:

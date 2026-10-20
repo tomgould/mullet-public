@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 
 from mullet.core.providers.model_registry import ModelRegistry
 from mullet.core.router.complexity import Tier
@@ -129,13 +131,14 @@ def test_best_openrouter_real_standard_tier_picks_v4_flash():
     assert chosen == "deepseek/deepseek-v4-flash"
 
 
-def test_best_openrouter_real_low_tier_picks_free_tier():
-    """Real pick_by_value run: LOW tier coding now lands on the free-tier
-    qwen/qwen3-coder:free -- alphabetically ahead of tencent/hy3:free at
-    identical zero cost. Floor=10; both free candidates clear it."""
+def test_best_openrouter_real_low_tier_picks_v4_flash():
+    """Real pick_by_value run: LOW tier coding lands on deepseek/deepseek-v4-flash.
+    The free-tier list is empty since OpenRouter withdrew qwen/qwen3-coder:free
+    and tencent/hy3:free (2026-10-20), so LOW goes to the paid ladder, where
+    v4-flash is the cheapest candidate over the LOW floor (10)."""
     reg = _make_registry()
     chosen = reg._best_openrouter("LOW")
-    assert chosen == "qwen/qwen3-coder:free"
+    assert chosen == "deepseek/deepseek-v4-flash"
 
 
 def test_best_openrouter_real_advanced_tier_picks_v4_flash_not_v4_pro():
@@ -293,13 +296,12 @@ def test_select_openrouter_model_premium_advanced_bypasses_value_picker():
 
 
 def test_select_openrouter_model_real_low_tier():
-    """Real pick_by_value run: LOW tier lands on qwen/qwen3-coder:free via
-    the free-tier-first block (alphabetically ahead of tencent/hy3:free at
-    identical zero cost). Floor=10; both free candidates clear it."""
+    """Real pick_by_value run: with no free-tier candidates left, LOW tier
+    lands on deepseek/deepseek-v4-flash through the paid value picker."""
     pf = _make_preflight(complexity_tier=Tier.LOW)
     model_id, reason = select_openrouter_model(pf, speed_mode="balanced")
-    assert model_id == "qwen/qwen3-coder:free"
-    assert "free-tier" in reason.lower()
+    assert model_id == "deepseek/deepseek-v4-flash"
+    assert "free-tier" not in reason.lower()
 
 
 def test_select_openrouter_model_real_standard_tier():
@@ -395,25 +397,57 @@ def test_best_openrouter_preflight_falls_back_when_pick_not_in_candidates():
 
 # ---------------------------------------------------------------------------
 # 7. Free-tier candidates -- LOW-only, never leak to higher tiers
+#
+# The real free-tier list is empty (OpenRouter withdrew both former entries),
+# so these run against a stand-in free model to keep the mechanism covered.
 # ---------------------------------------------------------------------------
 
-def test_free_tier_low_preflight_picks_qwen3_coder_free():
-    """LOW + preflight → free-tier block wins, returning qwen/qwen3-coder:free
-    (alphabetically ahead of tencent/hy3:free at identical zero cost)."""
+FAKE_FREE = "example/free-coder:free"
+
+
+@pytest.fixture()
+def fake_free_tier(monkeypatch):
+    from mullet.core.providers import model_registry as _registry
+    from mullet.core.providers.quality import MODEL_QUALITY, QualityScore
+    from mullet.core.router import routing_matrix as _matrix
+
+    roster = [(FAKE_FREE, 1_048_576)]
+    monkeypatch.setattr(_matrix, "OPENROUTER_FREE_TIER_CANDIDATES", roster)
+    monkeypatch.setattr(_registry, "OPENROUTER_FREE_TIER_CANDIDATES", roster)
+    monkeypatch.setitem(MODEL_QUALITY, FAKE_FREE, QualityScore(
+        coding=70, reasoning=45, general=45, confidence="direct", source="test stand-in",
+    ))
+    return FAKE_FREE
+
+
+def test_free_tier_low_preflight_picks_the_free_model(fake_free_tier):
+    """LOW + preflight → free-tier block wins."""
     pf = _make_preflight(complexity_tier=Tier.LOW)
     model_id, reason = select_openrouter_model(pf, speed_mode="balanced")
-    assert model_id == "qwen/qwen3-coder:free"
+    assert model_id == fake_free_tier
     assert "free-tier" in reason.lower()
 
 
-def test_free_tier_low_no_preflight_picks_qwen3_coder_free():
+def test_free_tier_low_no_preflight_picks_the_free_model(fake_free_tier):
     """LOW without preflight → _best_openrouter's free-tier block wins."""
     reg = _make_registry()
     chosen = reg._best_openrouter("LOW")
-    assert chosen == "qwen/qwen3-coder:free"
+    assert chosen == fake_free_tier
 
 
-def test_free_tier_never_leaks_to_standard():
+def test_free_tier_skips_a_model_recorded_as_unavailable(fake_free_tier, monkeypatch, tmp_path):
+    """A free model OpenRouter has refused is left out until its record expires."""
+    from mullet.core.providers import model_availability
+
+    monkeypatch.setattr(model_availability, "STORE_PATH", tmp_path / "unavailable.json")
+    model_availability.mark_unavailable("openrouter", fake_free_tier, "404 unavailable for free")
+    pf = _make_preflight(complexity_tier=Tier.LOW)
+    model_id, reason = select_openrouter_model(pf, speed_mode="balanced")
+    assert model_id == "deepseek/deepseek-v4-flash"
+    assert _make_registry()._best_openrouter("LOW") == "deepseek/deepseek-v4-flash"
+
+
+def test_free_tier_never_leaks_to_standard(fake_free_tier):
     """STANDARD tier must NOT pick a free model -- unchanged from before."""
     pf = _make_preflight(complexity_tier=Tier.STANDARD)
     model_id, reason = select_openrouter_model(pf, speed_mode="balanced")
@@ -421,7 +455,7 @@ def test_free_tier_never_leaks_to_standard():
     assert "free-tier" not in reason.lower()
 
 
-def test_free_tier_never_leaks_to_advanced():
+def test_free_tier_never_leaks_to_advanced(fake_free_tier):
     """ADVANCED tier must NOT pick a free model -- unchanged from before."""
     pf = _make_preflight(complexity_tier=Tier.ADVANCED)
     model_id, reason = select_openrouter_model(pf, speed_mode="balanced")
@@ -429,7 +463,7 @@ def test_free_tier_never_leaks_to_advanced():
     assert "free-tier" not in reason.lower()
 
 
-def test_free_tier_never_leaks_to_critical():
+def test_free_tier_never_leaks_to_critical(fake_free_tier):
     """CRITICAL tier must NOT pick a free model -- unchanged from before."""
     pf = _make_preflight(complexity_tier=Tier.CRITICAL)
     model_id, reason = select_openrouter_model(pf, speed_mode="balanced")
@@ -437,7 +471,7 @@ def test_free_tier_never_leaks_to_critical():
     assert "free-tier" not in reason.lower()
 
 
-def test_free_tier_skipped_when_needs_reasoning_at_low():
+def test_free_tier_skipped_when_needs_reasoning_at_low(fake_free_tier):
     """needs_reasoning=True at LOW must bypass the free-tier block and fall
     through to the existing reasoning override (deepseek/deepseek-v4-pro)."""
     pf = _make_preflight(complexity_tier=Tier.LOW, needs_reasoning=True)
@@ -446,7 +480,7 @@ def test_free_tier_skipped_when_needs_reasoning_at_low():
     assert "reasoning" in reason.lower()
 
 
-def test_free_tier_skipped_when_needs_reasoning_at_low_no_preflight():
+def test_free_tier_skipped_when_needs_reasoning_at_low_no_preflight(fake_free_tier):
     """prefer_reasoning=True at LOW (no preflight) must bypass the free-tier
     block in _best_openrouter and fall through to deepseek/deepseek-v4-pro."""
     reg = _make_registry()

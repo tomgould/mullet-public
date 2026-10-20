@@ -79,6 +79,11 @@ class HybridSearcher:
         code_priority_boost: float = 0.5,
         cross_reference_code: bool = False,
         cross_reference_top_k: int = 3,
+        # Recency boost (news pools): bonus that halves every half-life
+        recency_boost: float = 0.0,
+        recency_half_life_days: float = 180.0,
+        # Reorder data/list chunks ahead of prose (see prioritize_data_chunks)
+        prioritize_data: bool = True,
         # Reranker backend
         reranker_backend: str = "local",
         reranker_endpoint: str = None,
@@ -183,6 +188,16 @@ class HybridSearcher:
             logger.info(f"Code priority enabled (boost={code_priority_boost})")
         if cross_reference_code:
             logger.info(f"Cross-reference code enabled (top_k={cross_reference_top_k})")
+
+        # Recency boost (prefer recently published pages)
+        self.recency_boost = recency_boost
+        self.recency_half_life_days = recency_half_life_days
+        self.prioritize_data = prioritize_data
+        if recency_boost:
+            logger.info(
+                f"Recency boost enabled (boost={recency_boost}, "
+                f"half_life={recency_half_life_days}d)"
+            )
 
         # Initialize enhanced tokenizer if config provided
         self.tokenizer: Optional[EnhancedTokenizer] = None
@@ -1479,7 +1494,7 @@ class HybridSearcher:
         query: str,
         top_k: int = 10,
         rerank_top_n: int = 50,
-        prioritize_data: bool = True,
+        prioritize_data: bool | None = None,
         min_score: float = None,
         source_filter: list[str] = None,
         # Code-aware filtering
@@ -1497,6 +1512,7 @@ class HybridSearcher:
             top_k: Number of final results
             rerank_top_n: Number of candidates to re-rank
             prioritize_data: Reorder to prioritize actual data over references
+                             (None = the searcher's prioritize_data setting)
             min_score: Minimum rerank score to include (default: -2.0)
                        Chunks with lower scores are filtered out as irrelevant.
             source_filter: Optional list of allowed source files (None = all)
@@ -1512,6 +1528,8 @@ class HybridSearcher:
         query = self._sanitize_query(query)
         if query is None:
             return []
+        if prioritize_data is None:
+            prioritize_data = getattr(self, "prioritize_data", True)
 
         # Multi-query dispatch: generate variants, search each, merge via RRF.
         # Bypasses top-level cache intentionally — LLM-generated variants may differ
@@ -1660,6 +1678,14 @@ class HybridSearcher:
         if self.code_priority and reranked:
             reranked = self.prioritize_code_chunks(reranked, self.code_priority_boost)
 
+        # Step 5f: Boost recently published chunks (if enabled)
+        # Runs after relevance filtering, so it reorders relevant results
+        # rather than pulling in irrelevant recent ones
+        if self.recency_boost and reranked:
+            reranked = self.boost_recent_chunks(
+                reranked, self.recency_boost, self.recency_half_life_days,
+            )
+
         total_search_time = time.time() - search_start
         logger.info(f"Search completed in {total_search_time:.2f}s (parallel_search={parallel_time:.2f}s, merge={merge_time:.3f}s, rerank={rerank_time:.2f}s, mmr={mmr_time:.2f}s)")
 
@@ -1807,6 +1833,53 @@ class HybridSearcher:
 
         chunks.sort(key=get_score, reverse=True)
         return chunks
+
+    def boost_recent_chunks(
+        self,
+        chunks: list[dict],
+        boost: float,
+        half_life_days: float,
+        now: float | None = None,
+    ) -> list[dict]:
+        """
+        Boost chunks by how recently their source page was published.
+
+        A chunk published at ``now`` gains ``boost``; the bonus halves every
+        ``half_life_days``. Chunks without ``published_ts`` metadata (undated
+        pages, downloaded documents) are left as they are, so evergreen
+        content is never penalised — only outranked by fresh news.
+
+        Args:
+            chunks: List of chunks to reorder
+            boost: Maximum score bonus (added to rerank score)
+            half_life_days: Days for the bonus to fall by half
+            now: Reference UTC epoch seconds (defaults to the current time)
+
+        Returns:
+            Reordered list with recent chunks boosted
+        """
+        now = time.time() if now is None else now
+        half_life_secs = max(half_life_days, 1e-3) * 86400
+        boosted = []
+        for chunk in chunks:
+            metadata = chunk.get("metadata", {})
+            # recency_ts covers PDF, first-seen and updated dates too; indexes
+            # built before it existed only carry published_ts
+            date_ts = metadata.get("recency_ts", metadata.get("published_ts"))
+            if isinstance(date_ts, (int, float)) and not isinstance(date_ts, bool):
+                chunk = chunk.copy()
+                age_secs = max(0.0, now - date_ts)
+                bonus = boost * 0.5 ** (age_secs / half_life_secs)
+                score_key = "_rerank_score" if "_rerank_score" in chunk else "_combined_score"
+                chunk[score_key] = chunk.get(score_key, 0) + bonus
+                chunk["_recency_boost"] = round(bonus, 4)
+            boosted.append(chunk)
+
+        boosted.sort(
+            key=lambda c: c.get("_rerank_score", c.get("_combined_score", 0)),
+            reverse=True,
+        )
+        return boosted
 
     def cross_reference_with_code(
         self,

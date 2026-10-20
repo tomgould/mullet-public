@@ -7,8 +7,11 @@ section indexes, asset copying, platform-specific handlers.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 
@@ -182,6 +185,90 @@ def extract_title(html: str) -> str:
     if title:
         return title.get_text(strip=True)
     return ""
+
+
+# <meta> property/name keys that carry a publication date, most explicit first
+_PUBLISHED_META_KEYS = (
+    "article:published_time", "og:published_time", "datepublished",
+    "pubdate", "publish-date", "publish_date", "dc.date.issued", "dc.date",
+)
+
+
+def _parse_iso_date(value: str) -> datetime | None:
+    """Parse an ISO 8601 (or RFC 2822) date string into an aware UTC datetime."""
+    raw = value.strip()
+    value = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    value = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value)  # +0000 -> +00:00
+    # Python 3.10 only accepts 3- or 6-digit fractions; pad/trim to 6
+    value = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], value, count=1)
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            dt = parsedate_to_datetime(raw)  # e.g. "Tue, 07 Oct 2025 09:00:00 GMT"
+        except (TypeError, ValueError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _single_date(values: list[str]) -> datetime | None:
+    """Return the date if every candidate agrees on one, else None.
+
+    Listing pages carry one date per teaser; picking the first would mislabel
+    the whole page, so more than one distinct date is treated as no date.
+    """
+    dates = {d for d in (_parse_iso_date(v) for v in values if v) if d}
+    return dates.pop() if len(dates) == 1 else None
+
+
+def extract_published_date(html: str) -> str | None:
+    """Extract a page's publication date as an ISO 8601 UTC string.
+
+    Checks <meta> tags (article:published_time and common equivalents), then
+    JSON-LD ``datePublished``, then schema.org microdata
+    (``itemprop="datePublished"``). Returns None when no single unambiguous
+    date is found, so undated pages are never given one.
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    meta_dates: dict[str, str] = {}
+    for tag in soup.find_all("meta"):
+        key = (tag.get("property") or tag.get("name") or "").lower()
+        if key in _PUBLISHED_META_KEYS and tag.get("content"):
+            meta_dates.setdefault(key, tag["content"])
+    for key in _PUBLISHED_META_KEYS:
+        if key in meta_dates:
+            dt = _parse_iso_date(meta_dates[key])
+            if dt:
+                return dt.isoformat()
+
+    # JSON-LD: top-level objects and @graph entries only — nested items
+    # (e.g. an ItemList's articles) belong to other pages.
+    ld_values: list[str] = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for obj in data if isinstance(data, list) else [data]:
+            if not isinstance(obj, dict):
+                continue
+            graph = obj.get("@graph")
+            for item in [obj, *(graph if isinstance(graph, list) else [])]:
+                if isinstance(item, dict) and isinstance(item.get("datePublished"), str):
+                    ld_values.append(item["datePublished"])
+    dt = _single_date(ld_values)
+    if dt:
+        return dt.isoformat()
+
+    micro_values = [
+        tag.get("content") or tag.get("datetime") or tag.get_text(strip=True)
+        for tag in soup.find_all(attrs={"itemprop": "datePublished"})
+    ]
+    dt = _single_date(micro_values)
+    return dt.isoformat() if dt else None
 
 
 def clean_markdown(md: str) -> str | None:

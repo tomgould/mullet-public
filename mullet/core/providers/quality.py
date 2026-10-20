@@ -296,35 +296,6 @@ MODEL_QUALITY: dict[str, QualityScore] = {
             "not Qwen3-Coder-Next"
         ),
     ),
-    "qwen/qwen3-coder:free": QualityScore(
-        coding=70,
-        reasoning=45,
-        general=45,
-        confidence="direct",
-        source=(
-            "Same underlying model/weights as qwen/qwen3-coder (SWE-Bench Verified "
-            "69.6% at release), reached via OpenRouter's free-tier `:free` slot instead "
-            "-- identical benchmarks, see that entry for citations"
-        ),
-    ),
-    "tencent/hy3:free": QualityScore(
-        coding=63,
-        reasoning=50,
-        general=52,
-        confidence="estimated",
-        source=(
-            "Tencent's own July 2026 Hy3 (295B MoE, 21B active) release materials: "
-            "SWE-Bench Verified 78.0, SWE-Bench Pro 57.9, Terminal-Bench 2.1 71.7 -- "
-            "described as trailing Claude Opus 4.8/GPT-5.5 but competitive with/ahead "
-            "of GLM-5.2, DeepSeek-V4-Pro, Qwen3.7-Max on several benchmarks. Vendor-only "
-            "numbers, independent third-party reproduction still pending as of this "
-            "research pass (2026-07-10) -- same caveat class as kimi-k2.7-code, do NOT "
-            "let this be the sole candidate for a tier's quality floor until "
-            "independently verified. Not flagged is_reasoning_tuned despite the model's "
-            "configurable chain-of-thought modes -- no independent confirmation it "
-            "belongs in the same verified-reasoning class as deepseek/deepseek-v4-pro."
-        ),
-    ),
     "anthropic/claude-opus-4.8": QualityScore(
         coding=72,
         reasoning=68,

@@ -189,7 +189,9 @@ def test_best_openrouter_empty_cache_backward_compat() -> None:
     reg._cache["openrouter"] = []
     reg._cache_ts["openrouter"] = time.time()
 
-    assert reg._best_openrouter("LOW") == "qwen/qwen3-coder:free"
+    # No free-tier candidates are left (OpenRouter withdrew them), so LOW
+    # takes the cheapest paid model.
+    assert reg._best_openrouter("LOW") == "deepseek/deepseek-v4-flash"
     assert reg._best_openrouter("STANDARD") == "deepseek/deepseek-v4-flash"
     # routing-v3 Phase 3a (OpenRouter): with an empty live cache, ADVANCED now
     # goes through the value picker instead of the old static "elif ADVANCED"

@@ -6,6 +6,28 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-20: switch delegation off)
+- **`MULLET_DELEGATION=off`** (environment or `.env`; default `on`) stops Mullet sending
+  work to any model provider. `mullet_run`, `mullet_delegate`, `mullet_swarm`,
+  `mullet_opencode`, CLI task runs, review, watch, the orchestration modes, the REPL,
+  `live-test` and `mullet serve`'s chat endpoints reply that delegation is turned off.
+  Trawl, knowledge pools, status, budget and the other read-only tools are unaffected, and
+  the delegation hooks stay quiet while it is off.
+
+### Fixed (2026-10-20: withdrawn OpenRouter models)
+- **Removed `qwen/qwen3-coder:free` and `tencent/hy3:free`**, which OpenRouter no longer
+  offers; LOW-tier work goes to the paid ladder until a vetted free model is added.
+- **OpenRouter fallback on a missing model.** A "model unavailable" reply (404, "No endpoints
+  found", "not a valid model ID") no longer fails the task: the provider records the model in
+  `~/.mullet/unavailable_models.json` for a day, the routers skip it, and the request goes
+  to the next candidate.
+
+### Changed (2026-10-20: personal values in local settings)
+- **`MULLET_NO_AI_ATTRIBUTION`** (default off) decides whether `mullet init`,
+  `mullet setup-claude` and `mullet autopilot init` write a "no Co-Authored-By or AI
+  attribution" rule into projects. **`MULLET_OPENROUTER_REFERER`** (default unset) replaces
+  the hard-coded OpenRouter `HTTP-Referer`. See `.env.example`.
+
 ### Changed (2026-09-17 — delegation gated on real budget pressure)
 - **Delegation is now a last resort rather than the default.** The `UserPromptSubmit`
   reminder (`scripts/hooks/delegation_reminder.py`) previously fired on prompt shape alone:

@@ -953,18 +953,18 @@ def test_openrouter_advanced_returns_v4_flash():
 
 
 def test_openrouter_low_returns_v4_flash():
-    """LOW complexity for openrouter picks the free-tier candidate ahead of the paid ladder.
+    """LOW complexity for openrouter picks deepseek-v4-flash.
 
-    Post free-tier wiring (2026-07-10): qwen/qwen3-coder:free wins LOW-tier
-    OpenRouter picks over deepseek-v4-flash -- see
-    OPENROUTER_FREE_TIER_CANDIDATES in value_picker_constants.py.
+    The free-tier list (OPENROUTER_FREE_TIER_CANDIDATES in
+    value_picker_constants.py) is empty since OpenRouter withdrew
+    qwen/qwen3-coder:free and tencent/hy3:free, so LOW uses the paid ladder.
     """
     reg = ModelRegistry()
     reg._cache["openrouter"] = []
     reg._cache_ts["openrouter"] = time.time()
     chosen = reg.get_best_model("openrouter", complexity="LOW", context_needed=4096)
-    assert chosen == "qwen/qwen3-coder:free", (
-        f"openrouter LOW should pick the free-tier candidate, got {chosen!r}"
+    assert chosen == "deepseek/deepseek-v4-flash", (
+        f"openrouter LOW should pick v4-flash, got {chosen!r}"
     )
 
 

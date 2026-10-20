@@ -25,10 +25,20 @@ OPENROUTER_VALUE_PICK_CANDIDATES: list[tuple[str, int]] = [
 # value_picker.py's _sort_key comment) -- a genuinely free model would never
 # win against paid candidates in the same list. Isolating them here sidesteps
 # that guard entirely, since every candidate in THIS list is genuinely free.
-OPENROUTER_FREE_TIER_CANDIDATES: list[tuple[str, int]] = [
-    ("qwen/qwen3-coder:free", 1_048_576),
-    ("tencent/hy3:free",       262_144),
-]
+#
+# Empty for now. OpenRouter withdrew both former entries, qwen/qwen3-coder:free
+# and tencent/hy3:free (neither is in https://openrouter.ai/api/v1/models as of
+# 2026-10-20; requests for the first fail with 404 "This model is unavailable
+# for free"), and none of the free models it lists today is a free variant of
+# a model with a sourced QualityScore in quality.py. With the list empty, LOW
+# work goes to the paid ladder below (deepseek/deepseek-v4-flash at today's
+# prices). To add a free model: check its `:free` slug is in the public list
+# above, give it a sourced QualityScore in quality.py (without one it passes
+# every tier's quality floor) and a zero-price entry in pricing.yaml (without
+# one, a paid model whose name it contains lends it that price). Free slots
+# come and go, so OpenRouterProvider also falls back to the next candidate,
+# and remembers the dead model (model_availability.py), when one is withdrawn.
+OPENROUTER_FREE_TIER_CANDIDATES: list[tuple[str, int]] = []
 
 # Kimi candidates used by both routing_matrix.py::_kimi_value_pick
 # and model_registry.py::ModelRegistry._best_kimi.

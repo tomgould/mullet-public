@@ -97,3 +97,28 @@ def _isolate_routing_history(tmp_path_factory):
     
     # Restore original function
     _rh.history_path = original_history_path
+
+
+@pytest.fixture(autouse=True)
+def _neutral_personal_settings(monkeypatch):
+    """Run every test with delegation on and the personal settings unset.
+
+    The CLI and the MCP server load the checkout's .env into os.environ on
+    import, so without this a local MULLET_DELEGATION=off (or a personal
+    setting such as MULLET_NO_AI_ATTRIBUTION) would change what the tests see.
+    Tests that need another value set it themselves.
+    """
+    monkeypatch.setenv("MULLET_DELEGATION", "on")
+    for name in ("MULLET_NO_AI_ATTRIBUTION", "MULLET_OPENROUTER_REFERER"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_unavailable_models(tmp_path_factory):
+    """Keep the record of unavailable models out of the real ~/.mullet."""
+    import mullet.core.providers.model_availability as _availability
+
+    original = _availability.STORE_PATH
+    _availability.STORE_PATH = tmp_path_factory.mktemp("mullet_test_availability") / "unavailable_models.json"
+    yield
+    _availability.STORE_PATH = original

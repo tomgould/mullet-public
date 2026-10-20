@@ -25,7 +25,7 @@ def test_openrouter_constructor_api_key_from_env():
 
 
 def test_openrouter_constructor_extra_headers():
-    with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_api_key"}):
+    with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_api_key", "MULLET_OPENROUTER_REFERER": "https://github.com/tomgould/mullet-public"}):
         provider = OpenRouterProvider()
         expected_headers = {
             "HTTP-Referer": "https://github.com/tomgould/mullet-public",
@@ -46,7 +46,7 @@ def test_openrouter_list_models_method_exists():
         assert callable(provider.list_models)
 
 
-@mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_api_key"})
+@mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_api_key", "MULLET_OPENROUTER_REFERER": "https://github.com/tomgould/mullet-public"})
 @mock.patch("requests.get")
 def test_openrouter_list_models(mock_requests_get):
     mock_response = mock.Mock()
@@ -66,6 +66,20 @@ def test_openrouter_list_models(mock_requests_get):
         },
     )
     assert models == ["model1", "model2"]
+
+
+def test_openrouter_sends_no_referer_unless_configured():
+    """HTTP-Referer is optional for OpenRouter; it comes only from MULLET_OPENROUTER_REFERER."""
+    with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_api_key"}):
+        os.environ.pop("MULLET_OPENROUTER_REFERER", None)
+        provider = OpenRouterProvider()
+        assert "HTTP-Referer" not in provider.client.default_headers
+        assert provider.client.default_headers["X-Title"] == "Mullet"
+    with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "k", "MULLET_OPENROUTER_REFERER": "https://example.com/app"}):
+        provider = OpenRouterProvider()
+        assert provider.client.default_headers["HTTP-Referer"] == "https://example.com/app"
+        assert provider._extra_headers["HTTP-Referer"] == "https://example.com/app"
+
 
 @mock.patch.dict(os.environ, {}, clear=True)
 def test_openrouter_constructor_no_api_key_raises_error():
@@ -464,13 +478,14 @@ def test_select_openrouter_model_reasoning_premium():
 # --- Edge cases ---
 
 
-def test_select_openrouter_model_low_tier_is_free():
-    """LOW tier now hits the free-tier-first block, picking qwen/qwen3-coder:free
-    (alphabetically ahead of tencent/hy3:free at identical zero cost)."""
+def test_select_openrouter_model_low_tier_uses_cheapest_paid():
+    """LOW tier: the free-tier list is empty (OpenRouter withdrew
+    qwen/qwen3-coder:free and tencent/hy3:free), so the paid value picker
+    chooses deepseek/deepseek-v4-flash."""
     pf = _make_preflight(complexity_tier=Tier.LOW)
     model_id, reason = select_openrouter_model(pf)
-    assert model_id == "qwen/qwen3-coder:free"
-    assert "free-tier" in reason.lower()
+    assert model_id == "deepseek/deepseek-v4-flash"
+    assert "free-tier" not in reason.lower()
 
 
 def test_select_openrouter_model_mid_large_context():

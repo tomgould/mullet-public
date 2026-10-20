@@ -16,7 +16,7 @@ import logging
 import mailbox
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from .ingest_progress import IngestionCheckpoint
 
 import torch
+import yaml
 from unstructured.partition.auto import partition
 from unstructured.chunking.title import chunk_by_title
 
@@ -83,6 +84,183 @@ def build_context_prefix(metadata: dict) -> str:
         return ""
 
     return " ".join(parts) + " "
+
+
+def _as_utc(value) -> datetime | None:
+    """Coerce a YAML frontmatter date (str, date or datetime) to aware UTC."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        value = datetime(value.year, value.month, value.day)
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def read_frontmatter_metadata(path: Path) -> dict:
+    """
+    Chunk metadata from a Markdown file's YAML frontmatter.
+
+    Picks up the keys the web crawler writes: ``url`` and ``title`` as
+    ``source_url`` and ``doc_title``; ``published`` as ``published_at`` /
+    ``published_ts`` (UTC epoch seconds); ``first_seen`` and ``updated`` as
+    ``first_seen_ts`` and ``updated_ts``. Returns {} when there is nothing.
+    """
+    if path.suffix.lower() not in (".md", ".markdown"):
+        return {}
+    try:
+        with path.open(encoding="utf-8") as fh:
+            head = fh.read(8192)
+    except (OSError, UnicodeDecodeError):
+        return {}
+    match = re.match(r"---\r?\n(.*?)\r?\n---\r?\n", head, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+
+    meta: dict = {}
+    url = data.get("url")
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        meta["source_url"] = url
+    title = data.get("title")
+    if isinstance(title, str) and title.strip():
+        meta["doc_title"] = title.strip()
+    published = _as_utc(data.get("published"))
+    if published:
+        meta["published_at"] = published.isoformat()
+        meta["published_ts"] = int(published.timestamp())
+    for key in ("first_seen", "updated"):
+        value = _as_utc(data.get(key))
+        if value:
+            meta[f"{key}_ts"] = int(value.timestamp())
+    return meta
+
+
+def read_file_index_metadata(path: Path) -> dict:
+    """
+    Source URL and first-seen date for a document the web crawler downloaded.
+
+    Reads the ``.file_index.json`` the crawler writes next to its downloads
+    (``FILE_INDEX_NAME`` in sources/web_crawler.py). Returns {} for other files.
+    """
+    index_path = path.parent / ".file_index.json"
+    if not index_path.is_file():
+        return {}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    entry = index.get(path.name) if isinstance(index, dict) else None
+    if not isinstance(entry, dict):
+        return {}
+    meta: dict = {}
+    url = entry.get("url")
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        meta["source_url"] = url
+    first_seen = _as_utc(entry.get("first_seen"))
+    if first_seen:
+        meta["first_seen_ts"] = int(first_seen.timestamp())
+    return meta
+
+
+# PDF info-dictionary dates: D:YYYYMMDDHHmmSS+HH'mm' (everything after the year optional)
+_PDF_DATE = re.compile(
+    r"^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?\s*(Z|[+-]\d{2}'?(?:\d{2}'?)?)?"
+)
+
+
+def parse_pdf_date(raw) -> datetime | None:
+    """Parse a PDF date string (``D:20260907143000+01'00'``) to aware UTC.
+
+    Returns None for anything unparseable, before 1990, or in the future —
+    PDF producers write garbage here often enough to need the bounds.
+    """
+    if not isinstance(raw, str):
+        return None
+    m = _PDF_DATE.match(raw.strip())
+    if not m:
+        return None
+    year, month, day, hour, minute, second, tz = m.groups()
+    try:
+        dt = datetime(
+            int(year), int(month or 1), int(day or 1),
+            int(hour or 0), int(minute or 0), int(second or 0),
+        )
+    except ValueError:
+        return None
+    offset = timezone.utc
+    if tz and tz != "Z":
+        digits = tz.replace("'", "")
+        sign = 1 if digits[0] == "+" else -1
+        minutes = int(digits[3:5]) if len(digits) >= 5 else 0
+        offset = timezone(sign * timedelta(hours=int(digits[1:3]), minutes=minutes))
+    dt = dt.replace(tzinfo=offset).astimezone(timezone.utc)
+    if dt.year < 1990 or dt > datetime.now(timezone.utc) + timedelta(days=1):
+        return None
+    return dt
+
+
+def read_pdf_created(path: Path) -> datetime | None:
+    """Creation (failing that, modification) date from a PDF's info dictionary."""
+    if path.suffix.lower() != ".pdf":
+        return None
+    try:
+        from pypdf import PdfReader
+        # pypdf logs a warning per broken xref entry ("Ignoring wrong pointing
+        # object"), which floods reindex output on real-world PDFs
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+        info = PdfReader(str(path)).metadata or {}
+        for key in ("/CreationDate", "/ModDate"):
+            created = parse_pdf_date(info.get(key))
+            if created:
+                return created
+    except Exception as e:  # broken or encrypted PDF: no date rather than a failed ingest
+        logger.debug(f"No PDF date for {path.name}: {e}")
+    return None
+
+
+def document_metadata(path: Path) -> dict:
+    """
+    Per-document chunk metadata: source URL, title and dates.
+
+    Also sets ``recency_ts`` / ``recency_source``, the date the searcher's
+    recency boost and ``trawl_recent`` use: the page's own published date when
+    it has one, otherwise the newest of the PDF's creation date, when the
+    crawler first saw the document, and when its text last changed.
+    """
+    path = Path(path)
+    meta = read_frontmatter_metadata(path)
+    for key, value in read_file_index_metadata(path).items():
+        meta.setdefault(key, value)
+    created = read_pdf_created(path)
+    if created:
+        meta["pdf_created_ts"] = int(created.timestamp())
+
+    if "published_ts" in meta:
+        meta["recency_ts"], meta["recency_source"] = meta["published_ts"], "published"
+    else:
+        candidates = [
+            (meta[key], source)
+            for key, source in (
+                ("pdf_created_ts", "pdf_created"),
+                ("first_seen_ts", "first_seen"),
+                ("updated_ts", "updated"),
+            )
+            if key in meta
+        ]
+        if candidates:
+            meta["recency_ts"], meta["recency_source"] = max(candidates)
+    return meta
 
 
 # Batch size for embeddings (smaller = less GPU memory, slower)
@@ -511,9 +689,11 @@ class DocumentIngestor:
         chunks = self.chunk_elements(elements, source_id=str(path))
 
         # Add source file to metadata (can be overridden by ingest_directory for full path)
+        doc_meta = document_metadata(path)
         for chunk in chunks:
             chunk["metadata"]["source_file"] = path.name
             chunk["metadata"]["source_path"] = str(path)
+            chunk["metadata"].update(doc_meta)
 
         # Build context strings for contextual embeddings
         context_strings = None

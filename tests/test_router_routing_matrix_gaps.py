@@ -88,9 +88,9 @@ def test_select_kimi_model_replaces_deprecated(caplog):
         # default / STANDARD -> flash via value picker (tier name still
         # appears in the generic reason string for STANDARD)
         ({}, "balanced", "deepseek/deepseek-v4-flash", "standard"),
-        # LOW -> free-tier pick (qwen/qwen3-coder:free wins alphabetically
-        # over tencent/hy3:free at identical zero cost).
-        ({"complexity_tier": Tier.LOW}, "balanced", "qwen/qwen3-coder:free", "free-tier"),
+        # LOW -> no free-tier candidates left (OpenRouter withdrew them), so
+        # the paid value picker's cheapest model.
+        ({"complexity_tier": Tier.LOW}, "balanced", "deepseek/deepseek-v4-flash", "value picker"),
     ],
 )
 def test_select_openrouter_model_branches(kwargs, speed_mode, expected_model, expected_snippet):
