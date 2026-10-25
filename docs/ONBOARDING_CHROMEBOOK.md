@@ -552,7 +552,7 @@ Each step passes only when Mullet's own checks pass, not because the model says 
 
 You can also ask Claude Code to do this for you: the `mullet-job` skill, installed in Section 13, covers it.
 
-**Coming, not built yet:** choosing cheaper models for individual job steps, a benchmark command (`mullet job bench`), a guard that stops jobs overloading your machine, and job sandboxing on macOS.
+**Cheaper models for individual steps:** `mullet job plan --ladder` lets each step try free, local, Kimi and OpenRouter workers before Claude, and `mullet ladder report` shows how that went (see the README for the `ladder:` settings). **Not built:** a benchmark command (`mullet job bench`) and a job sandbox on macOS.
 
 **Tip:** Claude Code's `/model opusplan` command uses Opus for planning and a cheaper model for the work. It is separate from Mullet jobs.
 

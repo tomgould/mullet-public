@@ -20,7 +20,7 @@ Mullet uses opencode as a zero-Anthropic-token delegation target:
 
 When opencode is not installed, `mullet_opencode` automatically falls back to `mullet_run/Kimi` with a warning that filesystem access is unavailable.
 
-This guide covers the `mullet_opencode` MCP tool. It is separate from `mullet job`, whose only worker today is your own Claude Code. An opencode worker for jobs, inside the job sandbox and checked by the same gates, is coming. `MULLET_DELEGATION=off` switches `mullet_opencode` off with the other delegation tools.
+This guide covers the `mullet_opencode` MCP tool. It is separate from `mullet job`, which runs opencode workers of its own inside the job sandbox, behind a key proxy and checked by the same gates (see the README on the delegation ladder). `MULLET_DELEGATION=off` switches `mullet_opencode` off with the other delegation tools.
 
 ---
 

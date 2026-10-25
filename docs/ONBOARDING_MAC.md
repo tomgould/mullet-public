@@ -2,7 +2,7 @@
 
 > **Mullet runs large coding jobs unattended and checks every step itself.** It also gives Claude Code a knowledge-search server (Trawl) and optional tools that hand work to cheaper models (Kimi, OpenRouter, Gemini, or a model on your own Mac).
 >
-> **What works on a Mac today:** the MCP server, Trawl search, the delegation tools and local models. **`mullet job` does not start on macOS yet.** Jobs run inside a bubblewrap sandbox, which is Linux-only, and a macOS sandbox is coming but not built. Use a Linux machine to run jobs. This guide sets up everything else.
+> **What works on a Mac today:** the MCP server, Trawl search, the delegation tools and local models. **`mullet job` does not start on macOS yet.** Jobs run inside a bubblewrap sandbox, which is Linux-only, and there is no macOS sandbox yet, so jobs refuse to start without one. Use a Linux machine to run jobs. This guide sets up everything else.
 
 ## Table of Contents
 
@@ -661,7 +661,7 @@ You're all set. Mullet now gives Claude Code search over your code and optional 
 - **How Mullet routes requests and chooses providers:** See **[ARCHITECTURE.md](ARCHITECTURE.md)**
 - **Full installation reference (including Linux):** See **[INSTALL.md](INSTALL.md)**
 - **Run `mullet job` on a Linux machine:** `mullet job plan "<goal>"` makes a task tree to approve. Then `approve`, `run`, `status`, `tail -f`, `report` and `merge <id>` take it through to a branch and an evidence report. See **[ONBOARDING_LINUX.md](ONBOARDING_LINUX.md)**.
-- **Coming, not built yet:** job sandboxing on macOS, a ladder of Claude, OpenRouter, Kimi, free and local models for job steps, and `mullet job bench`.
+- **Not built:** a job sandbox on macOS (jobs refuse to start there without one) and `mullet job bench`. The job ladder of free, local, Kimi, OpenRouter and Claude workers exists (`mullet job plan --ladder`, `mullet ladder report`, `mullet night`), but jobs run on Linux.
 - **Something broken?** Run `mullet doctor --full` and paste the output into a GitHub issue.
 
 Happy coding.

@@ -22,7 +22,7 @@ mullet doctor
 | `mullet/cli/` | CLI entry points and subcommands |
 | `mullet/hud/` | Terminal status bar and budget guard |
 | `mullet/server/` | REST API, WebSocket, MCP server |
-| `tests/` | Full test suite (about 16,900 tests) |
+| `tests/` | Full test suite (about 18,000 tests) |
 
 ## Running Tests
 
@@ -30,8 +30,8 @@ mullet doctor
 # While working: only the files you changed
 python3 -m pytest tests/test_foo.py -q
 
-# Full suite, in parallel (about 4.5 minutes)
-python3 -m pytest tests -q -n 16 --timeout 300
+# Full suite, in parallel (about 5 minutes)
+python3 -m pytest tests -q -n 8 --timeout 300
 
 # Live tests (a real model; excluded by default)
 python3 -m pytest -m live tests/integration/ -v

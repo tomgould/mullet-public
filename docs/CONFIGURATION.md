@@ -129,4 +129,4 @@ In enterprise mode (`MULLET_MODE=enterprise`) the shared token is not used. REST
 
 ## Doctor checks
 
-`mullet doctor` is read-only and offline. It checks Python, the `claude` command, git, the job sandbox, the GPU, the Claude Code setup that `mullet setup-claude` recorded, and whether `ANTHROPIC_API_KEY` is set. It also warns when no spending limit is set. `--full` adds the network checks, including each paid provider's credit.
+`mullet doctor` is read-only and offline. It checks Python, the `claude` command, git, the job sandbox, the GPU, the Claude Code setup that `mullet setup-claude` recorded, and whether `ANTHROPIC_API_KEY` is set. It warns when no spending limit is set, and when the toolset policy lets a non-Claude provider run commands or touch files (`delegation.toolsets`). `--full` adds the network checks, including each paid provider's credit, which it flags under `budget.warn_below_usd`.

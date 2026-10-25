@@ -8,7 +8,7 @@ Mullet also serves Trawl, a knowledge search for your own documents and code, ov
 
 ## Status
 
-Mullet 2.0.0 is maintained. Jobs run on Linux. On macOS they refuse to start for now, because there is no sandbox there yet; the rest of Mullet works. The code, model list and prices date from October 2026.
+Mullet is maintained. Jobs run on Linux. On macOS they refuse to start for now, because there is no sandbox there yet; the rest of Mullet works. The code, model list and prices date from October 2026.
 
 ## Install
 
@@ -18,7 +18,7 @@ Mullet isn't on PyPI (the name there belongs to another package), so install it 
 curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
 ```
 
-That runs `uv tool install git+https://github.com/tomgould/mullet-public.git` (or the pipx equivalent). Run it again to update. Optional extras are `gemini`, `bedrock`, `postgres`, `gpu` and `all`. To work on Mullet itself, clone it and run `pip install -e ".[dev]"` in a virtualenv.
+That runs `uv tool install git+https://github.com/tomgould/mullet-public.git` (or the pipx equivalent). Run it again to update. Add `--version X.Y.Z` or `--ref <branch|tag|sha>` to pin a release or ref, and `--dry-run` to print the command without running it (with curl: `... | bash -s -- --version X.Y.Z`). Optional extras are `gemini`, `bedrock`, `postgres`, `gpu` and `all`. To work on Mullet itself, clone it and run `pip install -e ".[dev]"` in a virtualenv.
 
 ## Quick start
 
@@ -32,7 +32,7 @@ mullet job report <id>                         # evidence for each step
 mullet job merge <id>                          # copies the branch into your repo; never pushes
 ```
 
-`mullet job show <id>` prints the plan. Add `--yaml` to get an editable plan file, and pass it back with `--plan-file`. `--single` skips the planner and makes one step. `mullet job list` shows recent jobs, and `mullet job discard <id>` removes one.
+`mullet job show <id>` prints the plan. Add `--yaml` to get an editable plan file, and pass it back with `--plan-file`. `--single` skips the planner and makes one step. `mullet job list` shows recent jobs, and `mullet job discard <id>` removes one. A job with steps that could only be partly checked (shown as unverified) is refused by `merge` until you review them and add `--allow-unverified`.
 
 ## How a job works
 
@@ -103,7 +103,7 @@ ladder:
 - `mullet reap` stops idle or orphaned Mullet work (test workers, stray opencode runs, idle local models, stale temp directories); `--dry-run` shows what it would do.
 - A machine guard (one GPU lease across Mullet's processes, plus VRAM, RAM and temperature limits) keeps jobs, local models and reindexing from fighting over the card.
 
-Coming, and not in 2.2.0: a macOS sandbox, so jobs can run there.
+Not built: a macOS sandbox, so jobs cannot run there yet.
 
 ## Spending limits and other settings
 
@@ -129,7 +129,7 @@ Mullet tells you when a job blocks, pauses or finishes. Desktop notifications ar
 | `MULLET_NOTIFY` | Channels: `desktop`, `slack`, both separated by a comma, or `off` |
 | `MULLET_SLACK_WEBHOOK` | The Slack incoming webhook URL |
 | `MULLET_NOTIFY_HOURS` | Working hours for Slack, default `Mon-Fri 09:00-17:30` |
-| `MULLET_NOTIFY_TZ` | Time zone for those hours, default `Europe/London` |
+| `MULLET_NOTIFY_TZ` | Time zone for those hours, default the machine's local time zone |
 
 ## Where files live
 

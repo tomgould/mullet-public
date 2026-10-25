@@ -31,7 +31,7 @@ Provider API keys are optional. Jobs need none. They matter only for Mullet's de
 curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
 ```
 
-The installer runs `uv tool install` (or `pipx install`) from the public GitHub repository. The install is not editable, so Mullet never runs from a tree it may be editing. Run it again to update. You can also run the same command yourself:
+The installer runs `uv tool install` (or `pipx install`) from the public GitHub repository. The install is not editable, so Mullet never runs from a tree it may be editing. Run it again to update. To pin a version, add `--version X.Y.Z` (the release tag `vX.Y.Z`) or `--ref <branch|tag|sha>`; `--dry-run` prints the install command and stops. With curl: `curl -fsSL <url> | bash -s -- --version X.Y.Z`. You can also run the same command yourself:
 
 ```bash
 uv tool install git+https://github.com/tomgould/mullet-public.git

@@ -4,7 +4,7 @@
 
 ## Overview
 
-Mullet is a Python monolith (about 84K lines in about 370 modules, about 16,900 tests). Its main job is `mullet job`: large coding jobs that run unattended in a sandboxed clone, with every step checked by gates Mullet runs itself (see Jobs below). It also routes single tasks to the cheapest capable model, serves the Trawl knowledge engine over MCP, and keeps an OpenAI-compatible API. It installs from GitHub with `scripts/install.sh` (never `pip install mullet`: that PyPI package is someone else's).
+Mullet is a Python monolith (about 84K lines in about 370 modules, about 18,000 tests). Its main job is `mullet job`: large coding jobs that run unattended in a sandboxed clone, with every step checked by gates Mullet runs itself (see Jobs below). It also routes single tasks to the cheapest capable model, serves the Trawl knowledge engine over MCP, and keeps an OpenAI-compatible API. It installs from GitHub with `scripts/install.sh` (never `pip install mullet`: that PyPI package is someone else's).
 
 The diagram below is the legacy single-task path (`mullet "<task>"`, the API and the delegation tools). It runs unless `MULLET_DELEGATION=off` is set (the default is on), and jobs do not use it. Jobs have their own path, described under Jobs.
 
@@ -87,6 +87,8 @@ Routing now uses a 3-stage pipeline before any paid model call:
 | planning | todo (in-session tracking) |
 | interaction | clarify (structured user questions) |
 | mcp | mcp_client (call external MCP servers) |
+
+Which toolsets a provider gets is set by `delegation.toolsets`: Claude's own providers get all of them, any other provider gets a safe subset unless you list more. See [CONFIGURATION.md](CONFIGURATION.md#delegationtoolsets).
 
 ### Knowledge — Trawl (`mullet/knowledge/` + `mullet/server/mcp_knowledge.py`)
 
@@ -215,7 +217,7 @@ Optional: boto3 (Bedrock)
 
 ## Testing
 
-About 16,900 tests, about 4.5 minutes in parallel (`python3 -m pytest tests -q -n 16 --timeout 300`). Tests run with no network, no provider keys and a throwaway home directory (mostly unit with mocked providers; live tests, which need a real model, are excluded by default).
+About 16,900 tests, about 5 minutes in parallel (`python3 -m pytest tests -q -n 8 --timeout 300`). Tests run with no network, no provider keys and a throwaway home directory (mostly unit with mocked providers; live tests, which need a real model, are excluded by default).
 
 ### Agent Intelligence
 - **Project detection** — auto-detects language, framework, test command from directory contents.
