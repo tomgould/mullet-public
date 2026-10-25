@@ -167,7 +167,7 @@ def test_discard_deletes_the_clone(repo, capsys):
         assert ledger.get_job(job_id).status is JobStatus.DISCARDED
 
 
-def test_a_job_left_running_by_a_dead_runner_can_be_resumed(repo, capsys, monkeypatch):
+def test_a_job_left_running_by_a_dead_runner_can_be_resumed(repo, capsys, monkeypatch, fake_claude):
     monkeypatch.setattr(job_cli.sandbox, "check", lambda: sandbox.SandboxCheck(True, "bwrap", ""))
     job_id = plan(repo, capsys)
     with Ledger() as ledger:
