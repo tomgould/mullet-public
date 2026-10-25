@@ -102,7 +102,7 @@ ladder:
 - `mullet reap` stops idle or orphaned Mullet work (test workers, stray opencode runs, idle local models, stale temp directories); `--dry-run` shows what it would do.
 - A machine guard (one GPU lease across Mullet's processes, plus VRAM, RAM and temperature limits) keeps jobs, local models and reindexing from fighting over the card.
 
-Coming, and not in 2.0.0: a macOS sandbox, so jobs can run there.
+Coming, and not in 2.1.0: a macOS sandbox, so jobs can run there.
 
 ## Spending limits and other settings
 

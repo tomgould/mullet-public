@@ -48,6 +48,9 @@ from urllib.parse import urlsplit
 from mullet.jobs.executors.usage_meter import ReportedUsage, ResponseMeter
 
 MAX_BODY_BYTES = 32 * 1024 * 1024
+# A refused request's body is read up to this size before the connection closes (a bigger one is not).
+_DRAIN_LIMIT = 256 * 1024
+_DRAIN_TIMEOUT_S = 2.0
 UPSTREAM_TIMEOUT_S = 600.0
 READ_TIMEOUT_S = 60.0  # for the sandbox side to send a request
 MAX_CONNECTIONS = 16
@@ -154,10 +157,32 @@ class _Handler(BaseHTTPRequestHandler):
 
     do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = do_GET
 
+    def _drain_request(self) -> None:
+        """Read a small request body nobody has read yet, so closing after a refusal doesn't reset the
+        client's connection before it has seen the answer."""
+        if getattr(self, "_body_started", False):
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if not 0 < length <= _DRAIN_LIMIT:
+            return
+        try:
+            self.connection.settimeout(_DRAIN_TIMEOUT_S)
+            while length > 0:
+                piece = self.rfile.read(min(length, _PIECE))
+                if not piece:
+                    return
+                length -= len(piece)
+        except OSError:
+            return
+
     def _refuse(self, status: int, reason: str) -> None:
         self.server.proxy._log(self.command, self.path, status, 0)
         body = (reason + "\n").encode()
         self.close_connection = True
+        self._drain_request()
         try:
             self.send_response_only(status)
             self.send_header("Content-Type", "text/plain")
@@ -186,6 +211,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _read_body(self) -> bytes | None:
         """The request body, or None if it is over the limit. Raises _BodyError when malformed."""
+        self._body_started = True
         limit = self.server.proxy.max_body
         if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
             out = bytearray()

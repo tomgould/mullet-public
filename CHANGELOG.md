@@ -6,6 +6,46 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-25
+
+### Added
+- **Spending limits.** `budget.envelope.daily` and `.weekly` cap what all jobs and paid
+  providers may spend together; `budget.per_rung.<rung>` caps one provider. They are checked
+  before every attempt, and the key proxy stops an attempt (HTTP 402) the moment its
+  allowance is spent. Nothing is limited until you set a value; `mullet doctor` warns when
+  no envelope is set and, with `--full`, when a provider's credit is low
+  (`budget.warn_below_usd`).
+- **Provider-reported cost.** The proxy reads the usage in each provider response. OpenRouter
+  states the cost; other providers are priced from `ladder.prices`, cache rates included. An
+  attempt's recorded cost never falls below what the provider's responses say.
+- **Provider check.** Each job report compares the ledger with what each paid provider says
+  was spent while the job ran.
+- `mullet config show [--json] [section]` lists every setting and where its value came from.
+  `docs/CONFIGURATION.md` is the reference.
+- `delegation.toolsets` sets which toolsets each provider's delegated model may use, and
+  `delegation.file_deny` sets the credential locations the file and docker tools refuse.
+- Notifications carry provider credit and Claude's weekly use; a job that pauses because a
+  check could not run sends one.
+- `mullet serve --show-token` prints the install's server token. `server.require_token`,
+  `server.allowed_origins` and `server.allowed_hosts` change what the server accepts.
+- `scripts/install.sh --version X.Y.Z` (or `--ref`, `--dry-run`) installs a pinned release.
+
+### Security
+- Every URL a tool fetches is resolved and must be a public address, on every redirect
+  hop, and a failed lookup refuses the URL. This closes `localhost`, name-based tricks such
+  as `localtest.me`, link-local and carrier-grade addresses.
+- `mullet serve` refuses a foreign `Host` or `Origin` and, in solo mode, any request without
+  the install's token. An empty WebSocket token no longer becomes the solo user outside solo
+  mode.
+- Delegated models from providers other than Claude's own get only web, browser, session
+  and vision tools by default. Set `delegation.toolsets` to give a provider more.
+- The file and docker tools refuse `~/.ssh`, cloud and token files, Mullet's own state and
+  `.env` files, follow symlinks to decide, and refuse docker mounts that hold or contain
+  them. Docker also refuses the host IPC, user and UTS namespaces and `--device`.
+- Editor, dev container, shell hook and package-manager files (`.envrc`, `.vscode/**`,
+  `.devcontainer/**`, `.npmrc`, `AGENTS.md` and others) are protected paths by default.
+- The key proxy forwards an allowlist of headers, clamps `n`, and can clamp output tokens.
+
 ### Changed
 - Licence: the Additional Use Grant now allows production use for any purpose, including
   inside a company or team, on any number of machines, and to build software you sell or
@@ -15,6 +55,22 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
   relicense them.
 
 ### Fixed
+- A review that gives no verdict, or a gate that crashes, pauses the job instead of passing
+  or failing the work; nothing is committed and the worker's model is not barred.
+- Unverified steps are no longer counted as passed in reports; `mullet job merge` refuses
+  them without `--allow-unverified`.
+- A flaky test is excused by gate G5 only if it passed in some run.
+- A step gets at most `max_below_claude` counted attempts below Claude, also after Claude's
+  own. OpenRouter's privacy routing applies to every rung that uses it, and `unknown`
+  quantisation is off by default.
+- Non-ladder opencode jobs get the spend allowance, the shared limits and the free-model
+  public-repo check.
+- Each runner and delegation stops only its own child processes.
+- A reindex wait whose remaining time is below the clock's precision counts as over (a CI
+  flake on freshly started machines).
+- The key proxy answers a refused request that carries a body instead of resetting the
+  connection.
+- The notification time zone defaults to the machine's, not a fixed one.
 - The file tools accept paths in the user's temp directory, which on macOS is under
   `/var/folders` rather than `/tmp`.
 - `@file:` references check a file's size before guessing whether it is binary, so an

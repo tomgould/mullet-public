@@ -237,3 +237,19 @@ def test_a_configured_price_is_named_as_the_source_when_the_provider_states_no_c
     OpencodeExecutor._take_provider_cost(usage, _FakeProxy(4.2, 0.0))
     assert usage["total_cost_usd"] == 4.2 and usage["cost_source"] == "configured price"
     assert usage["cost_reported"] is True
+
+
+def test_a_refused_request_still_gets_its_answer_when_it_carries_a_body(make_proxy):
+    """The proxy reads a small body before closing, so the client sees the 400 and not a reset."""
+    p = make_proxy()
+    body = b"x" * 100_000
+    for _ in range(20):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(str(p.socket_path))
+        sock.sendall(b"POST /api/v1/../../admin HTTP/1.1\r\nHost: s\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
+        reply = b""
+        while chunk := sock.recv(65536):
+            reply += chunk
+        sock.close()
+        assert reply.split(b"\r\n", 1)[0].split()[1] == b"400"
+    assert _Upstream.seen == []
