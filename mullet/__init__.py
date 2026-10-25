@@ -1,3 +1,3 @@
 """Mullet — Cloud in the front, Local GPU in the back."""
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"

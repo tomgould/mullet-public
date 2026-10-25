@@ -40,7 +40,8 @@ CONFIRM_LINE = (
 
 
 def delegation_turned_off() -> bool:
-    """True when MULLET_DELEGATION=off, in the environment or Mullet's .env.
+    """True when MULLET_DELEGATION=off (environment or Mullet's .env) or a fresh
+    session strategy says ``delegation: off``.
 
     With delegation off, the MCP tools refuse to dispatch, so the hooks must
     not suggest delegating (or block manual work until Claude delegates).
@@ -52,6 +53,19 @@ def delegation_turned_off() -> bool:
     except Exception:
         value = os.environ.get("MULLET_DELEGATION", "").strip().lower()
         return value in {"0", "off", "false", "no", "disabled"}
+
+
+def _off_reason() -> str:
+    """Which switch turned delegation off, for the hooks' reason text."""
+    try:
+        from mullet.core.env import delegation_switch_on
+
+        if delegation_switch_on():
+            return ("delegation is turned off for this session (mullet strategy: delegation off; "
+                    "`mullet strategy set --delegation ladder` changes it)")
+    except Exception:
+        pass
+    return "delegation is turned off (MULLET_DELEGATION=off)"
 
 
 def pressure_snapshot() -> dict | None:
@@ -82,10 +96,11 @@ def delegation_warranted(snapshot: dict | None = None) -> tuple[bool, str]:
 
     Fails closed: if the figures can't be read, the answer is no. Staying quiet
     costs nothing, whereas nudging toward a paid provider on a bad guess does.
-    Always no while delegation is turned off (MULLET_DELEGATION=off).
+    Always no while delegation is turned off (MULLET_DELEGATION=off or the
+    session strategy).
     """
     if delegation_turned_off():
-        return False, "delegation is turned off (MULLET_DELEGATION=off)"
+        return False, _off_reason()
     snap = pressure_snapshot() if snapshot is None else snapshot
     if snap is None:
         return False, "budget figures unavailable"

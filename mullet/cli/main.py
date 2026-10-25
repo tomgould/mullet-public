@@ -28,7 +28,7 @@ from mullet.core.tools import terminal, file_ops, web, delegate, code_exec, brow
 logger = logging.getLogger("mullet")
 
 
-SUBCOMMANDS = {"serve", "mcp", "doctor", "init", "update", "history", "config", "stats", "completion", "explain", "login", "watch", "cost", "budget", "review", "plugins", "schedule", "research", "ingest", "search", "graph", "source", "reindex", "hud", "hud-claude", "pool", "docs", "evaluate", "setup-claude", "logs", "models", "clean", "override", "observations", "decisions", "routing", "review-session", "memory-sync", "live-test", "preset", "reap", "ladder"}
+SUBCOMMANDS = {"serve", "mcp", "doctor", "init", "update", "history", "config", "stats", "completion", "explain", "login", "watch", "cost", "budget", "review", "plugins", "schedule", "research", "ingest", "search", "graph", "source", "reindex", "hud", "hud-claude", "pool", "docs", "evaluate", "setup-claude", "logs", "models", "clean", "override", "observations", "decisions", "routing", "review-session", "memory-sync", "live-test", "preset", "reap", "ladder", "strategy"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
   migrate-state Move an older ~/.mullet into the XDG directories (--dry-run first)
   paths         Print Mullet's config, state, data, cache and pools directories
   reap          Stop idle or orphaned Mullet work (use --dry-run first)
+  strategy      Show or set this session's budget and delegation choice
   override      Toggle budget override (mullet override on/off)
 
   hud           Show/configure the terminal status HUD
@@ -1067,20 +1068,20 @@ def _maybe_preflight(task: str, args) -> None:
 
 
 def _delegation_refused(args=None) -> bool:
-    """Say so and return True when MULLET_DELEGATION=off.
+    """Say so and return True when delegation is off (MULLET_DELEGATION or the strategy).
 
     Every CLI path that sends work to a model provider (task runs, review,
     watch, the REPL, live-test) checks this before
     building a provider, so nothing is dispatched while delegation is off.
     """
-    from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
+    from mullet.core.env import delegation_enabled, delegation_off_message
     if delegation_enabled():
         return False
     if args is not None and getattr(args, "json_output", False):
         import json as _json
-        print(_json.dumps({"success": False, "error": DELEGATION_OFF_MESSAGE, "delegation": "off"}))
+        print(_json.dumps({"success": False, "error": delegation_off_message(), "delegation": "off"}))
     else:
-        print(DELEGATION_OFF_MESSAGE, file=sys.stderr)
+        print(delegation_off_message(), file=sys.stderr)
     return True
 
 
@@ -1503,6 +1504,9 @@ def _main_inner():
     if len(sys.argv) >= 2 and sys.argv[1] == "reap":
         from mullet.cli.reap_cmd import cmd_reap
         sys.exit(cmd_reap(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "strategy":
+        from mullet.cli.strategy_cli import cmd_strategy
+        sys.exit(cmd_strategy(sys.argv[2:]))
 
     parser = build_parser()
     args = parser.parse_args()

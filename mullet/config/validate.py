@@ -115,6 +115,19 @@ def validate_config(data: dict) -> ValidationResult:
             for problem in parse_policy(delegation.get("toolsets"), "delegation.toolsets").problems:
                 result.add_error("delegation.toolsets", problem)
 
+    session = data.get("session")
+    if session is not None:
+        if not isinstance(session, dict):
+            result.add_error("session", "Must be a mapping")
+        else:
+            from mullet.core.strategy import parse_settings
+
+            for problem in parse_settings(session, "session").problems:
+                if "unknown setting" in problem:
+                    result.add_warning(problem.split(":", 1)[0], "Unknown session setting (ignored)")
+                else:
+                    result.add_error("session", problem)
+
     # Validate max_iterations
     max_iter = data.get("max_iterations")
     if max_iter is not None:
@@ -140,7 +153,7 @@ def validate_config(data: dict) -> ValidationResult:
     # Warn about unknown top-level keys
     known_keys = {
         "providers", "routing", "budget", "max_iterations", "server",
-        "knowledge", "toolsets", "plugins", "skills", "default_toolsets", "ladder", "delegation",
+        "knowledge", "toolsets", "plugins", "skills", "default_toolsets", "ladder", "delegation", "session",
     }
     for key in data:
         if key not in known_keys and not key.startswith("#"):

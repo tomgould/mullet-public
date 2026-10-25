@@ -253,3 +253,17 @@ def test_a_refused_request_still_gets_its_answer_when_it_carries_a_body(make_pro
         sock.close()
         assert reply.split(b"\r\n", 1)[0].split()[1] == b"400"
     assert _Upstream.seen == []
+
+
+def test_progress_records_carry_the_proxys_running_cost(tmp_path):
+    """A runner killed mid-attempt keeps what the provider has charged: the ledger gets the proxy's figure."""
+    from mullet.jobs.executors.opencode import OpencodeExecutor, _Stream
+
+    executor = OpencodeExecutor(tmp_path / "logs", "fakeai/m1")
+    state = _Stream(cost=3.66, cost_reported=True)
+    assert executor._usage(state, 1.0)["total_cost_usd"] == 3.66
+    executor._proxy = type("P", (), {"spent_usd": 11.8})()
+    usage = executor._usage(state, 1.0)
+    assert usage["total_cost_usd"] == 11.8 and usage["cost_reported"] is True
+    zero = executor._usage(_Stream(), 1.0)
+    assert zero["total_cost_usd"] == 11.8 and zero["cost_reported"] is True

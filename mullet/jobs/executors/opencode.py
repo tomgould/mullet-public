@@ -1258,11 +1258,15 @@ class OpencodeExecutor:
                             time.monotonic() - started)
 
     def _usage(self, state: _Stream, duration: float) -> dict[str, Any]:
+        # The proxy has seen every response, so its running cost goes into each progress record:
+        # an attempt whose runner is killed keeps what the provider has been charged so far.
+        proxied = self._proxy.spent_usd if self._proxy is not None else 0.0
+        cost = max(state.cost, proxied)
         return {
             "duration_s": round(duration, 1),
             "num_turns": state.steps,
-            "total_cost_usd": round(state.cost, 6),
-            "cost_reported": state.cost_reported,
+            "total_cost_usd": round(cost, 6),
+            "cost_reported": state.cost_reported or proxied > state.cost,
             "tokens": dict(state.tokens),
             "tools": dict(state.tools),
             "model": self.model,

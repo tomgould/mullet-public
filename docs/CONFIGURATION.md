@@ -1,6 +1,6 @@
 # Settings
 
-Mullet reads one YAML file, `config.yaml` in the config directory (`~/.config/mullet` by default; `mullet paths` prints it). `mullet config show [--json] [section]` lists every active setting with its default and where its value came from. The sections are `ladder`, `budget`, `delegation`, `routing`, `providers`, `skills`, `other` and `unrecognised`. A setting whose name contains `key`, `token`, `secret` or `password` shows as `***`, and a provider's API key shows only `set` or `unset`. Keys in the file that Mullet does not recognise are listed under `unrecognised`.
+Mullet reads one YAML file, `config.yaml` in the config directory (`~/.config/mullet` by default; `mullet paths` prints it). `mullet config show [--json] [section]` lists every active setting with its default and where its value came from. The sections are `ladder`, `budget`, `delegation`, `session`, `routing`, `providers`, `skills`, `other` and `unrecognised`. A setting whose name contains `key`, `token`, `secret` or `password` shows as `***`, and a provider's API key shows only `set` or `unset`. Keys in the file that Mullet does not recognise are listed under `unrecognised`.
 
 Job commands (`mullet job ...`, `mullet ladder report`) read job data from the jobs directory and profiles from the profiles directory. If your jobs live elsewhere, set `MULLET_JOBS_DIR` and `MULLET_PROFILES_DIR` for those commands too.
 
@@ -37,6 +37,32 @@ The key proxy reads the usage in every provider response. OpenRouter states the 
 ### Provider check
 
 At the start and end of a job Mullet records each paid provider's own usage or remaining credit. `mullet job report` then prints a "Provider check" block that sets the ledger's spend for that provider beside the provider's figure and says whether they agree. A difference of up to 3% of the recorded spend, or $0.25 if that is more, counts as agreeing. The provider's figure also counts anything else using the same key, so a difference is a prompt to look, not proof of a fault.
+
+## Session start: budget and delegation
+
+The `session-strategy` hook (`mullet setup-claude --hooks session-strategy`) opens each Claude Code session with one short question: this session's budget in dollars, and the delegation strategy. It gives Claude local facts only (envelope left today and this week, Claude's weekly use, the active preset, night mode) and a recommendation, then Claude records the answer:
+
+```bash
+mullet strategy set --budget 3 --delegation ladder   # also --note TEXT
+mullet strategy                                      # show it, when it was set and when it expires
+mullet strategy clear
+```
+
+| Choice | Meaning |
+|:-------|:--------|
+| `ladder` | Cheap and free models first, Claude last (the job ladder) |
+| `claude-only` | Jobs run on Claude Code alone, no cheaper rungs |
+| `off` | Nothing is delegated |
+
+While the strategy is fresh, `mullet job plan` uses its budget as the job's cap when `--max-spend` is not given, plans a `claude-only` job with one Claude Code worker and no ladder, and refuses under `off`. Explicit flags always win, and `budget.envelope` still applies when the job runs. `off` also turns delegation off exactly as `MULLET_DELEGATION=off` does: the MCP delegation tools refuse and the delegation hooks stay quiet.
+
+The recommendation follows simple rules (`mullet.hooks.session_strategy.recommend`): no room left under the envelope means `claude-only`, or `off` when Claude's paced weekly pressure is also above `ladder.claude_high`; otherwise `ladder`. The suggested budget is `ladder.max_spend`, capped at the envelope room left. With a fresh strategy the hook tells Claude not to ask again.
+
+```yaml
+session:
+  ask_at_start: true          # false silences the hook (default true)
+  strategy_ttl_hours: 12      # how long a strategy stays in force (default 12)
+```
 
 ## Notifications
 

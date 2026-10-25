@@ -170,16 +170,42 @@ def _flag(value: str | None, default: bool) -> bool:
     return default
 
 
-def delegation_enabled() -> bool:
-    """True unless ``MULLET_DELEGATION`` is ``off``.
-
-    Read from the environment first, then from Mullet's .env files, so the
-    Claude Code hooks see the same switch as the MCP server. Default: on.
-    """
+def delegation_switch_on() -> bool:
+    """True unless ``MULLET_DELEGATION`` alone is off: the environment first, then Mullet's .env files."""
     value = os.environ.get("MULLET_DELEGATION")
     if value is None:
         value = dotenv_value("MULLET_DELEGATION")
     return _flag(value, default=True)
+
+
+def _strategy_off() -> bool:
+    """True when a fresh session strategy says ``delegation: off``; any error counts as no."""
+    try:
+        from mullet.core.strategy import delegation_off
+
+        return delegation_off()
+    except Exception:
+        return False
+
+
+def delegation_enabled() -> bool:
+    """True unless ``MULLET_DELEGATION`` is ``off`` or the session strategy says off.
+
+    The switch is read from the environment first, then from Mullet's .env
+    files, so the Claude Code hooks see the same switch as the MCP server.
+    A fresh ``mullet strategy`` with ``delegation: off`` counts the same; a
+    strategy that can't be read changes nothing. Default: on.
+    """
+    return delegation_switch_on() and not _strategy_off()
+
+
+def delegation_off_message() -> str:
+    """Why delegation is off: names ``MULLET_DELEGATION`` or the session strategy."""
+    if not delegation_switch_on():
+        return DELEGATION_OFF_MESSAGE
+    from mullet.core.strategy import STRATEGY_OFF_MESSAGE
+
+    return STRATEGY_OFF_MESSAGE
 
 
 def openrouter_referer() -> str | None:

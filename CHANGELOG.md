@@ -6,6 +6,20 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-25
+
+### Fixed
+- An attempt killed mid-step keeps what the provider charged: each progress record carries
+  the key proxy's running cost.
+
+### Added
+- **Session strategy.** `mullet strategy set --budget USD --delegation ladder|claude-only|off`
+  records this session's budget and delegation choice for `session.strategy_ttl_hours`
+  (default 12). `mullet job plan` uses the budget as the job's cap and follows the choice
+  unless flags say otherwise; `off` turns delegation off as `MULLET_DELEGATION=off` does.
+- The `session-strategy` hook asks for the strategy at session start, with local facts and a
+  recommendation. `session.ask_at_start: false` silences it.
+
 ## [2.1.0] - 2026-10-25
 
 ### Added

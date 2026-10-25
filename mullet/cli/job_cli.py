@@ -261,7 +261,42 @@ def decide_ladder(args: argparse.Namespace, profile: Profile, configured: bool, 
     return True
 
 
+def session_strategy():
+    """The fresh session strategy (`mullet strategy`), or None; an unreadable one counts as none."""
+    from mullet.core import strategy
+
+    try:
+        return strategy.load()
+    except Exception:
+        return None
+
+
+def apply_strategy(args: argparse.Namespace) -> list[str]:
+    """Fold a fresh session strategy into `args` where the user gave no flag; say what changed.
+
+    ``off`` refuses the job. ``claude-only`` plans one Claude Code worker with
+    no ladder unless --ladder, --no-ladder or --executor was given. A budget
+    becomes the job's spending cap unless --max-spend was given; the shared
+    envelope (``budget.envelope``) still applies when the job runs.
+    """
+    chosen = session_strategy()
+    if chosen is None:
+        return []
+    if chosen.delegation == "off":
+        raise CliError("the session strategy turns delegation off, so no job is planned. "
+                       "Run `mullet strategy set --delegation ladder` (or claude-only) to change it.")
+    applied = []
+    if chosen.delegation == "claude-only" and args.ladder is None and args.executor is None:
+        args.ladder, args.executor = False, "claude"
+        applied.append("claude-only (one Claude Code worker, no ladder)")
+    if args.max_spend is None and chosen.budget_usd is not None:
+        args.max_spend = chosen.budget_usd
+        applied.append(f"spending cap ${chosen.budget_usd:.2f}")
+    return applied
+
+
 def cmd_plan(args: argparse.Namespace, ledger: Ledger) -> int:
+    applied = apply_strategy(args)
     repo = _repo_root(args.repo)
     base_sha = resolve_commit(repo, args.ref)
     base_ref = args.ref
@@ -275,6 +310,8 @@ def cmd_plan(args: argparse.Namespace, ledger: Ledger) -> int:
     if not stored.exists():
         save_profile(profile)
         print(f"Saved a detected profile to {stored}. Edit it to change setup or checks, then plan again.")
+    if applied:
+        print("Session strategy applied: " + "; ".join(applied) + " (explicit flags override it).")
     executor = _EXECUTOR_NAMES[args.executor or "claude"]
     ladder_config = make_ladder().config
     use_ladder = decide_ladder(args, profile, ladder_config.configured, stored)
@@ -772,7 +809,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="one executor for every node, as before the ladder")
     plan.add_argument("--max-spend", type=_dollars, default=None,
                       help="dollars the job may spend on paid rungs, or on a paid --executor opencode model "
-                           "(default: ladder.max_spend, $2)")
+                           "(default: the session strategy's budget, else ladder.max_spend, $2)")
     plan.add_argument("--executor-model", help="the worker's model; for opencode, a provider/model id")
     plan.add_argument("--preload", action="store_true",
                       help="also pre-load the files in scope into a Claude worker's prompt (opencode always does)")

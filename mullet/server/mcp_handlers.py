@@ -98,17 +98,17 @@ def _rlog(msg: str) -> None:
 
 
 def _delegation_off_reply() -> str | None:
-    """The refusal message when MULLET_DELEGATION=off, else None.
+    """The refusal message when delegation is off (MULLET_DELEGATION or the strategy), else None.
 
     Checked first by every handler that sends work to a model provider
     (mullet_run, mullet_delegate, mullet_swarm, mullet_opencode), before any
     routing, so nothing reaches a provider while delegation is turned off.
     Trawl, status, budget and the other read-only tools don't check it.
     """
-    from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
+    from mullet.core.env import delegation_enabled, delegation_off_message
     if delegation_enabled():
         return None
-    return DELEGATION_OFF_MESSAGE
+    return delegation_off_message()
 
 
 def _active_preset():

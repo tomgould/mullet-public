@@ -16,7 +16,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
-SECTIONS = ("ladder", "budget", "delegation", "routing", "providers", "skills", "other", "unrecognised")
+SECTIONS = ("ladder", "budget", "delegation", "session", "routing", "providers", "skills", "other", "unrecognised")
 MASK = "***"
 _SECRET_WORDS = ("key", "token", "secret", "password")
 LEGACY_BUDGET_KEYS = ("per_task", "per_session", "daily")
@@ -25,7 +25,7 @@ LEGACY_NOTE = "legacy delegation path, not used by gated jobs"
 # Top-level keys the loaders and the validator know about.
 KNOWN_TOP_LEVEL = frozenset({
     "providers", "routing", "budget", "max_iterations", "server", "knowledge", "toolsets", "plugins",
-    "skills", "default_toolsets", "ladder", "opencode_timeout_seconds", "delegation",
+    "skills", "default_toolsets", "ladder", "opencode_timeout_seconds", "delegation", "session",
 })
 _OTHER_SCALARS = ("max_iterations", "default_toolsets", "opencode_timeout_seconds")
 _OTHER_BLOCKS = ("server", "knowledge", "toolsets", "plugins")
@@ -153,6 +153,22 @@ def _delegation_rows(raw: dict[str, Any], path: Path) -> list[Row]:
     return rows
 
 
+def _session_rows(raw: dict[str, Any], path: Path, problems: list[str], unknown: list[str]) -> list[Row]:
+    """The ``session:`` settings behind the session-strategy hook and `mullet strategy`."""
+    from mullet.core.strategy import SessionSettings, parse_settings
+
+    block = _block(raw, "session")
+    active = parse_settings(raw.get("session"), "session")
+    default = SessionSettings()
+    problems.extend(p for p in active.problems if "unknown setting" not in p)
+    unknown += [f"session.{k}" for k in block if k not in ("ask_at_start", "strategy_ttl_hours")]
+    notes = {"ask_at_start": "false silences the session-strategy hook",
+             "strategy_ttl_hours": "how long `mullet strategy set` stays in force"}
+    return [_row(f"session.{name}", getattr(active, name), getattr(default, name),
+                 str(path) if name in block else "default", note)
+            for name, note in notes.items()]
+
+
 def _provider_rows(raw: dict[str, Any], config: Any, path: Path) -> list[Row]:
     block = _block(raw, "providers")
     rows = []
@@ -207,6 +223,7 @@ def collect(path: Path | None = None) -> dict[str, Any]:
         "ladder": _ladder_rows(raw, target, problems, unknown),
         "budget": _budget_rows(raw, target),
         "delegation": _delegation_rows(raw, target),
+        "session": _session_rows(raw, target, problems, unknown),
         "routing": _routing_rows(raw, config, target, unknown),
         "providers": _provider_rows(raw, config, target),
         "skills": _skills_rows(raw, config, target, unknown),

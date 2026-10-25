@@ -80,6 +80,12 @@ _SPECS = (
         (("PreToolUse", "mcp__mullet__.*"),),
     ),
     HookSpec(
+        "session-strategy", "session_strategy",
+        "At session start, has Claude ask for this session's budget and delegation strategy "
+        "(ladder, claude-only or off), then record it with `mullet strategy set`.",
+        (("SessionStart", None),),
+    ),
+    HookSpec(
         "session-context", "session_context",
         "On the first prompt, lists the three most recent Mullet sessions.",
         (("UserPromptSubmit", ""),),
