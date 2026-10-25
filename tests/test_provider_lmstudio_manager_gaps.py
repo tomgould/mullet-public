@@ -1,11 +1,9 @@
 """Coverage-gap tests for mullet.core.providers.lmstudio_manager."""
 
-import json
 import logging
 import urllib.error
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.core.providers.lmstudio_manager import LMStudioManager
 
@@ -97,7 +95,7 @@ class TestEnsureLoadedGaps:
              patch("time.sleep"):
             mock_loaded.return_value = []  # never loads
             mock_run.return_value = (True, "initiated")
-            # Simulate time advancing past 30s timeout; use a generator that
+            # Simulate time advancing past the load timeout; use a generator that
             # yields large values once the sequence is exhausted so logging's
             # internal time.time() calls don't blow up with StopIteration.
             time_seq = iter([0, 5, 10, 20, 35])

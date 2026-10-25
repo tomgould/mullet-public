@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from mullet.config.loader import load_from_yaml, build_stack, _build_provider_entries, _detect_local
 from mullet.core.router.config import ProviderConfig

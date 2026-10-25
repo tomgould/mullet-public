@@ -10,50 +10,121 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
+from mullet.core.env import load_dotenv
 
-def _load_dotenv() -> None:
-    """Load .env from the project root (repo dir) if present.
-
-    Tries python-dotenv first; falls back to a minimal line parser so the
-    server works even without python-dotenv installed. Does not overwrite
-    variables already set in the environment (os.environ takes precedence).
-    """
-    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    if not env_path.exists():
-        return
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(env_path, override=False)
-        return
-    except ImportError as e:
-        logger.warning("mcp: python-dotenv not found, falling back to basic parser: %s", e)
-        pass
-    # Minimal fallback parser
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
+load_dotenv()
 
 
-_load_dotenv()
+def _code_fingerprint() -> float:
+    """Return the newest modification time of any .py file in the mullet package."""
+    package_dir = Path(__import__("mullet").__file__).parent
+    newest = 0.0
+    for path in package_dir.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > newest:
+            newest = mtime
+    return newest
 
-from mullet.server.mcp_handlers import MCP_TOOLS, MCP_HANDLERS
-from mullet.server.mcp_knowledge import MCP_KNOWLEDGE_TOOLS, MCP_KNOWLEDGE_HANDLERS
 
-# Merge knowledge tools into the main tool/handler registries
-MCP_TOOLS = MCP_TOOLS + MCP_KNOWLEDGE_TOOLS
-MCP_HANDLERS = {**MCP_HANDLERS, **MCP_KNOWLEDGE_HANDLERS}
+def _drop_mullet_modules() -> None:
+    """Remove cached mullet modules so the next import re-reads source files."""
+    protected = {"mullet", "mullet.server", "mullet.server.mcp"}
+    to_remove = [name for name in sys.modules if name.startswith("mullet.") and name not in protected]
+    for name in to_remove:
+        del sys.modules[name]
+
+
+def _load_registries() -> tuple[list, dict]:
+    """Import the MCP tool/handler registries (fresh copies after a module drop)."""
+    from mullet.server.mcp_handlers import MCP_TOOLS, MCP_HANDLERS
+    from mullet.server.mcp_knowledge import MCP_KNOWLEDGE_TOOLS, MCP_KNOWLEDGE_HANDLERS
+    return MCP_TOOLS + MCP_KNOWLEDGE_TOOLS, {**MCP_HANDLERS, **MCP_KNOWLEDGE_HANDLERS}
+
+
+MCP_TOOLS, MCP_HANDLERS = _load_registries()
 
 logger = logging.getLogger(__name__)
+
+_RELOAD_INTERVAL = 5.0
+_RELOAD_LOCK = threading.Lock()
+_reload_last_check: float = 0.0
+_reload_last_fingerprint: float = _code_fingerprint()
+_reload_pending_warning: str | None = None
+
+
+def _maybe_reload() -> str | None:
+    """Check whether Mullet source changed and, if so, reload tool registries.
+
+    Called at the start of tools/list and tools/call. Throttled to once every
+    five seconds. On success it sends an MCP notification so the client
+    refetches the tool list. On failure the existing registries are kept and a
+    short message is returned for surfacing to the user.
+    """
+    global _reload_last_check, _reload_last_fingerprint, _reload_pending_warning
+    global MCP_TOOLS, MCP_HANDLERS
+
+    if os.environ.get("MULLET_MCP_RELOAD", "").lower() == "off":
+        return None
+
+    now = time.monotonic()
+    if now - _reload_last_check < _RELOAD_INTERVAL:
+        return None
+    _reload_last_check = now
+
+    fingerprint = _code_fingerprint()
+    if fingerprint == _reload_last_fingerprint:
+        return None
+
+    with _RELOAD_LOCK:
+        # Re-check under lock in case another thread already reloaded.
+        if fingerprint == _reload_last_fingerprint:
+            return None
+
+        old_tools, old_handlers = MCP_TOOLS, MCP_HANDLERS
+        # Kept so a failed reload can put the old modules back: the old
+        # handlers' lazy imports must keep resolving to the code they came from.
+        old_modules = {k: v for k, v in sys.modules.items() if k.startswith("mullet.")}
+        try:
+            # Only a real reload drops the cached modules; at import the
+            # registries load normally, so nothing already imported is orphaned.
+            _drop_mullet_modules()
+            MCP_TOOLS, MCP_HANDLERS = _load_registries()
+            _reload_last_fingerprint = fingerprint
+            _reload_pending_warning = None
+            logger.info("Mullet code changed; reloaded MCP tool registries")
+            _write_response({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+            return None
+        except Exception as exc:
+            for name in [k for k in sys.modules if k.startswith("mullet.")]:
+                if name not in old_modules:
+                    del sys.modules[name]
+            sys.modules.update(old_modules)
+            MCP_TOOLS, MCP_HANDLERS = old_tools, old_handlers
+            _reload_last_fingerprint = fingerprint
+            message = (
+                f"Mullet's code changed but the new version failed to load "
+                f"({type(exc).__name__}: {str(exc).splitlines()[0]}); "
+                f"run /mcp in Claude Code to restart the server."
+            )
+            _reload_pending_warning = message
+            logger.warning("MCP reload failed: %s", exc, exc_info=True)
+            return message
+
+
+def _take_reload_warning() -> str | None:
+    global _reload_pending_warning
+    warning = _reload_pending_warning
+    _reload_pending_warning = None
+    return warning
 
 
 def handle_request(request: dict) -> dict:
@@ -68,7 +139,7 @@ def handle_request(request: dict) -> dict:
             "id": req_id,
             "result": {
                 "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {
                     "name": "mullet",
                     "version": __import__("mullet").__version__,
@@ -80,6 +151,7 @@ def handle_request(request: dict) -> dict:
         return None  # No response for notifications
 
     elif method == "tools/list":
+        _maybe_reload()
         return {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -89,16 +161,21 @@ def handle_request(request: dict) -> dict:
         }
 
     elif method == "tools/call":
+        _maybe_reload()
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
         handler = MCP_HANDLERS.get(tool_name)
         if not handler:
+            content = [{"type": "text", "text": json.dumps({"error": f"Unknown tool: {tool_name}"})}]
+            warning = _take_reload_warning()
+            if warning:
+                content.append({"type": "text", "text": warning})
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [{"type": "text", "text": json.dumps({"error": f"Unknown tool: {tool_name}"})}],
+                    "content": content,
                     "isError": True,
                 },
             }
@@ -111,20 +188,28 @@ def handle_request(request: dict) -> dict:
             # for human display — pass those through unchanged.
             if isinstance(result_text, dict):
                 result_text = json.dumps(result_text)
+            content = [{"type": "text", "text": result_text}]
+            warning = _take_reload_warning()
+            if warning:
+                content.append({"type": "text", "text": warning})
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [{"type": "text", "text": result_text}],
+                    "content": content,
                 },
             }
         except Exception as e:
             logger.exception("Tool %s failed", tool_name)
+            content = [{"type": "text", "text": json.dumps({"error": str(e)})}]
+            warning = _take_reload_warning()
+            if warning:
+                content.append({"type": "text", "text": warning})
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [{"type": "text", "text": json.dumps({"error": str(e)})}],
+                    "content": content,
                     "isError": True,
                 },
             }

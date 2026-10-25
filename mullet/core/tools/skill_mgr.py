@@ -43,11 +43,14 @@ SKILL_MGR_SCHEMA = {
     },
 }
 
-_skill_manager = SkillManager()
+# Tests replace this with a mock; None means a SkillManager made per call, so
+# the skills directory is worked out when the tool runs, not at import.
+_skill_manager: SkillManager | None = None
 
 
 def skill_mgr_handler(**kwargs) -> str:
     """Tool handler for SkillManager operations."""
+    manager = _skill_manager if _skill_manager is not None else SkillManager()
     action = kwargs.pop("action")
     name = kwargs.pop("name", None)
     description = kwargs.pop("description", None)
@@ -59,21 +62,21 @@ def skill_mgr_handler(**kwargs) -> str:
 
     if action == "create":
         if name and description and body:
-            result = _skill_manager.create(name, description, body, triggers, tags)
+            result = manager.create(name, description, body, triggers, tags)
         else:
             result["message"] = "Name, description, and body are required for creating a skill."
     elif action == "edit":
         if name and (body or description or triggers or tags):
-            result = _skill_manager.edit(name, body, description, triggers, tags)
+            result = manager.edit(name, body, description, triggers, tags)
         else:
             result["message"] = "Name and at least one field (body, description, triggers, tags) are required for editing a skill."
     elif action == "delete":
         if name:
-            result = _skill_manager.delete(name)
+            result = manager.delete(name)
         else:
             result["message"] = "Name is required for deleting a skill."
     elif action == "list":
-        result = {"skills": _skill_manager.list_user(), "success": True}
+        result = {"skills": manager.list_user(), "success": True}
     
     return json.dumps(result)
 

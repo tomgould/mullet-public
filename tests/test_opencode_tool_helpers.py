@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import json
-import os
+from pathlib import Path
 from unittest.mock import patch
-
-import pytest
-
 
 import mullet.tools.opencode_tool as _oc
 
@@ -84,115 +81,21 @@ class TestResolveKimiKey:
         result = _oc._resolve_kimi_key()
         assert result == "kimi-first"
 
-    def test_reads_kimi_key_from_mcp_json(self, tmp_path, monkeypatch) -> None:
+    def test_ignores_mcp_json_in_cwd_and_home(self, tmp_path, monkeypatch) -> None:
+        """Keys come only from the process environment, never from .mcp.json files."""
         monkeypatch.delenv("KIMI_API_KEY", raising=False)
         monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-        mcp_path = tmp_path / ".mcp.json"
-        mcp_path.write_text(json.dumps({
-            "mcpServers": {
-                "mullet": {
-                    "env": {"KIMI_API_KEY": "from-mcp-file"}
-                }
-            }
-        }))
-        # Patch both cwd and expanduser so it finds the tmp file
+        servers = {"mcpServers": {"mullet": {"env": {"KIMI_API_KEY": "from-mcp-file"}}}}
+        (tmp_path / ".mcp.json").write_text(json.dumps(servers))
+        (Path.home() / ".mcp.json").write_text(json.dumps(servers))
         monkeypatch.chdir(tmp_path)
-        with patch.object(_oc.os.path, "expanduser", return_value=str(tmp_path / ".mcp.json.nonexistent")):
-            result = _oc._resolve_kimi_key()
-        assert result == "from-mcp-file"
-
-    def test_reads_moonshot_key_from_mcp_json(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.delenv("KIMI_API_KEY", raising=False)
-        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-        mcp_path = tmp_path / ".mcp.json"
-        mcp_path.write_text(json.dumps({
-            "mcpServers": {
-                "svc": {
-                    "env": {"MOONSHOT_API_KEY": "ms-from-file"}
-                }
-            }
-        }))
-        monkeypatch.chdir(tmp_path)
-        with patch.object(_oc.os.path, "expanduser", return_value=str(tmp_path / ".mcp.json.nonexistent")):
-            result = _oc._resolve_kimi_key()
-        assert result == "ms-from-file"
+        assert _oc._resolve_kimi_key() is None
 
     def test_returns_none_when_no_key_anywhere(self, tmp_path, monkeypatch) -> None:
         monkeypatch.delenv("KIMI_API_KEY", raising=False)
         monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-        # Point cwd and home to paths with no .mcp.json
         monkeypatch.chdir(tmp_path)
-        nonexistent = str(tmp_path / "no_such.json")
-        with patch.object(_oc.os, "getcwd", return_value=str(tmp_path)):
-            with patch.object(_oc.os.path, "expanduser", return_value=nonexistent):
-                result = _oc._resolve_kimi_key()
-        assert result is None
-
-    def test_skips_malformed_mcp_json(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.delenv("KIMI_API_KEY", raising=False)
-        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-        mcp_path = tmp_path / ".mcp.json"
-        mcp_path.write_text("{ broken json")
-        monkeypatch.chdir(tmp_path)
-        with patch.object(_oc.os.path, "expanduser", return_value=str(tmp_path / ".mcp.json.nonexistent")):
-            result = _oc._resolve_kimi_key()
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _read_dotenv
-# ---------------------------------------------------------------------------
-
-class TestReadDotenv:
-    def test_missing_file_returns_empty_dict(self, tmp_path) -> None:
-        result = _oc._read_dotenv(str(tmp_path / "no_such.env"))
-        assert result == {}
-
-    def test_empty_file_returns_empty_dict(self, tmp_path) -> None:
-        p = tmp_path / "empty.env"
-        p.write_text("")
-        assert _oc._read_dotenv(str(p)) == {}
-
-    def test_comments_only_returns_empty_dict(self, tmp_path) -> None:
-        p = tmp_path / "comments.env"
-        p.write_text("# this is a comment\n# another one\n\n")
-        assert _oc._read_dotenv(str(p)) == {}
-
-    def test_simple_key_value(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text("FOO=bar\n")
-        assert _oc._read_dotenv(str(p)) == {"FOO": "bar"}
-
-    def test_export_prefix_stripped(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text("export FOO=bar\n")
-        assert _oc._read_dotenv(str(p)) == {"FOO": "bar"}
-
-    def test_single_quoted_value(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text("FOO='hello world'\n")
-        assert _oc._read_dotenv(str(p)) == {"FOO": "hello world"}
-
-    def test_double_quoted_value(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text('FOO="hello world"\n')
-        assert _oc._read_dotenv(str(p)) == {"FOO": "hello world"}
-
-    def test_malformed_line_skipped(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text("good_one=ok\nthis_line_has_no_equals\nstill_good=yes\n")
-        result = _oc._read_dotenv(str(p))
-        assert result == {"good_one": "ok", "still_good": "yes"}
-
-    def test_key_whitespace_stripped(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text("  FOO  =bar\n")
-        assert _oc._read_dotenv(str(p)) == {"FOO": "bar"}
-
-    def test_blank_lines_skipped(self, tmp_path) -> None:
-        p = tmp_path / ".env"
-        p.write_text("\n\nFOO=bar\n\n\nBAZ=qux\n")
-        assert _oc._read_dotenv(str(p)) == {"FOO": "bar", "BAZ": "qux"}
+        assert _oc._resolve_kimi_key() is None
 
 
 # ---------------------------------------------------------------------------
@@ -200,54 +103,42 @@ class TestReadDotenv:
 # ---------------------------------------------------------------------------
 
 class TestResolveForwardedKeys:
-    """env-var > .env precedence, only known keys forwarded."""
+    """Only known keys, and only from the process environment."""
 
-    def _isolate(self, monkeypatch, tmp_path, dotenv_content: str = "") -> None:
-        """Common setup: clear forwarded keys from env, point all .env candidates
-        at tmp_path/.env, and chdir there (so $PWD/.env also resolves to it)."""
+    def _clear(self, monkeypatch) -> None:
         for key in _oc._FORWARDED_API_KEYS:
             monkeypatch.delenv(key, raising=False)
-        if dotenv_content:
-            (tmp_path / ".env").write_text(dotenv_content)
-        real_expanduser = os.path.expanduser
-        tmp_env = str(tmp_path / ".env")
 
-        def fake_expanduser(p):
-            if p.startswith("~"):
-                return tmp_env
-            return real_expanduser(p)
-
-        monkeypatch.setattr(_oc.os.path, "expanduser", fake_expanduser)
-        monkeypatch.chdir(tmp_path)
-
-    def test_env_var_wins_over_dotenv(self, tmp_path, monkeypatch) -> None:
-        self._isolate(monkeypatch, tmp_path, "OPENROUTER_API_KEY=from-dotenv\n")
+    def test_env_var_forwarded(self, monkeypatch) -> None:
+        self._clear(monkeypatch)
         monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
-        result = _oc._resolve_forwarded_keys()
-        assert result.get("OPENROUTER_API_KEY") == "from-env"
+        assert _oc._resolve_forwarded_keys() == {"OPENROUTER_API_KEY": "from-env"}
 
-    def test_dotenv_used_when_env_absent(self, tmp_path, monkeypatch) -> None:
-        self._isolate(monkeypatch, tmp_path, "OPENROUTER_API_KEY=from-dotenv\n")
-        result = _oc._resolve_forwarded_keys()
-        assert result.get("OPENROUTER_API_KEY") == "from-dotenv"
+    def test_dotenv_files_ignored(self, tmp_path, monkeypatch) -> None:
+        """Neither the project's .env nor ~/.mullet/.env is read."""
+        self._clear(monkeypatch)
+        (tmp_path / ".env").write_text("OPENROUTER_API_KEY=from-project-dotenv\n")
+        (Path.home() / ".mullet").mkdir()
+        (Path.home() / ".mullet" / ".env").write_text("OPENAI_API_KEY=from-home-dotenv\n")
+        monkeypatch.chdir(tmp_path)
+        assert _oc._resolve_forwarded_keys() == {}
 
-    def test_missing_everywhere_omitted(self, tmp_path, monkeypatch) -> None:
-        self._isolate(monkeypatch, tmp_path, "")
-        result = _oc._resolve_forwarded_keys()
-        assert "OPENROUTER_API_KEY" not in result
+    def test_empty_value_omitted(self, monkeypatch) -> None:
+        self._clear(monkeypatch)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "")
+        assert "OPENROUTER_API_KEY" not in _oc._resolve_forwarded_keys()
 
-    def test_unknown_keys_not_forwarded(self, tmp_path, monkeypatch) -> None:
-        self._isolate(
-            monkeypatch, tmp_path,
-            "FOOBAR_API_KEY=should-be-ignored\nOPENROUTER_API_KEY=ok\n",
-        )
+    def test_unknown_keys_not_forwarded(self, monkeypatch) -> None:
+        self._clear(monkeypatch)
+        monkeypatch.setenv("FOOBAR_API_KEY", "should-be-ignored")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "ok")
         result = _oc._resolve_forwarded_keys()
         assert "FOOBAR_API_KEY" not in result
         assert result.get("OPENROUTER_API_KEY") == "ok"
 
-    def test_all_eight_known_keys_resolvable(self, tmp_path, monkeypatch) -> None:
-        body = "\n".join(f"{k}=val-{k}" for k in _oc._FORWARDED_API_KEYS) + "\n"
-        self._isolate(monkeypatch, tmp_path, body)
+    def test_all_eight_known_keys_resolvable(self, monkeypatch) -> None:
+        for k in _oc._FORWARDED_API_KEYS:
+            monkeypatch.setenv(k, f"val-{k}")
         result = _oc._resolve_forwarded_keys()
         for k in _oc._FORWARDED_API_KEYS:
             assert result.get(k) == f"val-{k}", f"missing {k}"

@@ -8,30 +8,9 @@ import traceback
 from pathlib import Path
 
 
-def _load_dotenv() -> None:
-    """Load .env from project root into os.environ (does not overwrite existing vars)."""
-    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    if not env_path.exists():
-        return
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(env_path, override=False)
-        return
-    except ImportError as _exc:
-        logger.warning("cli/main: Failed to import dotenv: %s", _exc)
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
+from mullet.core.env import load_dotenv
 
-
-_load_dotenv()
+load_dotenv()
 
 from mullet.core.agent.runner import AgentRunner
 from mullet.core.agent.types import AgentResult
@@ -49,7 +28,7 @@ from mullet.core.tools import terminal, file_ops, web, delegate, code_exec, brow
 logger = logging.getLogger("mullet")
 
 
-SUBCOMMANDS = {"serve", "mcp", "doctor", "init", "update", "history", "config", "stats", "completion", "explain", "autopilot", "ralph", "ralphthon", "ultrawork", "team", "eco", "login", "watch", "cost", "budget", "review", "plugins", "schedule", "research", "ingest", "search", "graph", "source", "reindex", "hud", "hud-claude", "pool", "docs", "evaluate", "setup-claude", "logs", "models", "clean", "override", "observations", "decisions", "routing", "review-session", "memory-sync", "live-test", "preset"}
+SUBCOMMANDS = {"serve", "mcp", "doctor", "init", "update", "history", "config", "stats", "completion", "explain", "login", "watch", "cost", "budget", "review", "plugins", "schedule", "research", "ingest", "search", "graph", "source", "reindex", "hud", "hud-claude", "pool", "docs", "evaluate", "setup-claude", "logs", "models", "clean", "override", "observations", "decisions", "routing", "review-session", "memory-sync", "live-test", "preset", "reap", "ladder"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,13 +44,13 @@ def build_parser() -> argparse.ArgumentParser:
   doctor        Check system health and provider status
   init          Generate mullet.yaml config for current project
   update        Update existing project scaffolding (LOOP_AGREEMENT, hooks, providers)
-  setup-claude  Install recommended Claude Code global config for Mullet
-
-  autopilot     Full autonomous: plan → execute → verify
-  ralph         Persistence loop until PRD criteria pass
-  ultrawork     Parallel agent execution
-  team N        N coordinated agents with staged pipeline
-  eco MODE      Run MODE with reduced token cost
+  setup-claude  Register Mullet with Claude Code (MCP server, skills, opt-in hooks)
+  hook          Run one of Mullet's Claude Code hooks (mullet hook list)
+  job           Plan and run a gated job in a sandboxed clone (mullet job --help)
+  ladder        Report on how the delegation ladder has done across jobs (mullet ladder report --help)
+  migrate-state Move an older ~/.mullet into the XDG directories (--dry-run first)
+  paths         Print Mullet's config, state, data, cache and pools directories
+  reap          Stop idle or orphaned Mullet work (use --dry-run first)
   override      Toggle budget override (mullet override on/off)
 
   hud           Show/configure the terminal status HUD
@@ -111,7 +90,6 @@ examples:
   mullet --pool backend "fix the auth bug"         # with project context
   mullet --speed fast "implement user auth"        # skip local, use Kimi
   mullet --provider kimi "refactor this module"   # explicit provider
-  mullet --verbose ralph "implement user auth"    # orchestration mode
   mullet --json "explain this" | jq .response     # JSON output
   cat file.py | mullet "review this code"         # pipe content
   mullet serve --port 8080                        # start API server
@@ -143,10 +121,6 @@ examples:
     parser.add_argument("--tools", action="store_true", help="List available tools and exit")
     parser.add_argument("--skills", action="store_true", dest="list_skills", help="List available skills and exit")
     parser.add_argument("--export", help="Export conversation to file (json or md format)")
-    parser.add_argument("--resume", action="store_true", help="Resume interrupted orchestration mode")
-    parser.add_argument("--require-goal", action="store_true",
-                        help="Require .mullet/autopilot/goal.md to exist and be filled before starting "
-                             "autopilot/ralph. Enforces the last-human-interaction gate.")
     parser.add_argument("--no-claude", dest="no_claude", action="store_true", help="Skip .claude/ scaffolding during init")
     parser.add_argument("--no-memory", dest="no_memory", action="store_true", help="Skip project memory seeding during init")
     parser.add_argument("--no-pool", dest="no_pool", action="store_true", help="Skip pool creation during init")
@@ -190,14 +164,18 @@ def get_opencode_declared_context(model_id: str) -> int | None:
     return None
 
 
-def get_local_loaded_context(base_url: str = "http://localhost:1234") -> int:
+def get_local_loaded_context(base_url: str | None = None) -> int:
     """Query the actual loaded context length from a local LM Studio server.
 
     Uses /api/v0/models which returns `loaded_context_length` for each loaded model.
     Falls back to 0 if the endpoint is unavailable or no model is loaded.
+    ``base_url`` is the server root and defaults to ``LOCAL_LLM_URL`` without ``/v1``.
     """
     import urllib.request as _req
     import json as _json
+    if base_url is None:
+        from mullet.core.env import local_llm_host
+        base_url = local_llm_host()
     try:
         with _req.urlopen(f"{base_url}/api/v0/models", timeout=3) as resp:
             data = _json.loads(resp.read())
@@ -332,7 +310,7 @@ def resolve_provider(args, allowed_providers: frozenset[str] | None = None) -> P
             if api_key:
                 from mullet.core.providers.anthropic import AnthropicProvider
                 return AnthropicProvider(api_key=api_key, model=args.model or default_model)
-            # Fall back to Claude CLI (Max subscription OAuth via subprocess)
+            # Fall back to the user's own Claude CLI (subprocess)
             from mullet.core.providers.claude_cli import ClaudeCLIProvider, is_claude_cli_available
             if is_claude_cli_available():
                 cli_model = cli_model_map.get(provider_name, "sonnet")
@@ -357,12 +335,6 @@ def resolve_provider(args, allowed_providers: frozenset[str] | None = None) -> P
             except ImportError:
                 print("Error: boto3 not installed. Run: pip install boto3", file=sys.stderr)
                 return None
-        elif provider_name == "gemini-cli":
-            from mullet.core.providers.gemini_cli import GeminiCLIProvider, is_gemini_cli_available
-            if not is_gemini_cli_available():
-                print("Error: gemini CLI not found. Install: npm install -g @google/gemini-cli", file=sys.stderr)
-                return None
-            return GeminiCLIProvider(model=args.model or "gemini-2.5-flash")
         elif provider_name in ("local", "lmstudio", "ollama"):
             return detect_local_provider()
         elif provider_name in ("openrouter",):
@@ -454,15 +426,6 @@ def resolve_provider(args, allowed_providers: frozenset[str] | None = None) -> P
             except ImportError as _exc:
                 logger.warning("cli/main: GeminiProvider import failed: %s", _exc)
 
-        # Try Gemini CLI (OAuth) as fallback
-        if allow_gemini:
-            try:
-                from mullet.core.providers.gemini_cli import GeminiCLIProvider, is_gemini_cli_available
-                if is_gemini_cli_available():
-                    return GeminiCLIProvider(model=args.model or "gemini-2.5-flash")
-            except ImportError as _exc:
-                logger.warning("cli/main: GeminiCLIProvider import failed: %s", _exc)
-
     if allow_local:
         return detect_local_provider()
     return None
@@ -524,10 +487,6 @@ def build_agent(args, task: str = "") -> tuple[AgentRunner, str, list[str]]:
             stack = build_stack()
             router = stack["router"]
 
-            # Apply eco modifier if active
-            if getattr(args, "_eco", False):
-                router.local_only = False  # eco doesn't force local, just downtiers
-
             from mullet.core.router.resolver import ProviderResolver
             resolver = ProviderResolver(router)
             provider, decision = resolver.route_and_resolve(
@@ -550,7 +509,7 @@ def build_agent(args, task: str = "") -> tuple[AgentRunner, str, list[str]]:
     if not provider:
         print("Error: No LLM provider found.\n", file=sys.stderr)
         print("Options:", file=sys.stderr)
-        print("  1. Start LM Studio (port 1234) or Ollama (port 11434)", file=sys.stderr)
+        print("  1. Start LM Studio (port 1234) or Ollama (port 11434), or set LOCAL_LLM_URL / OLLAMA_URL", file=sys.stderr)
         print("  2. Set ANTHROPIC_API_KEY for Claude", file=sys.stderr)
         print("  3. Set OPENROUTER_API_KEY for OpenRouter", file=sys.stderr)
         print("  4. Use --base-url http://your-endpoint/v1", file=sys.stderr)
@@ -704,32 +663,33 @@ def _run_init(args=None):
 def _run_doctor(full: bool = False, fix: bool = False) -> int:
     """Check system health and report status of all components.
 
+    Read-only. Without --full it makes no network calls, so it stays quick.
+
     Args:
-        full: If True, run additional probes (e.g. Kimi reachability HTTPS check).
-              Slower; off by default to keep `mullet doctor` snappy.
+        full: If True, also check GitHub for a newer Mullet and probe the
+              provider APIs. Slower, and needs the network.
         fix: If True, attempt auto-remediation for non-passing checks.
 
     Returns:
         Exit code: 0 if all checks pass (or all fixed when fix=True), 1 otherwise.
     """
     import mullet
+    from mullet.cli.doctor_checks import claude_setup_checks, gpu_checks, toolchain_checks
 
     print(f"Mullet v{mullet.__version__} — System Health Check\n")
 
-    try:
-        from mullet.cli.update_checker import check_for_update
-        _upd = check_for_update(timeout=3.0)
-        if _upd["update_available"]:
-            print(f"  ⚠  {_upd['message']}\n")
-    except Exception:
-        pass
+    if full:
+        try:
+            from mullet.cli.update_checker import check_for_update
+            _upd = check_for_update(timeout=3.0)
+            if _upd["update_available"]:
+                print(f"  ⚠  {_upd['message']}\n")
+        except Exception:
+            pass
 
-    checks = []
-
-    # Python version
-    import platform
-    py = platform.python_version()
-    checks.append(("Python", py, "ok"))
+    # Python, Claude Code CLI, git, the job sandbox (bubblewrap and socat on
+    # Linux) and a warning when ANTHROPIC_API_KEY would override subscription login.
+    checks = toolchain_checks()
 
     # Local LLM
     local = detect_local_provider()
@@ -760,25 +720,15 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
     else:
         checks.append(("Local LLM", "Not found (start LM Studio/Ollama)", "warn"))
 
-    # Anthropic
-    import os
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        checks.append(("Anthropic API", "Key set", "ok"))
-    else:
-        checks.append(("Anthropic API", "ANTHROPIC_API_KEY not set", "info"))
+    # The GPU: free VRAM, temperature, who holds Mullet's GPU lease, LM Studio
+    # on the GPU, and the power limit.
+    checks.extend(gpu_checks())
 
     # Google Gemini
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
         checks.append(("Google Gemini", "API key set", "ok"))
     else:
-        try:
-            from mullet.core.providers.gemini_cli import is_gemini_cli_available
-            if is_gemini_cli_available():
-                checks.append(("Google Gemini", "CLI available (OAuth)", "ok"))
-            else:
-                checks.append(("Google Gemini", "GOOGLE_API_KEY not set", "info"))
-        except ImportError:
-            checks.append(("Google Gemini", "GOOGLE_API_KEY not set", "info"))
+        checks.append(("Google Gemini", "GOOGLE_API_KEY not set", "info"))
 
     # OpenRouter
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
@@ -868,8 +818,9 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
 
     # Config
     from pathlib import Path
-    config_paths = ["mullet.yaml", str(Path.home() / ".mullet" / "config.yaml")]
-    config_found = any(Path(p).exists() for p in config_paths)
+    from mullet.cli.doctor_checks import config_file, database_path
+    config_paths = [Path("mullet.yaml"), config_file("config.yaml")]
+    config_found = any(p.exists() for p in config_paths)
     if config_found:
         checks.append(("Config", "mullet.yaml found", "ok"))
     else:
@@ -892,46 +843,11 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
             checks.append(("Config Valid", f"Error validating config: {_exc}", "warn"))
 
     # Database
-    db_path = Path.home() / ".mullet" / "mullet.db"
+    db_path = database_path()
     if db_path.exists():
         checks.append(("Database", str(db_path), "ok"))
     else:
         checks.append(("Database", "Will be created on first use", "info"))
-
-    # Git (for git tool)
-    try:
-        import subprocess
-        git_result = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=5)
-        if git_result.returncode == 0:
-            git_ver = git_result.stdout.strip().replace("git version ", "")
-            checks.append(("Git", git_ver, "ok"))
-        else:
-            checks.append(("Git", "Not found (git tool won't work)", "warn"))
-    except Exception:
-        checks.append(("Git", "Not found", "warn"))
-
-    # Version drift — warn if local is behind origin/master
-    try:
-        import subprocess as _sp
-        _sp.run(
-            ["git", "fetch", "--quiet", "origin", "master"],
-            capture_output=True, timeout=5,
-            cwd=str(Path(__file__).resolve().parent.parent.parent),
-        )
-        behind = _sp.run(
-            ["git", "rev-list", "--count", "HEAD..origin/master"],
-            capture_output=True, text=True, timeout=5,
-            cwd=str(Path(__file__).resolve().parent.parent.parent),
-        )
-        n = int(behind.stdout.strip()) if behind.returncode == 0 and behind.stdout.strip().isdigit() else None
-        if n is None:
-            checks.append(("Version drift", "Could not check (fetch failed)", "info"))
-        elif n == 0:
-            checks.append(("Version drift", "Up to date with origin/master", "ok"))
-        else:
-            checks.append(("Version drift", f"{n} commit{'s' if n != 1 else ''} behind origin/master — run: git pull", "warn"))
-    except Exception as _exc:
-        checks.append(("Version drift", f"Could not check: {_exc}", "info"))
 
     # Project detection
     try:
@@ -945,105 +861,9 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
     except Exception as _exc:
         logger.warning("cli/main: Failed to detect project: %s", _exc)
 
-    # kimi-docs knowledge pool — helps Kimi routing with provider docs.
-    # Look under both naming conventions: the user might have created the
-    # pool with the CLI's default slug ("kimi-docs") or with the underscore
-    # form ("kimi_docs") that mullet pool create produces from "Kimi Docs".
-    try:
-        from mullet.server.mcp_knowledge import _get_pools_dir
-        pools_dir = _get_pools_dir()
-        kimi_pool = None
-        for candidate in ("kimi-docs", "kimi_docs"):
-            p = pools_dir / candidate
-            if p.exists():
-                kimi_pool = p
-                break
-        if kimi_pool is not None:
-            meta_file = kimi_pool / ".pool_metadata.json"
-            if meta_file.exists():
-                import json as _json
-                meta = _json.loads(meta_file.read_text())
-                chunk_count = meta.get("chunk_count", "?")
-                last_indexed = meta.get("last_indexed_at", "")[:10] if meta.get("last_indexed_at") else "unknown"
-                checks.append(("kimi-docs pool", f"{chunk_count} chunks, indexed {last_indexed} ({kimi_pool.name})", "ok"))
-            else:
-                checks.append(("kimi-docs pool", f"Exists (not yet indexed) ({kimi_pool.name})", "info"))
-        else:
-            checks.append(("kimi-docs pool", "Not found — run: mullet ingest --source web --pool kimi-docs", "info"))
-    except Exception:
-        pass
-
-    # Claude Code global CLAUDE.md — verify Mullet delegation rules are present.
-    # We don't require the exact wording from the canonical template (users
-    # customise their global CLAUDE.md); instead we look for evidence that some
-    # form of delegation guidance + filesystem rule are present. Strict-string
-    # matching produced a permanent warning even for users with stronger
-    # delegation rules than the template.
-    claude_md = Path.home() / ".claude" / "CLAUDE.md"
-    if claude_md.exists():
-        content = claude_md.read_text()
-        delegation_markers = (
-            "Delegation (Mullet)",
-            "Token Budget & Delegation",
-            "Delegation ladder",
-            "mullet_opencode",
-        )
-        filesystem_markers = (
-            "API LLM delegates have NO filesystem access",
-            "API LLM delegates have no filesystem access",
-            "no filesystem access",
-            "delegates have no filesystem",
-        )
-        missing = []
-        if not any(m in content for m in delegation_markers):
-            missing.append("delegation rules")
-        if not any(m in content for m in filesystem_markers):
-            missing.append("API filesystem rule")
-        if missing:
-            checks.append(("Claude CLAUDE.md", f"Missing: {', '.join(missing)} — run: mullet setup-claude", "warn"))
-        else:
-            checks.append(("Claude CLAUDE.md", "Mullet rules present", "ok"))
-    else:
-        checks.append(("Claude CLAUDE.md", "Not found — run: mullet setup-claude", "warn"))
-
-    # Claude Code global settings.json — verify Mullet hooks are installed
-    claude_settings = Path.home() / ".claude" / "settings.json"
-    try:
-        import json as _json
-        settings_data = _json.loads(claude_settings.read_text()) if claude_settings.exists() else {}
-        hooks_data = settings_data.get("hooks", {})
-        ups_hooks = hooks_data.get("UserPromptSubmit", [])
-        ups_cmds = " ".join(
-            h.get("command", "") for group in ups_hooks for h in group.get("hooks", [])
-        )
-        missing_hooks = []
-        if "delegation_reminder" not in ups_cmds:
-            missing_hooks.append("delegation_reminder")
-        if "mullet_pretooluse_rewriter" not in " ".join(
-            h.get("command", "")
-            for group in hooks_data.get("PreToolUse", [])
-            for h in group.get("hooks", [])
-        ):
-            missing_hooks.append("mullet_pretooluse_rewriter")
-        if missing_hooks:
-            checks.append(("Claude hooks", f"Missing: {', '.join(missing_hooks)} — run: mullet setup-claude", "warn"))
-        else:
-            checks.append(("Claude hooks", "delegation_reminder + pretooluse_rewriter active", "ok"))
-
-        # statusLine — must exist and point to a resolvable binary
-        status_line = settings_data.get("statusLine", {})
-        sl_cmd = status_line.get("command", "") if isinstance(status_line, dict) else ""
-        if not sl_cmd:
-            checks.append(("Claude statusLine", "Not configured — run: mullet setup-claude", "warn"))
-        else:
-            import shutil as _shutil
-            from pathlib import Path as _Path
-            if _Path(sl_cmd).is_file() or _shutil.which(sl_cmd):
-                checks.append(("Claude statusLine", sl_cmd, "ok"))
-            else:
-                checks.append(("Claude statusLine", f"Binary not found: {sl_cmd} — run: mullet setup-claude", "warn"))
-    except Exception as _exc:
-        checks.append(("Claude hooks", f"Could not read settings.json: {_exc}", "warn"))
+    # Claude Code: what `mullet setup-claude` recorded, and hooks an older
+    # setup-claude left pointing into a checkout. Never runs `claude mcp`.
+    checks.extend(claude_setup_checks())
 
     # Security posture
     try:
@@ -1191,7 +1011,8 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
                     print(f"    mullet routing purge-provider {_pname} --yes")
 
     if not local and not os.environ.get("ANTHROPIC_API_KEY"):
-        print("\n⚠ No LLM provider available. Start LM Studio or set ANTHROPIC_API_KEY.")
+        print("\n⚠ No local LLM found: delegation needs one, or a provider key such as "
+              "OPENROUTER_API_KEY. Mullet jobs need only the claude CLI.")
 
     return 0 if ok_count == len(checks) else 1
 
@@ -1205,21 +1026,6 @@ def _get_knowledge(args):
         return KnowledgeManager(args.client)
     except Exception:
         return None
-
-
-class _ModeProgressHandler(logging.Handler):
-    """Logging handler that shows orchestration progress on stderr."""
-
-    def emit(self, record):
-        """Print iteration/story log records as `↳ msg` progress lines."""
-        msg = record.getMessage()
-        # Show key orchestration events as progress indicators
-        if "iteration" in msg.lower() or "story" in msg.lower():
-            sys.stderr.write(f"\033[34m  ↳\033[0m {msg}\n")
-            sys.stderr.flush()
-        elif "phase" in msg.lower() or "stage" in msg.lower():
-            sys.stderr.write(f"\033[34m▶\033[0m {msg}\n")
-            sys.stderr.flush()
 
 
 def _maybe_preflight(task: str, args) -> None:
@@ -1253,7 +1059,7 @@ def _delegation_refused(args=None) -> bool:
     """Say so and return True when MULLET_DELEGATION=off.
 
     Every CLI path that sends work to a model provider (task runs, review,
-    watch, the orchestration modes, the REPL, live-test) checks this before
+    watch, the REPL, live-test) checks this before
     building a provider, so nothing is dispatched while delegation is off.
     """
     from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
@@ -1414,115 +1220,6 @@ def run_task(task: str, args) -> int:
                     logger.debug("Skill pipeline chain failed: %s", e)
 
     return 0 if result.completed else 1
-
-
-def run_mode(mode_name: str, task: str, args) -> int:
-    """Run a task in an orchestration mode."""
-    if _delegation_refused(args):
-        return 2
-    # Check for --resume: load saved state and inject context
-    if getattr(args, "resume", False):
-        from mullet.core.orchestration.state import ModeState
-        state = ModeState(None, mode_name)
-        saved = state.load()
-        if saved:
-            phase = saved.get("phase", "unknown")
-            print(f"\033[33m↻ Resuming {mode_name} from phase: {phase}\033[0m", file=sys.stderr)
-            # Use saved task if no new task provided
-            if not task and saved.get("task"):
-                task = saved["task"]
-            # Inject resume context into the task
-            if saved.get("plan"):
-                task = f"[RESUMING — previous plan below]\n{saved['plan'][:2000]}\n\n{task}"
-            # G25: rehydrate the user's --providers envelope from saved state
-            # unless the caller passed --providers on this invocation.
-            saved_providers = saved.get("allowed_providers")
-            if saved_providers and not getattr(args, "providers", None):
-                args.providers = ",".join(sorted(saved_providers))
-                logger.info(
-                    "run_mode: restored allowed_providers from saved state: %s",
-                    args.providers,
-                )
-        else:
-            print(f"No saved state for {mode_name}. Starting fresh.", file=sys.stderr)
-
-    if not task:
-        print(f"Error: {mode_name} requires a task.", file=sys.stderr)
-        return 1
-
-    agent, _, _ = build_agent(args, task)
-
-    # Track file changes during mode execution
-    from mullet.core.agent.diff import ChangeTracker
-    tracker = ChangeTracker(watch_dirs=[os.getcwd()])
-    tracker.snapshot_before()
-
-    # Progress indicator for modes
-    import logging as _logging
-    mode_logger = _logging.getLogger("mullet.core.orchestration")
-    _progress_handler = _ModeProgressHandler()
-    mode_logger.addHandler(_progress_handler)
-    mode_logger.setLevel(_logging.INFO)
-
-    if mode_name == "ultrawork":
-        from mullet.core.orchestration.ultrawork import UltraworkMode
-        print("\033[34m▶ ultrawork\033[0m decomposing task...", file=sys.stderr)
-        mode = UltraworkMode(max_workers=3)
-        result = mode.execute(task, agent)
-        print(result.summary)
-        if args.verbose:
-            print(f"\n--- ultrawork: {len(result.subtask_results)} subtasks, "
-                  f"tiers: {result.tiers_used}", file=sys.stderr)
-        return 0 if result.completed else 1
-
-    elif mode_name == "ralph":
-        from mullet.core.orchestration.ralph import RalphMode
-        km = _get_knowledge(args)
-        print("\033[34m▶ ralph\033[0m generating PRD...", file=sys.stderr)
-        ralph = RalphMode(knowledge=km)
-        result = ralph.execute(task, agent)
-        print(result.summary)
-        tracker.snapshot_after()
-        print(tracker.format_changes(), file=sys.stderr)
-        if args.verbose:
-            print(f"\n--- ralph: {result.stories_completed}/{result.stories_total} stories, "
-                  f"{result.iterations_used} iterations", file=sys.stderr)
-        return 0 if result.completed else 1
-
-    elif mode_name == "autopilot":
-        from mullet.core.orchestration.autopilot import AutopilotMode
-        km = _get_knowledge(args)
-        print("\033[34m▶ autopilot\033[0m planning...", file=sys.stderr)
-        autopilot = AutopilotMode(knowledge=km)
-        result = autopilot.execute(task, agent)
-        print(result.summary)
-        tracker.snapshot_after()
-        print(tracker.format_changes(), file=sys.stderr)
-        if args.verbose:
-            print(f"\n--- autopilot: qa={'PASS' if result.qa_passed else 'FAIL'}", file=sys.stderr)
-        return 0 if result.completed else 1
-
-    elif mode_name == "team":
-        from mullet.core.orchestration.team import TeamMode
-        km = _get_knowledge(args)
-        num_workers = 3
-        # Try to get num_workers from remaining args
-        remaining = getattr(args, "remaining", [])
-        if remaining and remaining[0].isdigit():
-            num_workers = int(remaining[0])
-        team = TeamMode(knowledge=km, num_workers=num_workers)
-        result = team.execute(task, agent)
-        print(result.summary)
-        if args.verbose:
-            print(f"\n--- team: {num_workers} workers, "
-                  f"verify={'PASS' if result.verify_passed else 'FAIL'}, "
-                  f"fix_cycles={result.fix_cycles}", file=sys.stderr)
-        return 0 if result.completed else 1
-
-    else:
-        result = agent.run(task)
-        _print_result(result, args)
-        return 0 if result.completed else 1
 
 
 def _print_result(result: AgentResult, args, duration: float = 0):
@@ -1710,28 +1407,91 @@ def main():
 
 
 _INSTALL_HELP = """\
-Install Mullet from GitHub (needs Python 3.10+ and git):
+Install Mullet from GitHub on Linux or macOS (needs git, and uv or pipx):
 
-  git clone https://github.com/tomgould/mullet-public.git
-  cd mullet-public
-  pip install -e .
-
-Optional extras, installed with pip install -e ".[EXTRA]" in the clone:
-  gemini    Google Gemini provider
-  bedrock   AWS Bedrock provider
-  postgres  PostgreSQL backend
-  all       gemini, bedrock and postgres, plus NVIDIA GPU monitoring
-
-Or run the installer, which does the same in its own virtualenv:
   curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
+
+The installer runs one of these, which you can also run yourself:
+
+  uv tool install git+https://github.com/tomgould/mullet-public.git
+  pipx install git+https://github.com/tomgould/mullet-public.git
+
+With an optional extra (gemini, bedrock, postgres or all):
+
+  uv tool install "mullet[gemini] @ git+https://github.com/tomgould/mullet-public.git"
+
+Then run `mullet doctor` and `mullet setup-claude`.
 
 Mullet is not on PyPI: the "mullet" package there is an unrelated project."""
 
 
+def _run_packaged(module: str, args: list[str]) -> int:
+    """Run one of Mullet's own modules as a script with this interpreter.
+
+    ``python -m`` would put the current directory first on the import path, so
+    a stray ``argparse.py`` there would run in place of the real one. The child
+    drops that entry before importing anything.
+    """
+    import subprocess as _sp
+    code = (
+        "import sys; sys.path.pop(0); import runpy; "
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)"
+    )
+    # -u: the reindexer's progress output should appear as it happens
+    return _sp.run([sys.executable, "-u", "-c", code, *args]).returncode
+
+
+def _cmd_paths(argv: list[str]) -> int:
+    """Print Mullet's directories as ``name=path`` lines, or one bare path."""
+    from mullet.core import paths as _paths
+    dirs = {
+        "config": _paths.config_dir,
+        "state": _paths.state_dir,
+        "data": _paths.data_dir,
+        "cache": _paths.cache_dir,
+        "pools": _paths.pools_dir,
+    }
+    if not argv:
+        for name, fn in dirs.items():
+            print(f"{name}={fn()}")
+        return 0
+    if len(argv) == 1 and argv[0] in dirs:
+        print(dirs[argv[0]]())
+        return 0
+    print(f"usage: mullet paths [{'|'.join(dirs)}]", file=sys.stderr)
+    return 2
+
+
 def _main_inner():
+    if len(sys.argv) >= 2 and sys.argv[1] == "hook":
+        from mullet.cli.hook_cli import cmd_hook
+        sys.exit(cmd_hook(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "setup-claude":
+        from mullet.cli.setup_claude import cmd_setup_claude
+        sys.exit(cmd_setup_claude(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "preset":
         from mullet.cli.preset_cli import cmd_preset
         return cmd_preset(sys.argv[2:])
+    if len(sys.argv) >= 2 and sys.argv[1] == "job":
+        from mullet.cli.job_cli import cmd_job
+        sys.exit(cmd_job(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "local":
+        from mullet.cli.local_cli import cmd_local
+        sys.exit(cmd_local(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "night":
+        from mullet.cli.night_cli import cmd_night
+        sys.exit(cmd_night(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "ladder":
+        from mullet.cli.ladder_cli import cmd_ladder
+        sys.exit(cmd_ladder(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "migrate-state":
+        from mullet.cli.migrate_state import cmd_migrate_state
+        sys.exit(cmd_migrate_state(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "paths":
+        sys.exit(_cmd_paths(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "reap":
+        from mullet.cli.reap_cmd import cmd_reap
+        sys.exit(cmd_reap(sys.argv[2:]))
 
     parser = build_parser()
     args = parser.parse_args()
@@ -1812,12 +1572,9 @@ def _main_inner():
         return 0
 
     if command == "setup-claude":
-        from mullet.cli.setup_claude import run_setup_claude
-        dry_run = "--check" in sys.argv or "--dry-run" in sys.argv
-        yes = "--yes" in sys.argv
-        force = "--force" in sys.argv
-        run_setup_claude(dry_run=dry_run, yes=yes, force=force)
-        return
+        # Reached when global options come first (`mullet --verbose setup-claude`).
+        from mullet.cli.setup_claude import cmd_setup_claude
+        sys.exit(cmd_setup_claude(task_parts))
 
     if command == "models":
         _run_models_command(task_parts)
@@ -1972,7 +1729,8 @@ def _main_inner():
             print("  No plugins loaded.")
         print()
         # Show plugin directories
-        dirs = [Path.home() / ".mullet" / "plugins", Path(".mullet") / "plugins"]
+        from mullet.core.paths import data_dir
+        dirs = [data_dir() / "plugins", Path(".mullet") / "plugins"]
         print("  Plugin directories:")
         for d in dirs:
             exists = "exists" if d.exists() else "create to add plugins"
@@ -2320,21 +2078,23 @@ def _main_inner():
     if command == "login":
         if task in ("--help", "-h", "help"):
             print("Usage: mullet login")
-            print("Authenticate with a Personal Access Token (stored at ~/.mullet/credentials.json).")
+            from mullet.core.paths import config_dir
+            print(f"Authenticate with a Personal Access Token (stored at {config_dir() / 'credentials.json'}).")
             sys.exit(0)
         print("mullet login: Paste your Personal Access Token:")
         token = input("> ").strip()
         if not token.startswith("mllt_"):
             print("Warning: Token should start with 'mllt_'", file=sys.stderr)
 
-        cred_dir = os.path.expanduser("~/.mullet")
+        from mullet.core.paths import config_dir
+        cred_dir = config_dir()
         os.makedirs(cred_dir, mode=0o700, exist_ok=True)
         import json
         cred_path = os.path.join(cred_dir, "credentials.json")
         fd = os.open(cred_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump({"token": token}, f)
-        print("Token saved to ~/.mullet/credentials.json")
+        print(f"Token saved to {cred_path}")
 
         # Verify the token if a server is running
         try:
@@ -2377,30 +2137,12 @@ def _main_inner():
         return
 
     if command == "reindex":
-        # Delegate to the direct in-process reindex script
-        import subprocess as _sp
-        from pathlib import Path as _Path
-        script = str(_Path(__file__).parent.parent.parent / "scripts" / "reindex.py")
-        reindex_args = ["python3", "-u", script]  # -u for unbuffered output
-        # Map CLI args — pass through all flags after "reindex"
+        # Everything after "reindex" goes to the reindexer as given; a leading
+        # bare word is the pool name (`mullet reindex mypool --graph`).
         raw_args = sys.argv[sys.argv.index("reindex") + 1:] if "reindex" in sys.argv else []
-        # Filter out args that mullet's own parser consumed
-        skip_next = False
-        for i, arg in enumerate(raw_args):
-            if skip_next:
-                skip_next = False
-                continue
-            if arg.startswith("--") or arg.startswith("-"):
-                reindex_args.append(arg)
-                # Check if this flag takes a value
-                if arg in ("--pool", "-c") and i + 1 < len(raw_args):
-                    reindex_args.append(raw_args[i + 1])
-                    skip_next = True
-            elif not any(raw_args[j] in ("--pool", "-c") for j in range(max(0, i-1), i)):
-                # Positional arg that's not a flag value — treat as pool name
-                reindex_args.extend(["--pool", arg])
-        result = _sp.run(reindex_args, cwd=str(_Path.cwd()))
-        sys.exit(result.returncode)
+        if raw_args and not raw_args[0].startswith("-"):
+            raw_args = ["--pool", *raw_args]
+        sys.exit(_run_packaged("mullet.knowledge.reindex", raw_args))
 
     if command == "pool":
         sub = task_parts[0] if task_parts else "list"
@@ -2510,18 +2252,14 @@ def _main_inner():
     if command == "evaluate":
         pool = task_parts[0] if task_parts else None
         if not pool or pool in ("--help", "-h", "help"):
-            print("Usage: mullet evaluate <pool_name> [--dataset <path>]")
-            print("Run quality evaluation against a pool using test queries.")
+            print("Usage: mullet evaluate <pool_name> [--tags T] [--rag] [--compare A,B] [--json] [--verbose]")
+            print("       mullet evaluate --list")
+            print("Run quality evaluation against a pool using its eval dataset.")
             sys.exit(0 if pool in ("--help", "-h", "help") else 1)
-        from pathlib import Path as _Path
-        sys.path.insert(0, str(_Path(__file__).parent.parent.parent / "scripts"))
-        from evaluate import run_evaluation
-        dataset = None
-        if "--dataset" in sys.argv:
-            idx = sys.argv.index("--dataset")
-            dataset = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else None
-        run_evaluation(pool, dataset_path=dataset)
-        return
+        raw_args = sys.argv[sys.argv.index("evaluate") + 1:]
+        if not raw_args[0].startswith("-"):
+            raw_args = ["--client", *raw_args]
+        sys.exit(_run_packaged("mullet.knowledge.evaluate", raw_args))
 
     if command == "search":
         if not task:
@@ -2720,70 +2458,6 @@ def _main_inner():
         from mullet.cli.hud import cmd_hud_claude
         sys.exit(cmd_hud_claude(task_parts))
 
-    if command == "ralphthon":
-        # Ralphthon is marathon ralph — delegate to ralph mode with extended budget
-        args.max_iterations = max(args.max_iterations, 200)
-        command = "ralph"
-        task = task or ""
-
-    if command in ("autopilot", "ralph", "ultrawork", "team", "eco"):
-        if task in ("--help", "-h", "help"):
-            _HELP = {
-                "autopilot": "Full autonomous: plan → execute → verify. Usage: mullet autopilot \"<task>\"",
-                "ralph":     "Persistence loop until PRD criteria pass. Usage: mullet ralph \"<task>\"",
-                "ultrawork": "Parallel agent execution. Usage: mullet ultrawork \"<task>\"",
-                "team":      "N coordinated agents with staged pipeline. Usage: mullet team N \"<task>\"",
-                "eco":       "Run MODE with reduced token cost. Usage: mullet eco <mode> \"<task>\"",
-            }
-            print(_HELP.get(command, f"Usage: mullet {command} \"<task>\""))
-            sys.exit(0)
-
-        # `mullet autopilot init [...]` scaffolds `.mullet/autopilot/` state files
-        # and exits.
-        if command == "autopilot" and task_parts and task_parts[0] == "init":
-            from mullet.cli.autopilot_init import run_autopilot_init
-            sys.exit(run_autopilot_init(list(task_parts[1:])))
-
-        if not task and not getattr(args, "resume", False):
-            print(f"Error: {command} requires a task (or --resume).", file=sys.stderr)
-            sys.exit(1)
-
-        # `--require-goal` gate: enforce the last-human-interaction pattern before
-        # going autonomous. Flag may be parsed by argparse (when passed before
-        # the subcommand) or captured in REMAINDER (when passed after).
-        _require_goal_flag = (
-            getattr(args, "require_goal", False)
-            or "--require-goal" in task_parts
-        )
-        if _require_goal_flag and command in ("autopilot", "ralph"):
-            # Strip the flag out of the task text so it doesn't leak into the prompt.
-            task_parts = [p for p in task_parts if p != "--require-goal"]
-            task = " ".join(task_parts) if task_parts else task
-            from mullet.cli.autopilot_init import require_goal
-            ok, msg = require_goal()
-            if not ok:
-                print(f"Error: {msg}", file=sys.stderr)
-                sys.exit(3)
-            if getattr(args, "verbose", False):
-                print(f"[--require-goal] {msg}", file=sys.stderr)
-
-        mode_name = command
-        is_eco = False
-        if mode_name == "eco":
-            is_eco = True
-            for m in ("ralph", "ultrawork", "autopilot"):
-                if task.startswith(m):
-                    mode_name = m
-                    task = task[len(m):].strip()
-                    break
-            else:
-                mode_name = "ralph"
-            if args.verbose:
-                print(f"Eco mode: downtiering {mode_name}", file=sys.stderr)
-        # Store eco flag for router to use
-        args._eco = is_eco
-        sys.exit(run_mode(mode_name, task, args))
-
     # Handle piped stdin
     if not sys.stdin.isatty():
         stdin_content = sys.stdin.read().strip()
@@ -2797,29 +2471,6 @@ def _main_inner():
 
     # Default: direct task or REPL
     if task:
-        # Check if task triggers a skill with a mode (e.g., /autopilot → AutopilotMode)
-        # Skip auto-matching when --provider is set (delegated tasks go direct)
-        matched_skill = getattr(args, "_matched_skill", None)
-        explicit_provider = getattr(args, "provider", None)
-        if not matched_skill and not explicit_provider:
-            # Pre-check skill match for mode activation
-            try:
-                from mullet.core.skills.loader import SkillLoader
-                from mullet.core.skills.registry import SkillRegistry
-                loader = SkillLoader()
-                sr = SkillRegistry(loader=loader)
-                sr.load_all()
-                m = sr.match(task)
-                if m and m.skill.metadata.mode:
-                    matched_skill = m.skill
-            except Exception as _exc:
-                logger.warning("cli/main: Failed to pre-check skill match: %s", _exc)
-
-        if matched_skill and matched_skill.metadata.mode:
-            mode_name = matched_skill.metadata.mode
-            if mode_name in ("autopilot", "ralph", "ultrawork", "team"):
-                sys.exit(run_mode(mode_name, task, args))
-
         sys.exit(run_task(task, args))
 
     # No task — REPL mode

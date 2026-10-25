@@ -500,6 +500,7 @@ def test_provider_spend_5h_excludes_old_entries(tmp_path):
         "cost_usd": 99.99,
         "tags": [],
     }
+    history_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     history_path(tmp_path).write_text(json.dumps(entry) + "\n")
     result = provider_spend_5h(base=tmp_path)
     # Old entry should not be counted
@@ -669,7 +670,6 @@ def test_daily_cost_summary_empty(tmp_path):
 
 def test_daily_cost_summary_groups_by_day(tmp_path):
     from mullet.core.routing_history import daily_cost_summary, RoutingOutcome, record
-    from datetime import datetime, timezone
     # Write 3 records: 2 on one date, 1 on another
     for i, (date, cost) in enumerate([("2026-06-14", 1.5), ("2026-06-14", 0.5), ("2026-06-15", 2.0)]):
         o = RoutingOutcome(
@@ -693,3 +693,38 @@ def test_daily_cost_summary_groups_by_day(tmp_path):
     assert abs(result["days"]["2026-06-15"] - 2.0) < 1e-6
     assert result["count"] == 2
     assert result["max"] == pytest.approx(2.0)
+
+
+def test_history_path_default_uses_state_dir_and_does_not_touch_cwd(tmp_path, monkeypatch):
+    """history_path() with no base must not create .mullet/ in the working directory.
+
+    Reading the path and writing through record() should create the file in
+    Mullet's state directory instead. Tests run with a throwaway HOME, so the
+    state directory is safe to write to.
+    """
+    import mullet.core.routing_history as rh
+    from mullet.core.paths import state_dir
+
+    monkeypatch.chdir(tmp_path)
+    path = rh.history_path()
+    assert path == state_dir() / "routing_history.jsonl"
+    assert not (tmp_path / ".mullet").exists()
+    assert list(tmp_path.iterdir()) == []
+
+    # Reading the path must not create anything in cwd either.
+    assert list(rh.iter_recent(limit=10)) == []
+    assert not (tmp_path / ".mullet").exists()
+
+    # Only writing should create the file, and it should be under the state dir.
+    outcome = rh.make_outcome("test task", "kimi", "kimi-k2", "STANDARD", True, 100, 50, 100)
+    rh.record(outcome)
+    assert path.exists()
+    assert not (tmp_path / ".mullet").exists()
+    assert list(rh.iter_recent(limit=10)) != []
+
+
+def test_history_path_base_argument_still_uses_dot_mullet(tmp_path):
+    """Passing an explicit base keeps the old .mullet/ layout."""
+    from mullet.core.routing_history import history_path
+
+    assert history_path(tmp_path) == tmp_path / ".mullet" / "routing_history.jsonl"

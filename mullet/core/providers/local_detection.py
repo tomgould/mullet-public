@@ -19,12 +19,14 @@ import asyncio
 import logging
 import time
 
+from mullet.core.env import local_llm_url, ollama_url
 from mullet.core.providers.openai_compat import OpenAICompatibleProvider
 
 logger = logging.getLogger("mullet.core.providers.local_detection")
 
-# Ports probed in order. 1234 = LM Studio (handled via LMStudioManager),
-# 11434 = Ollama, 8000 = generic OpenAI-compat.
+# Default ports: 1234 = LM Studio (handled via LMStudioManager), 11434 =
+# Ollama, 8000 = generic OpenAI-compat. The first two can be moved with
+# LOCAL_LLM_URL and OLLAMA_URL; see _fallback_urls().
 LOCAL_PORTS = [1234, 11434, 8000]
 
 _CACHE_TTL: float = 30.0  # Re-probe every 30 seconds
@@ -48,6 +50,11 @@ def clear_local_provider_cache() -> None:
     _refresh_task = None
 
 
+def _fallback_urls() -> list[str]:
+    """OpenAI-compatible roots probed after LM Studio: Ollama, then port 8000."""
+    return [f"{ollama_url()}/v1", "http://localhost:8000/v1"]
+
+
 def detect_local_provider() -> OpenAICompatibleProvider | None:
     """Auto-detect a running local LLM server, loading the best model if needed.
 
@@ -65,20 +72,20 @@ def detect_local_provider() -> OpenAICompatibleProvider | None:
             return _cached_local_provider
         _cached_local_provider = None
 
-    # Try LM Studio first (port 1234) using the full lifecycle manager
+    # Try LM Studio first (LOCAL_LLM_URL) using the full lifecycle manager
     try:
-        from mullet.core.providers.lmstudio_manager import LMStudioManager
-        mgr = LMStudioManager(port=1234)
-        model_id, was_loaded = mgr.get_or_load_provider(ttl=60)
+        from mullet.core.providers.lmstudio_manager import LOAD_TTL_S, LMStudioManager
+        mgr = LMStudioManager()
+        model_id, was_loaded = mgr.get_or_load_provider(ttl=LOAD_TTL_S)
         if model_id:
             provider = OpenAICompatibleProvider(
-                base_url="http://localhost:1234/v1",
+                base_url=local_llm_url(),
                 model=model_id,
             )
             _cached_local_provider = provider
             _cache_timestamp = now
             if not was_loaded:
-                logger.info("Loaded local model: %s (TTL=60s)", model_id)
+                logger.info("Loaded local model: %s (TTL=%ds)", model_id, LOAD_TTL_S)
             return provider
     except Exception as e:
         logger.debug("LMStudioManager failed: %s", e)
@@ -86,8 +93,8 @@ def detect_local_provider() -> OpenAICompatibleProvider | None:
     # Fallback: plain port scan for Ollama / other OpenAI-compat servers
     import urllib.request
     import json as _json
-    for port in LOCAL_PORTS[1:]:  # skip 1234 — already tried above
-        url = f"http://localhost:{port}/v1/models"
+    for base_url in _fallback_urls():
+        url = f"{base_url}/models"
         try:
             with urllib.request.urlopen(url, timeout=2) as resp:
                 if resp.status != 200:
@@ -103,15 +110,15 @@ def detect_local_provider() -> OpenAICompatibleProvider | None:
                     "default",
                 )
                 _cached_local_provider = OpenAICompatibleProvider(
-                    base_url=f"http://localhost:{port}/v1",
+                    base_url=base_url,
                     model=chat_model,
                 )
                 _cache_timestamp = now
                 return _cached_local_provider
         except Exception as _exc:
             logger.debug(
-                "local_detection: failed to detect local provider on port %s: %s",
-                port,
+                "local_detection: failed to detect local provider at %s: %s",
+                base_url,
                 _exc,
             )
             continue

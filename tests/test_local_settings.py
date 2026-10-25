@@ -1,10 +1,9 @@
 """Personal settings read from the environment (or .env), with neutral defaults.
 
-MULLET_NO_AI_ATTRIBUTION: off by default, so `mullet init`, `mullet
-setup-claude` and `mullet autopilot init` write no commit-trailer rule into
-the projects they set up; on, they write the "no Co-Authored-By or other AI
-attribution" rule. (MULLET_OPENROUTER_REFERER is covered in test_openrouter.py,
-MULLET_DELEGATION in test_delegation_switch.py.)
+MULLET_NO_AI_ATTRIBUTION: off by default, so `mullet init` writes no
+commit-trailer rule into the projects it sets up; on, it writes the "no
+Co-Authored-By or other AI attribution" rule. (MULLET_OPENROUTER_REFERER is
+covered in test_openrouter.py, MULLET_DELEGATION in test_delegation_switch.py.)
 """
 from __future__ import annotations
 
@@ -13,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from mullet.cli import autopilot_init, setup_claude
 from mullet.cli.init_project import run_init
 from mullet.core.env import no_ai_attribution, openrouter_referer
 
@@ -76,57 +74,3 @@ def test_init_seeds_the_trailer_rule_when_asked(tmp_path, monkeypatch):
     assert index[2].startswith("- [No Co-Authored-By in commits](feedback_coauthored_by.md)")
     # The other notes are still listed after it.
     assert any("feedback_prefer_concurrent.md" in line for line in index[3:])
-
-
-# ---------------------------------------------------------------------------
-# mullet setup-claude: the /commit skill
-# ---------------------------------------------------------------------------
-
-def _commit_skill(tmp_path: Path, monkeypatch) -> str:
-    monkeypatch.setattr(setup_claude, "_get_claude_dir", lambda: tmp_path / ".claude")
-    setup_claude._copy_claude_skill_files(dry_run=False, force=True)
-    return (tmp_path / ".claude" / "skills" / "commit.md").read_text()
-
-
-def test_commit_skill_follows_repo_conventions_by_default(tmp_path, monkeypatch):
-    text = _commit_skill(tmp_path, monkeypatch)
-    assert setup_claude._COMMIT_STEP_NEUTRAL in text
-    assert "Co-Authored-By" not in text
-
-
-def test_commit_skill_forbids_attribution_when_asked(tmp_path, monkeypatch):
-    monkeypatch.setenv("MULLET_NO_AI_ATTRIBUTION", "on")
-    text = _commit_skill(tmp_path, monkeypatch)
-    assert "5. " + setup_claude._COMMIT_STEP_NO_AI_ATTRIBUTION in text
-    assert setup_claude._COMMIT_STEP_NEUTRAL not in text
-
-
-# ---------------------------------------------------------------------------
-# mullet autopilot init: standards.md
-# ---------------------------------------------------------------------------
-
-def _standards(tmp_path: Path) -> str:
-    assert autopilot_init.run_autopilot_init([], cwd=tmp_path) == 0
-    return (tmp_path / ".mullet" / "autopilot" / "standards.md").read_text()
-
-
-def test_autopilot_standards_have_no_trailer_rule_by_default(tmp_path):
-    assert "Co-Authored-By" not in _standards(tmp_path)
-
-
-def test_autopilot_standards_get_the_rule_when_asked(tmp_path, monkeypatch):
-    monkeypatch.setenv("MULLET_NO_AI_ATTRIBUTION", "on")
-    text = _standards(tmp_path)
-    git = text.split("## Git", 1)[1]
-    assert autopilot_init._NO_AI_ATTRIBUTION_RULE in git
-
-
-def test_rule_is_added_once_and_keeps_later_sections(monkeypatch):
-    monkeypatch.setenv("MULLET_NO_AI_ATTRIBUTION", "on")
-    src = "# S\n\n## Git\n- one\n\n## Other\n- two\n"
-    out = autopilot_init._with_commit_rules(src)
-    assert out == "# S\n\n## Git\n- one\n" + autopilot_init._NO_AI_ATTRIBUTION_RULE + "\n\n## Other\n- two\n"
-    assert autopilot_init._with_commit_rules(out) == out
-    assert autopilot_init._with_commit_rules("# S\n").endswith(
-        "## Git\n" + autopilot_init._NO_AI_ATTRIBUTION_RULE + "\n"
-    )

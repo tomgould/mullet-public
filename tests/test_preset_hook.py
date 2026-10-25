@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/preset_prompt.py."""
+"""Tests for mullet/hooks/preset_prompt.py, run through its scripts/hooks shim."""
 
 import json
 import os

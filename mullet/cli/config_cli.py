@@ -1,6 +1,7 @@
 """CLI subcommand: ``mullet config {get|set|list|edit|reset}``.
 
-Reads and writes ``~/.config/mullet/config.json``.
+Reads and writes ``config.json`` in the config directory (``~/.config/mullet``
+by default; see ``mullet.core.paths``).
 """
 
 from __future__ import annotations
@@ -12,11 +13,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+from mullet.core.paths import config_dir
 from mullet.core.providers.spend_caps import _find_budget_file, load_budget_config
 
 
-_CONFIG_DIR = Path.home() / ".config" / "mullet"
-_CONFIG_PATH = _CONFIG_DIR / "config.json"
+# Tests point these at temporary paths; None means config.json in the config
+# directory (see mullet.core.paths).
+_CONFIG_DIR: Path | None = None
+_CONFIG_PATH: Path | None = None
+
+
+def _config_path() -> Path:
+    return _CONFIG_PATH or (_CONFIG_DIR or config_dir()) / "config.json"
 
 _VALID_BUDGET_PROVIDERS = {"openrouter", "kimi", "anthropic", "gemini", "local"}
 
@@ -28,13 +36,13 @@ _DEFAULTS: dict[str, object] = {
 
 
 def _ensure_dir() -> None:
-    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _config_path().parent.mkdir(parents=True, exist_ok=True)
 
 
 def _load() -> dict[str, object]:
-    if _CONFIG_PATH.exists():
+    if _config_path().exists():
         try:
-            data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            data = json.loads(_config_path().read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 return data
         except json.JSONDecodeError:
@@ -44,7 +52,7 @@ def _load() -> dict[str, object]:
 
 def _save(data: dict[str, object]) -> None:
     _ensure_dir()
-    _CONFIG_PATH.write_text(
+    _config_path().write_text(
         json.dumps(data, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )

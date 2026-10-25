@@ -193,10 +193,10 @@ class TestAgentStateMissingLines:
         with patch.object(state_file.__class__, "read_text", side_effect=OSError("disk error")):
             assert agent_state._read_current() == []
 
-    def test_state_path_returns_dot_mullet_path(self):
-        """_state_path returns ~/.mullet/state/agents.json (line 22)."""
-        path = agent_state._state_path()
-        assert str(path).endswith(".mullet/state/agents.json")
+    def test_state_path_is_under_the_state_dir(self):
+        """_state_path returns state/agents.json in the state directory (line 22)."""
+        from mullet.core.paths import state_dir
+        assert agent_state._state_path() == state_dir() / "state" / "agents.json"
 
     def test_update_agent_status(self, tmp_path, monkeypatch):
         """update_agent_status changes the status field (lines 92-98)."""

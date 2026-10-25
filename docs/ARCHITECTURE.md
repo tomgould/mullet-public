@@ -4,7 +4,9 @@
 
 ## Overview
 
-Mullet is a Python monolith (~97K lines, ~337 modules, 17,700+ tests) that routes AI tasks to the cheapest capable model. Local GPU for grunt work, cloud for architecture. One `pip install`, one command.
+Mullet is a Python monolith (about 84K lines in about 370 modules, about 16,900 tests). Its main job is `mullet job`: large coding jobs that run unattended in a sandboxed clone, with every step checked by gates Mullet runs itself (see Jobs below). It also routes single tasks to the cheapest capable model, serves the Trawl knowledge engine over MCP, and keeps an OpenAI-compatible API. It installs from GitHub with `scripts/install.sh` (never `pip install mullet`: that PyPI package is someone else's).
+
+The diagram below is the single-task path (`mullet "<task>"`, the API and the delegation tools). Jobs have their own path, described under Jobs.
 
 ```
 User → CLI/API/MCP → Router → Provider → Agent Loop → Tools → Response
@@ -26,14 +28,13 @@ User → CLI/API/MCP → Router → Provider → Agent Loop → Tools → Respon
 - **cost.py** — Cost estimation with savings display vs premium baseline.
 - **context.py** — Multi-source context injection with priority ordering.
 
-### Providers (`mullet/core/providers/`) — 10 backends
+### Providers (`mullet/core/providers/`) — 9 backends
 - **openai_compat.py** — Covers LM Studio, Ollama, vLLM, OpenRouter, Kimi, OpenAI. Retry with exponential backoff on 429/5xx.
 - **anthropic.py** — Native Anthropic with prompt caching (~75% savings), tool_result batching, streaming.
 - **gemini.py** — Native Google Gemini via google-genai SDK. Tool calling via FunctionDeclaration.
-- **gemini_cli.py** — Free-tier Gemini via the `gemini` CLI (OAuth, no API key).
 - **bedrock.py** — AWS Bedrock Converse API.
 - **ollama.py** — Native Ollama integration.
-- **claude_cli.py** — Routes via a local Claude Code CLI/Max subscription.
+- **claude_cli.py**: Runs the user's own `claude` command as a provider. Mullet never reads Claude's credentials; Anthropic models through Mullet's own providers need `ANTHROPIC_API_KEY`.
 - **openrouter.py** — OpenRouter meta-provider.
 - **kimi.py** — Moonshot AI Kimi K2 provider. Used by swarm orchestration and default STANDARD tier.
 - **kimi_async.py** — Async facade over KimiProvider via `asyncio.to_thread`. Used by SwarmDispatcher.
@@ -50,13 +51,13 @@ User → CLI/API/MCP → Router → Provider → Agent Loop → Tools → Respon
 
 ### Presets (`mullet/core/presets.py`)
 
-Named routing policies (allowed provider sets, speed mode, opencode model, native-only flag) persisted to `~/.config/mullet/presets.yaml`. Built-ins (`balanced-mix`, `local-only`, `claude-only`, `cheap-cloud`) are always merged from code on load. Enforced in the MCP handlers before model selection.
+Named routing policies (allowed provider sets, speed mode, opencode model, native-only flag) persisted to `presets.yaml` in the config directory (`~/.config/mullet` by default). Built-ins (`balanced-mix`, `local-only`, `claude-only`, `cheap-cloud`) are always merged from code on load. Enforced in the MCP handlers before model selection.
 
 ### Pre-flight routing pipeline (added 2026-04-28)
 
 Routing now uses a 3-stage pipeline before any paid model call:
 
-1. **`mullet/core/router/preflight.py`** — calls a near-free LLM (local LM Studio first, then `gemini-2.5-flash`, then heuristic fallback) to estimate input tokens, expected output tokens, and complexity tier. Results are cached to `~/.mullet/cache/preflight.jsonl` (7-day TTL, atomic writes).
+1. **`mullet/core/router/preflight.py`**: calls a near-free LLM (local LM Studio first, then `gemini-2.5-flash`, then heuristic fallback) to estimate input tokens, expected output tokens, and complexity tier. Results are cached to `preflight.jsonl` in the cache directory (`mullet paths cache`; 7-day TTL, atomic writes).
 2. **`mullet/core/router/routing_matrix.py`** — `select_kimi_model()`, `select_gemini_model()`, and `select_local_model()` implement a 3-axis cheapest-viable-model selector. `select_local_model()` is adaptive: it classifies whatever models LM Studio exposes by parsing model ID strings (param count, coder/vision/reasoning flags), so it works on any machine.
 3. **Fallback chain** — `_best_local()` → `_best_kimi()` → `_best_gemini()` in `ModelRegistry`. Local is attempted first for LOW/STANDARD tasks on economy/balanced speed mode.
 
@@ -64,7 +65,7 @@ Routing now uses a 3-stage pipeline before any paid model call:
 
 ### Tools (`mullet/core/tools/`) — 24 tools
 
-See "Built-in tools" in `README.md` for the full list. Highlights:
+`mullet --tools` prints the full list. Highlights:
 
 | Toolset | Tools |
 |---|---|
@@ -72,7 +73,7 @@ See "Built-in tools" in `README.md` for the full list. Highlights:
 | file | file_ops (read/write/patch/list/search), patch (unified diffs, fuzzy matching) |
 | web | web_search (DuckDuckGo), fetch_page |
 | browser | browse (read, links, forms, extract, CSS selectors) |
-| code | code_exec (sandboxed subprocess), python_repl (persistent state) |
+| code | code_exec (subprocess in a temp directory with a timeout; no OS sandbox), python_repl (persistent state) |
 | delegation | delegate (child agent spawning, depth-limited) |
 | git | git (status, diff, log, blame — read-only) |
 | testing | run_tests (pytest + npm with structured results) |
@@ -98,16 +99,29 @@ Trawl knowledge engine. Over 40 MCP tools covering pools, search, graphs, ingest
 - **`mullet/core/knowledge/predigest.py`** — Local LLM pre-processes heavy content → stores summary → cloud reasons over it.
 
 ### Orchestration (`mullet/core/orchestration/`)
-- **ultrawork** — Decompose → parallel children → merge results.
-- **ralph** — PRD-driven persistence loop. Generate stories → implement → verify → loop.
-- **autopilot** — Plan → ralph → QA → fix cycle → summary.
-- **team** — 5-stage pipeline: plan → prd → exec → verify → fix.
-- **planner** — Structured plan generation with dependency ordering.
-- **verifier** — Per-criterion verification with evidence collection.
-- **eco** — Downtier modifier (CRITICAL→ADVANCED→STANDARD→LOCAL). Tier names: LOCAL (<30) / STANDARD (30-75) / ADVANCED (76-89) / CRITICAL (90+).
-- **swarm** — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
+- **swarm** — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. It returns text, can save a JSON report, and never edits project files. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
+- **shared_memory.py**: file-backed key/value store behind the `shared_mem` tool.
+- **scheduler.py**: recurring tasks for `mullet schedule`.
+- **autoresearch.py**: research pipeline object behind `mullet research`.
 
-### Skills (`mullet/core/skills/`) — 10 built-in
+### Jobs (`mullet/jobs/`)
+
+Long, unattended work runs as a `mullet job`: a planned set of nodes, each run by the user's own `claude -p` in a sandboxed private clone and checked by gates Mullet runs itself (G0 baseline, then real change, scope, static checks, build, tests against the baseline, test weakening, and a fresh review). A node's status comes from gate results only, never from words in a model's reply. The job hands back a branch and an evidence report. See [MULLET2.md](MULLET2.md).
+
+- **planner.py**: task tree (at most three levels and 40 nodes).
+- **clone.py**: private clone; the worker never sees its git directory.
+- **sandbox.py**: bubblewrap on Linux, no unsandboxed fallback. Jobs refuse to start on macOS for now.
+- **gates.py**, **review.py**: gates G0 to G7.
+- **ledger.py**: SQLite ledger; **report.py** builds the report from it.
+- **profile.py**: per-repo setup and check commands. The stored profile lives in the `projects` folder of the config directory.
+- **runner.py**: detached runner with resume; **notify.py**: desktop and Slack messages when a job blocks, pauses or finishes.
+- **executors/claude_code.py**: the only worker today.
+
+Job data (clones, ledger, logs) lives in `jobs/` under the data directory; `MULLET_JOBS_DIR` overrides it.
+
+Coming, and not built yet: an opencode worker, a delegation ladder across Claude, OpenRouter, Kimi, free and local models, `mullet job bench`, a machine guard (a GPU lease) and a macOS sandbox.
+
+### Skills (`mullet/core/skills/`) — 6 built-in (brainstorm, code-review, mullet-job, plan, pool-improve, session-review)
 - **loader.py** — Discovers SKILL.md files across builtin/user/project scopes.
 - **registry.py** — Trigger matching (slash commands + keywords + learned).
 - **invoker.py** — Pipeline context, requirements, handoff artifacts.
@@ -123,9 +137,8 @@ Trawl knowledge engine. Over 40 MCP tools covering pools, search, graphs, ingest
 - **db.py** — SQLite schema (6 tables), solo bootstrap.
 
 ### CLI (`mullet/cli/`)
-- 40+ commands including serve, mcp, doctor, init, setup-claude, history, config, stats, completion, explain, autopilot, ralph, ultrawork, team, eco, login, hud, pool, ingest, search, reindex, evaluate, live-test, review-session, and others
+- 40+ commands including serve, mcp, doctor, init, setup-claude, job, history, config, stats, completion, explain, login, hud, pool, ingest, search, reindex, evaluate, live-test, review-session, and others
 - --verbose shows routing decisions, cost savings
-- --resume resumes interrupted orchestration modes
 - --export saves conversation to JSON or Markdown
 - --tools, --skills for discovery
 - Pipe support: `cat file.py | mullet "review this code"`
@@ -142,9 +155,11 @@ Live subcommands:
 
 - **mullet serve** — OpenAI-compatible REST + WebSocket API server.
 - **mullet mcp** — stdio MCP server for Claude Code and other MCP clients.
-- **mullet doctor** — diagnostic checks for install / models / pools / version drift.
+- **mullet doctor**: read-only checks of Python, the `claude` CLI, git, the job sandbox (bubblewrap and `socat` on Linux), the Claude Code setup, providers and pools.
 - **mullet init** — initialize a new project profile (writes `.mullet/`).
-- **mullet setup-claude** — idempotent Claude Code integration setup.
+- **mullet setup-claude**: registers the MCP server and skills with Claude Code, adds hooks only with `--hooks`, and records every change so `--uninstall` removes exactly those.
+- **mullet hook**: runs one of the Claude Code hooks in `mullet/hooks/` (`mullet hook list`).
+- **mullet job**: plan, approve, run and merge gated jobs in a sandboxed clone.
 - **mullet config** — read/write user + project config keys (get/set/list/edit/reset/budget).
 - **mullet preset** — manage routing presets.
 - **mullet budget** — token spend tracking and limits.
@@ -189,7 +204,6 @@ Live subcommands:
 - **prompt_cache.py** (`mullet/core/providers/`) — Anthropic prompt caching (~75% cost savings).
 - **reasoning.py** — Thinking block extraction (DeepSeek-R1, Claude, QwQ).
 - **redact.py** — Secret redaction (20+ API key patterns, DB connstrings).
-- **verification.py** (`mullet/core/orchestration/`) — Standardized BUILD/TEST/LINT checks for orchestration.
 
 ## Dependencies
 
@@ -198,7 +212,7 @@ Optional: boto3 (Bedrock)
 
 ## Testing
 
-17,700+ tests (mostly unit with mocked providers; integration tests require LM Studio on localhost:1234).
+About 16,900 tests, about 4.5 minutes in parallel (`python3 -m pytest tests -q -n 16 --timeout 300`). Tests run with no network, no provider keys and a throwaway home directory (mostly unit with mocked providers; live tests, which need a real model, are excluded by default).
 
 ### Agent Intelligence
 - **Project detection** — auto-detects language, framework, test command from directory contents.

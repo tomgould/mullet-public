@@ -125,8 +125,9 @@ class TestGetErrorLogPath:
     def test_ends_with_errors_log(self):
         assert get_error_log_path().endswith("errors.log")
 
-    def test_contains_mullet(self):
-        assert ".mullet" in get_error_log_path()
+    def test_under_the_state_dir(self):
+        from mullet.core.paths import state_dir
+        assert get_error_log_path().startswith(str(state_dir()))
 
 
 # ---------------------------------------------------------------------------

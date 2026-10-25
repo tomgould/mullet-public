@@ -225,9 +225,11 @@ async def test_swarm_retries_transient_failures():
     assert result.results[1].response == "ok on retry"
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_run_swarm_with_real_api():
-    """Integration test with real API - skipped unless API key is set."""
+    """Integration test with the real Kimi API. Marked live: Mullet loads .env,
+    so a key is nearly always present and an unmarked run spends real money."""
     import os
     if not (os.getenv("KIMI_API_KEY") or os.getenv("MOONSHOT_API_KEY")):
         pytest.skip("Requires KIMI_API_KEY or MOONSHOT_API_KEY environment variable")

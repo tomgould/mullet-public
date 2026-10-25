@@ -53,7 +53,10 @@ class LearnedSkillManager:
     """Manage learned skills stored in a single JSON file."""
 
     def __init__(self, skills_dir: Path | None = None) -> None:
-        self._skills_dir = skills_dir or Path.home() / ".mullet"
+        if skills_dir is None:
+            from mullet.core.paths import data_dir
+            skills_dir = data_dir()
+        self._skills_dir = skills_dir
         self._path = self._skills_dir / "learned_skills.json"
         self._skills: list[LearnedSkill] = []
         self._load()

@@ -126,7 +126,7 @@ def validate_config(data: dict) -> ValidationResult:
     # Warn about unknown top-level keys
     known_keys = {
         "providers", "routing", "budget", "max_iterations", "server",
-        "knowledge", "toolsets", "plugins", "skills", "default_toolsets",
+        "knowledge", "toolsets", "plugins", "skills", "default_toolsets", "ladder",
     }
     for key in data:
         if key not in known_keys and not key.startswith("#"):

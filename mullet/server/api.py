@@ -210,36 +210,26 @@ async def _sync_response(
     """Non-streaming response — run agent and return complete result."""
     import asyncio
 
+    mode = opts.get("mode", "standard")
+    if mode != "standard":
+        return web.json_response({
+            "error": {
+                "message": f"mode '{mode}' was removed. For multi-step work, use `mullet job`.",
+                "type": "invalid_request_error",
+            },
+        }, status=400)
+
     agent, provider = _build_server_agent(user_message, opts)
     if not agent:
         return web.json_response({"error": "No provider available"}, status=503)
 
-    mode = opts.get("mode", "standard")
-
-    # Run in orchestration mode if requested
     def _execute():
-        if mode == "autopilot":
-            from mullet.core.orchestration.autopilot import AutopilotMode
-            ap = AutopilotMode()
-            r = ap.execute(user_message, agent)
-            return r.summary, r.completed, r.total_tokens
-        elif mode == "ralph":
-            from mullet.core.orchestration.ralph import RalphMode
-            rm = RalphMode()
-            r = rm.execute(user_message, agent)
-            return r.summary, r.completed, r.total_tokens
-        elif mode == "ultrawork":
-            from mullet.core.orchestration.ultrawork import UltraworkMode
-            um = UltraworkMode()
-            r = um.execute(user_message, agent, provider)
-            return r.final_response, r.completed, r.tokens_used
-        else:
-            # Pass prior conversation as history for multi-turn support
-            history = [m for m in messages if m.get("role") != "user" or m.get("content") != user_message]
-            # Keep only system + prior turns (not the current user message)
-            prior = [m for m in history if m != messages[-1]] if len(messages) > 1 else None
-            r = agent.run(user_message, conversation_history=prior if prior else None)
-            return r.final_response, r.completed, r.tokens_used
+        # Pass prior conversation as history for multi-turn support
+        history = [m for m in messages if m.get("role") != "user" or m.get("content") != user_message]
+        # Keep only system + prior turns (not the current user message)
+        prior = [m for m in history if m != messages[-1]] if len(messages) > 1 else None
+        r = agent.run(user_message, conversation_history=prior if prior else None)
+        return r.final_response, r.completed, r.tokens_used
 
     try:
         response_text, completed, tokens = await asyncio.get_event_loop().run_in_executor(None, _execute)

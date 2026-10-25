@@ -1,7 +1,6 @@
 """Tests for provider classes and factory functions in mullet/knowledge/engine/llm.py."""
-import os
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 import requests
 
 from mullet.knowledge.engine.llm import (

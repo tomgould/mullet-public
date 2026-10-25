@@ -1,7 +1,7 @@
 """Tests for mullet.hud.colors — ANSI color helpers."""
 
 from mullet.hud.colors import (
-    BLUE, BOLD, BRIGHT_BLUE, CYAN, DIM, GREEN, MAGENTA, RED, RESET, WHITE, YELLOW,
+    BLUE, BOLD, BRIGHT_BLUE, CYAN, DIM, GREEN, MAGENTA, RED, WHITE, YELLOW,
     bar, blue, bold, bright_blue, ctx_color, cyan, dim,
     green, magenta, red, strip_ansi, white, yellow,
 )

@@ -379,12 +379,10 @@ class TestResolverMissingLines:
         with patch("mullet.core.providers.pricing.get_known_pricing", side_effect=ValueError("boom")):
             assert _pricing("model-a", 0.5, 0.6) == (0.5, 0.6)
 
-    # Lines 240-241 — oauth read exception (also covers line 286 kimi guard)
-    def test_build_default_router_anthropic_oauth_read_fails(self, monkeypatch):
+    def test_build_default_router_no_anthropic_key_no_premium_cloud(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        with patch("mullet.core.providers.claude_max._read_oauth_token", side_effect=Exception("boom")):
-            with patch("mullet.cli.main.detect_local_provider", return_value=None):
-                router, _ = build_default_router()
+        with patch("mullet.cli.main.detect_local_provider", return_value=None):
+            router, _ = build_default_router()
         assert "premium_cloud" not in router.providers
 
     def test_build_default_router_kimi_sets_cheap_cloud(self, monkeypatch):

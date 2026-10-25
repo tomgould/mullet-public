@@ -19,7 +19,6 @@ from mullet.core.router.decision import (
     _provider_allowed,
     ProviderEntry,
     Router,
-    RoutingDecision,
 )
 
 

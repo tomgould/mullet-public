@@ -8,7 +8,6 @@ import logging
 import os
 import sqlite3
 import time
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +186,9 @@ def get_db_path() -> str:
     db_url = os.getenv("DATABASE_URL", "")
     if db_url.startswith("postgresql://") or db_url.startswith("postgres://"):
         return db_url  # Return URL for Postgres
-    # Default: SQLite in ~/.mullet/
-    db_dir = Path.home() / ".mullet"
+    # Default: SQLite in the data directory
+    from mullet.core.paths import data_dir
+    db_dir = data_dir()
     db_dir.mkdir(parents=True, exist_ok=True)
     return str(db_dir / "mullet.db")
 

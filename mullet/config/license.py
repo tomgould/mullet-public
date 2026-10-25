@@ -14,14 +14,20 @@ import time
 from pathlib import Path
 
 from mullet.config.mode import MulletMode
+from mullet.core.paths import config_dir, config_file, state_dir
 
 logger = logging.getLogger(__name__)
 
 TRIAL_DAYS = 14
-LICENSE_FILE_LOCATIONS = [
-    ".mullet/license.key",
-    str(Path.home() / ".mullet" / "license.key"),
-]
+# Tests point this at their own files; None means the project's
+# .mullet/license.key, then license.key in the config directory.
+LICENSE_FILE_LOCATIONS: list[str] | None = None
+
+
+def _license_file_locations() -> list[str]:
+    if LICENSE_FILE_LOCATIONS is not None:
+        return LICENSE_FILE_LOCATIONS
+    return [".mullet/license.key", str(config_file("license.key"))]
 
 # Process-level flag so the "base64 only" warning fires once per run rather
 # than once per license-check call. Each call previously spammed the warning
@@ -44,7 +50,7 @@ class LicenseChecker:
             if trial_remaining <= 0:
                 raise LicenseError(
                     "Enterprise license required for multi-user mode. "
-                    "Set MULLET_LICENSE_KEY or place license.key in ~/.mullet/. "
+                    f"Set MULLET_LICENSE_KEY or place license.key in {config_dir()}. "
                     "Or set MULLET_MODE=solo for single-user use."
                 )
             logger.warning("Mullet enterprise trial: %d days remaining", trial_remaining)
@@ -93,7 +99,7 @@ class LicenseChecker:
 
     def _read_license_file(self) -> str | None:
         """Read license key from file."""
-        for path in LICENSE_FILE_LOCATIONS:
+        for path in _license_file_locations():
             p = Path(path)
             if p.exists():
                 return p.read_text().strip()
@@ -101,7 +107,7 @@ class LicenseChecker:
 
     def _trial_days_remaining(self) -> int:
         """Check trial period. Trial starts when enterprise mode is first used."""
-        trial_file = Path.home() / ".mullet" / ".trial_start"
+        trial_file = state_dir() / ".trial_start"
         if not trial_file.exists():
             trial_file.parent.mkdir(parents=True, exist_ok=True)
             trial_file.write_text(str(time.time()))

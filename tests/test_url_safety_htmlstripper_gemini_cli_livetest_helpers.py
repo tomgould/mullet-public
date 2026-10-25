@@ -1,9 +1,8 @@
-"""Tests for url_safety, HTMLStripper, gemini_cli, and live_test pure helpers."""
+"""Tests for url_safety, HTMLStripper, and live_test pure helpers."""
 
 
 from mullet.core.tools.url_safety import is_safe_url
 from mullet.core.tools.web_fetch import HTMLStripper
-from mullet.core.providers.gemini_cli import GeminiCLIProvider, is_gemini_cli_available
 from mullet.cli.live_test import (
     Target,
     _parse_args,
@@ -119,81 +118,6 @@ class TestHTMLStripper:
         result = stripper.get_data()
         assert 'class=' not in result
         assert 'content here' in result
-
-
-# ---------------------------------------------------------------------------
-# GeminiCLIProvider
-# ---------------------------------------------------------------------------
-
-class TestGeminiCLIProvider:
-    def test_default_model(self):
-        p = GeminiCLIProvider()
-        assert isinstance(p.model, str)
-        assert len(p.model) > 0
-
-    def test_default_name(self):
-        p = GeminiCLIProvider()
-        assert p.name == "gemini-cli"
-
-    def test_custom_model(self):
-        p = GeminiCLIProvider(model="gemini-2.0-flash")
-        assert p.model == "gemini-2.0-flash"
-
-    def test_messages_to_prompt_user_role(self):
-        p = GeminiCLIProvider()
-        msgs = [{"role": "user", "content": "hello world"}]
-        result = p._messages_to_prompt(msgs)
-        assert "hello world" in result
-
-    def test_messages_to_prompt_system_role(self):
-        p = GeminiCLIProvider()
-        msgs = [{"role": "system", "content": "you are helpful"}]
-        result = p._messages_to_prompt(msgs)
-        assert "you are helpful" in result
-        assert "Instructions" in result
-
-    def test_messages_to_prompt_assistant_role(self):
-        p = GeminiCLIProvider()
-        msgs = [{"role": "assistant", "content": "here is my answer"}]
-        result = p._messages_to_prompt(msgs)
-        assert "here is my answer" in result
-
-    def test_messages_to_prompt_returns_string(self):
-        p = GeminiCLIProvider()
-        result = p._messages_to_prompt([{"role": "user", "content": "test"}])
-        assert isinstance(result, str)
-
-    def test_messages_to_prompt_empty_list(self):
-        p = GeminiCLIProvider()
-        result = p._messages_to_prompt([])
-        assert isinstance(result, str)
-
-    def test_messages_to_prompt_multimodal_content(self):
-        p = GeminiCLIProvider()
-        msgs = [{"role": "user", "content": [
-            {"type": "text", "text": "analyze this"},
-            {"type": "image", "url": "http://example.com/img.png"},
-        ]}]
-        result = p._messages_to_prompt(msgs)
-        assert "analyze this" in result
-
-    def test_messages_to_prompt_multi_turn(self):
-        p = GeminiCLIProvider()
-        msgs = [
-            {"role": "user", "content": "question one"},
-            {"role": "assistant", "content": "answer one"},
-            {"role": "user", "content": "question two"},
-        ]
-        result = p._messages_to_prompt(msgs)
-        assert "question one" in result
-        assert "answer one" in result
-        assert "question two" in result
-
-
-class TestIsGeminiCliAvailable:
-    def test_returns_bool(self):
-        result = is_gemini_cli_available()
-        assert isinstance(result, bool)
 
 
 # ---------------------------------------------------------------------------

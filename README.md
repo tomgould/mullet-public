@@ -1,206 +1,154 @@
 # Mullet
 
-Mullet takes work off an AI coding tool such as Claude Code. Over the Model Context Protocol (MCP), it sends each task to the cheapest model that can handle it, from a local model in LM Studio or Ollama to Kimi, OpenRouter, Gemini or Claude, and it searches your own documents and code.
+Mullet runs a large coding job in a repo while you are away, and checks every step itself before it counts. You approve a plan, leave it running, and come back to a branch and an evidence report. Your own checkout is not touched until you merge.
+
+Each step is done by a worker in a sandboxed private clone. A step passes only when Mullet's own gates pass: real changes in the diff, files within scope, no secrets, a clean build, tests no worse than before, and a fresh review. Nothing is marked done because a model said so.
+
+Mullet also serves Trawl, a knowledge search for your own documents and code, over MCP.
 
 ## Status
 
-Mullet is paused, not finished. I still run its knowledge search, Trawl, but I've turned delegation off: a larger Anthropic subscription turned out quicker than handing work to other models. If Anthropic's prices rise, I'll switch it back on and send most of the work to cheaper models through Kimi and OpenRouter. Set `MULLET_DELEGATION=off` in `.env` to turn delegation off; Trawl, status and budget keep working. The code, model list and prices date from October 2026.
+Mullet 2.0.0 is maintained. Jobs run on Linux. On macOS they refuse to start for now, because there is no sandbox there yet; the rest of Mullet works. The code, model list and prices date from October 2026.
 
 ## Install
 
-Mullet isn't on PyPI (the name there belongs to another package), so install it from a clone. It needs Python 3.10 or later.
+Mullet isn't on PyPI (the name there belongs to another package), so install it from GitHub. It needs Python 3.10 or later, git, and uv or pipx. Jobs also need the `claude` command-line tool, logged in, and on Linux, bubblewrap and socat.
 
 ```bash
-git clone https://github.com/tomgould/mullet-public.git
-cd mullet-public
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
 ```
 
-Keep the install editable (`-e`): the Claude Code hooks run from `scripts/hooks/` in the clone. Optional extras are `gemini`, `bedrock`, `postgres`, `gpu`, `all` and `dev`, for example `pip install -e ".[gemini]"`. opencode needs Node.js 18 or later.
+That runs `uv tool install git+https://github.com/tomgould/mullet-public.git` (or the pipx equivalent). Run it again to update. Optional extras are `gemini`, `bedrock`, `postgres`, `gpu` and `all`. To work on Mullet itself, clone it and run `pip install -e ".[dev]"` in a virtualenv.
 
 ## Quick start
 
 ```bash
-cp .env.example .env     # add the API keys you have
-mullet doctor            # checks the install and which providers it can reach
-mullet explain "add a retry with exponential backoff to the HTTP client"   # scores a task, calls no model
-mullet "explain this codebase in one paragraph"                            # runs a task
+mullet doctor                                  # checks Claude Code, the sandbox and your setup
+cd your-repo
+mullet job plan "add retry with backoff to the HTTP client"   # a read-only session proposes a task tree
+mullet job approve <id>                        # you approve the plan
+mullet job run <id>                            # runs in the background; status, tail, stop, resume
+mullet job report <id>                         # evidence for each step
+mullet job merge <id>                          # copies the branch into your repo; never pushes
 ```
 
-Mullet reads `.env` from the root of the clone. `KIMI_API_KEY` alone is enough to start, and a local model in LM Studio or Ollama needs no key. `ANTHROPIC_API_KEY` is optional: without it, Mullet hands Anthropic work back to Claude Code or uses the `claude` command-line tool.
+`mullet job show <id>` prints the plan. Add `--yaml` to get an editable plan file, and pass it back with `--plan-file`. `--single` skips the planner and makes one step. `mullet job list` shows recent jobs, and `mullet job discard <id>` removes one.
 
-The MCP server is `mullet mcp`. To add it to Claude Code for every project:
+## How a job works
 
-```bash
-claude mcp add --scope user mullet -- mullet mcp
+1. The planner breaks the goal into a tree of steps, up to three levels deep and 40 steps, until each leaf fits one pass. Only Mullet creates steps. Workers never start workers.
+2. You read the plan and approve it. This is the first of two approvals.
+3. Each step runs in a private clone of the commit the job started from. A worker edits the files. Mullet then snapshots the tree, runs the gates, and commits exactly the tree it judged.
+4. A failed step is reset and tried again with the gate output, up to three attempts. After that it is blocked. A parent step passes only when its children pass and the full checks pass on their combined change.
+5. When the job finishes, you read the report and run `mullet job merge`. This is the second approval.
+
+One Claude worker runs at a time across all jobs, because they share one subscription's allowance; cheaper workers have slots of their own (three by default, `MULLET_API_WORKERS`). When Claude Code reports a usage limit, the job pauses until the reset and carries on. A pause does not count as an attempt. Stop and `kill -9` are safe: `mullet job resume` returns the clone to the last commit Mullet recorded.
+
+## The gates
+
+A gate that fails fails the step. A gate that could not run shows as unverified, never as passed.
+
+| Gate | What it checks |
+| --- | --- |
+| G0 | The repo's checks on the starting commit, once per job, so later results have a baseline |
+| G1 | The diff from git shows a real change |
+| G2 | Files stay in scope; protected paths such as `.git*`, `CLAUDE.md`, CI workflows and lockfiles are untouched |
+| G3 | Added lines hold no secrets and no risky patterns |
+| G4 | Lint, type check and build |
+| G5 | Tests, compared with G0: new failures, and tests that passed before and are skipped now, count against the step |
+| G6 | No removed assertions or newly skipped tests, unless the step is allowed to |
+| G7 | A fresh read-only Claude session reviews the diff, without seeing the worker's transcript. It can block a step, never pass one |
+
+Job state is kept in a SQLite ledger, and a step's status comes from gate results only. The report is built from the ledger. Anything the worker says about itself is labelled as a claim.
+
+## Safety
+
+- Workers run inside bubblewrap on Linux: read-only root, your home directory hidden, no network, and an allowlisted environment so none of Mullet's loaded keys get through. Gate commands run in the same sandbox. If the sandbox can't start, the job refuses to run. There is no unsandboxed fallback.
+- The private clone keeps its git directory out of the worker's reach, so a worker can't move refs or rewrite history. Mullet runs its own git commands with hooks off.
+- Credentials: the Claude Code worker is your own installed `claude -p`, using your own login. Mullet never reads, stores or passes Claude's credentials. `ANTHROPIC_API_KEY` is left out of the worker's environment, because in `claude -p` it silently replaces your login and bills per token. Plan a job with `--billing api` to opt in. `mullet doctor` warns when the key is set. Check Anthropic's current terms for your own use.
+- `mullet job merge` fetches the job branch into your repo as a new branch and stops. It refuses an existing branch name. It never pushes.
+
+## Workers
+
+A step's worker is Claude Code, your own `claude -p`, or opencode on a model you name: Kimi on Moonshot's API, an OpenRouter model, an OpenRouter `:free` model, or a model in LM Studio on your own machine. opencode is off unless a repo's stored profile lists it in `allowed_executors`. Every worker runs in the same sandbox and faces the same gates, and reaches its provider through a key proxy on a Unix socket, so the sandbox never sees an API key and each attempt may only use its own model.
+
+### The delegation ladder
+
+With a `ladder:` section in `~/.config/mullet/config.yaml`, each step goes up a ladder of workers, one attempt per rung, cheapest first unless Claude's week has room:
+
+```yaml
+ladder:
+  kimi: moonshotai/kimi-k2.7-code          # Moonshot's own API (MOONSHOT_API_KEY)
+  openrouter: [openrouter/z-ai/glm-5.3]    # paid OpenRouter models, in order
+  free: openrouter/<model>:free            # optional; verified-public GitHub repos only
+  local: lmstudio/qwen3.6-35b-a3b          # optional; LM Studio on 127.0.0.1:1234
+  local_by_day: false                      # local only in night mode
+  max_spend: 4.0                           # dollars per job on the paid rungs
+  routing:                                 # optional OpenRouter host choice per model
+    openrouter/z-ai/glm-5.3: {only: [z-ai]}
 ```
 
-`mullet setup-claude` goes further. Read what it does first, or run it with `--dry-run`: it installs hooks that run in every project, adds delegation rules to `~/.claude/CLAUDE.md`, installs skills, agents and a status line into `~/.claude/`, and installs opencode with npm.
+- The planner marks each step mechanical, design, analysis or integration; mechanical and checkable design steps start low, the rest start with Claude or Kimi. Planning and review always stay on Claude.
+- The order follows Claude's paced weekly usage, read from what Claude Code reports: with room, Claude comes before the paid rungs; when the week is tight, Claude is the last resort.
+- Free models only see repos GitHub confirms are public. Paid OpenRouter requests always ask for hosts that don't keep prompts, and by default skip hosts serving a 4-bit copy of the model.
+- Each job has a spending cap on the paid rungs. A provider error moves a step up without using an attempt, and a model that failed a step's gates isn't tried again elsewhere.
+- `mullet ladder report` adds up every job's attempts by rung, step kind and model from the ledger, with a short list of what to change.
+- `mullet job ladder` shows which rungs work now; `mullet job retry <job> <step> --rung claude` gives a blocked step another go. The report shows each attempt's rung, model and cost.
+
+### Local models and night mode
+
+- `mullet night on [--until HH:MM]` lets overnight jobs lean on the local GPU: local attempts get longer and wait for room on the machine. It ends at its time or when you come back.
+- `mullet local status|restart|check --fix` keeps LM Studio usable, and `mullet local watchdog --install` checks it every two minutes and restarts it when it is stuck.
+- `mullet reap` stops idle or orphaned Mullet work (test workers, stray opencode runs, idle local models, stale temp directories); `--dry-run` shows what it would do.
+- A machine guard (one GPU lease across Mullet's processes, plus VRAM, RAM and temperature limits) keeps jobs, local models and reindexing from fighting over the card.
+
+Coming, and not in 2.0.0: a macOS sandbox, so jobs can run there.
+
+## Notifications
+
+Mullet tells you when a job blocks, pauses or finishes. Desktop notifications are on by default. A Slack incoming webhook is sent only in working hours.
+
+| Variable | Meaning |
+| --- | --- |
+| `MULLET_NOTIFY` | Channels: `desktop`, `slack`, both separated by a comma, or `off` |
+| `MULLET_SLACK_WEBHOOK` | The Slack incoming webhook URL |
+| `MULLET_NOTIFY_HOURS` | Working hours for Slack, default `Mon-Fri 09:00-17:30` |
+| `MULLET_NOTIFY_TZ` | Time zone for those hours, default `Europe/London` |
+
+## Where files live
+
+`mullet paths` prints every directory. Settings and keys go in `~/.config/mullet/.env` (`$MULLET_CONFIG_DIR` if set). State, data and caches follow the XDG directories. An older `~/.mullet` still works, and `mullet migrate-state --dry-run` shows what moving it would do. Your stored job profile for each repo is in the `projects` folder of the config directory. A repo can add `.mullet/project.yaml`, which can only tighten it.
+
+`mullet setup-claude` registers the MCP server and Mullet's skills with Claude Code for every project. Run it with `--dry-run` first, and `--uninstall` removes exactly what it added. It never edits `CLAUDE.md`. Hooks are opt-in: `--hooks list` describes them, and `mullet hook <name>` runs one.
+
+## Trawl and MCP
+
+Trawl indexes collections of documents and code, called pools. It searches them by keyword and by meaning together, re-ranks the results and can build a knowledge graph. `mullet mcp` serves it to Claude Code and other MCP clients, with `mullet search`, `mullet pool`, `mullet reindex` and `mullet graph` on the command line. [docs/REINDEX.md](docs/REINDEX.md) covers pools and crawling websites.
+
+The MCP server still has the older delegation tools, which send a task to another model provider. `MULLET_DELEGATION=off` in `~/.config/mullet/.env` switches them off. Trawl, status and budget keep working. Presets such as `local-only` limit which providers they may use:
+
+| Preset | Providers | opencode model |
+| --- | --- | --- |
+| `balanced-mix` (default) | all | `moonshot/kimi-k2.6` |
+| `local-only` | `local` | `lmstudio/ornith-1.5-35b-a3b` |
+| `claude-only` | `sonnet`, `haiku`, `opus-4-8`, used by Claude Code itself, never delegated | none |
+| `cheap-cloud` | `kimi`, `gemini` | `moonshot/kimi-k2.6` |
+
+The old orchestration modes (ultrawork, ralph, autopilot, team, eco) and the overnight loop are gone.
 
 ## Documentation
 
 The guides are in [`docs/`](docs/):
 
 - [Quick start](docs/QUICKSTART.md)
-- [Installation](docs/INSTALL.md), with guides for [Linux](docs/ONBOARDING_LINUX.md), [macOS](docs/ONBOARDING_MAC.md) and [ChromeOS](docs/ONBOARDING_CHROMEBOOK.md)
+- [Installation](docs/INSTALL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Model routing](docs/MODEL_ROUTING.md)
-- [opencode integration](docs/opencode_integration.md)
 - [API reference](docs/API.md)
-- [Writing skills](docs/SKILLS.md)
 - [Reindexing knowledge pools](docs/REINDEX.md)
 - [Changelog](CHANGELOG.md)
 
-The rest of this page is a reference.
-
-## What it does
-
-- Scores each task out of 100 before it picks a model, from keywords, the number of subtasks, how much of the system it touches and whether it needs tests. The score puts the task in a tier: LOW, STANDARD, ADVANCED or CRITICAL. `mullet explain` shows the working without calling a model.
-- Watches the budget. It reads how much of a Claude subscription's five-hour and weekly allowance has gone and, as that runs low, moves work away from Claude to providers such as OpenRouter and Kimi.
-- Edits files through [opencode](https://github.com/sst/opencode), an open-source coding agent, then checks what it did. The list of changed files comes from `git status`, not from the model's report, and a classifier with no model behind it flags edits that often mean trouble.
-- Splits a goal across parallel Kimi calls and merges the answers, and has longer-running modes that break a task up, work through it and check the result.
-- Searches your own documents and code with Trawl, its knowledge engine. Trawl indexes collections called pools, searches them by keyword and by meaning together, re-ranks the results and can build a knowledge graph.
-- Limits which providers it may use through presets.
-- Serves an OpenAI-compatible API with `mullet serve`.
-
-## Using it from Claude Code
-
-The MCP server has 10 Mullet tools and 43 Trawl tools.
-
-| Tool | What it does |
-| --- | --- |
-| `mullet_run` | Sends a task to the cheapest suitable model. The model can't see your files, so the task must carry everything it needs. |
-| `mullet_opencode` | Gives the task to opencode, which edits files in place and returns the list of changed files. It never commits. |
-| `mullet_swarm` | Fans a goal out across parallel Kimi calls and merges the results. |
-| `mullet_delegate` | Runs a child agent on providers you choose. |
-| `mullet_search` | Searches a Trawl pool. |
-| `mullet_remember` | Stores a note in a project's knowledge base. |
-| `mullet_analyze` | Scores a task and shows the routing decision. |
-| `mullet_status`, `mullet_providers`, `mullet_budget` | Show provider health and budget. |
-
-The Trawl tools manage pools, search code, documents and the knowledge graph, and list a pool's newest documents. With `MULLET_DELEGATION=off`, `mullet_run`, `mullet_opencode`, `mullet_swarm` and `mullet_delegate` refuse, and the rest keep working.
-
-## Routing
-
-Routing has three stages.
-
-1. A preflight step estimates how much the task will read and write and how hard it is. It asks a local model first, then Gemini Flash, and falls back to heuristics.
-2. A routing matrix picks the cheapest model that can take that input and output at that complexity. Size estimates get a 10% margin before they're compared with a model's context window.
-3. A fallback chain takes over if that model isn't available.
-
-Local models are classified from their names, by size and by whether they're built for code, vision or reasoning, so routing works with whatever is loaded in LM Studio. A fifth tier, PREMIUM, is for the orchestrating model only: `mullet override on` sends work to Opus until the current five-hour window resets.
-
-`mullet models` and `mullet cost` list the models and prices Mullet knows about. [docs/MODEL_ROUTING.md](docs/MODEL_ROUTING.md) has the detail.
-
-### Budget guard
-
-`mullet.hud.guard.check_budget()` returns one of three states. It's "go" normally. It's "throttle", which steers work to a cheaper provider, once five-hour usage reaches 70% (55% when weekly usage is 85% or more) or the day's share of the weekly allowance drops below 8%. It's "pause" when five-hour usage is at least 95% and weekly usage at least 90%.
-
-### Provider presets
-
-A preset limits which providers Mullet may use.
-
-| Preset | Providers | opencode model |
-| --- | --- | --- |
-| `balanced-mix` (default) | all | `moonshot/kimi-k2.6` |
-| `local-only` | `local` | `lmstudio/qwen2.5-coder-14b-instruct` |
-| `claude-only` | `sonnet`, `haiku`, `opus-4-8`, used by Claude Code itself, never delegated | none |
-| `cheap-cloud` | `kimi`, `gemini` | `moonshot/kimi-k2.6` |
-
-```bash
-mullet preset list          # * marks the active one
-mullet preset use cheap-cloud
-mullet preset show local-only
-mullet preset add --name my-preset --label "My preset" --providers local,kimi --speed balanced
-mullet preset remove my-preset
-```
-
-### Orchestration modes
-
-| Command | What it does |
-| --- | --- |
-| `mullet "<task>"` | One routed call |
-| `mullet ultrawork "<task>"` | Splits the task and runs the parts in parallel |
-| `mullet ralph "<task>"` | Repeats ultrawork until every user story passes, up to ten times |
-| `mullet autopilot "<task>"` | Plans, runs ralph, then checks the result |
-| `mullet team N "<task>"` | Runs N coordinated agents |
-| `mullet eco <mode> "<task>"` | Runs another mode on cheaper tiers |
-
-Over MCP, `mullet_run` takes `standard`, `ultrawork` or `ralph` as its `mode`.
-
-### Built-in tools
-
-A task run by Mullet's own agent can use 24 tools, in `mullet/core/tools/`:
-
-| Kind | Tools |
-| --- | --- |
-| Files and code | `file_ops`, `patch`, `git`, `lsp` |
-| Shell | `terminal`, `code_exec`, `python_repl`, `run_tests`, `docker` |
-| Web | `web_search`, `fetch_page`, `browse` |
-| Agents | `delegate`, `todo`, `clarify`, `skill_invoke`, `skill_mgr` |
-| Memory and sessions | `memory`, `notepad`, `shared_mem`, `session_search`, `session_list` |
-| Images | `analyze_image` (needs a provider that takes images), `image_gen` |
-
-Tools from other MCP servers can be added through the client in `mullet/core/tools/mcp_client.py`.
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `mullet mcp` | Starts the MCP server (stdio) |
-| `mullet serve` | Starts the API server on `127.0.0.1:3000` (`--host`, `--port`) |
-| `mullet doctor` | Checks the install, providers, pools, config and hooks |
-| `mullet setup-claude` | Sets up Claude Code, as above |
-| `mullet init` | Writes a `mullet.yaml` for the current project |
-| `mullet preset` | Lists, switches, shows, adds or removes presets |
-| `mullet explain` | Scores a task without calling a model |
-| `mullet models`, `mullet cost` | List models and prices |
-| `mullet budget`, `mullet routing` | Show spend and routing history |
-| `mullet search`, `mullet pool`, `mullet reindex`, `mullet graph` | Search and manage knowledge pools |
-| `mullet history`, `mullet logs`, `mullet stats` | Show past sessions and model calls |
-| `mullet override` | Turns the Opus override on or off |
-
-`mullet --help` lists the rest.
-
-## API server
-
-`mullet serve` offers `/v1/chat/completions`, `/v1/models`, `/health`, `/metrics` (Prometheus) and a WebSocket at `/ws`.
-
-```bash
-mullet serve
-curl http://localhost:3000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"hello"}]}'
-```
-
-[docs/API.md](docs/API.md) covers the REST, WebSocket and admin endpoints.
-
-## Configuration
-
-- API keys and switches such as `MULLET_DELEGATION` go in `.env`; `.env.example` lists them.
-- Project settings go in `mullet.yaml` in the project, or `~/.mullet/config.yaml`; `mullet.yaml.example` shows the shape. For example, to add an OpenAI-compatible server on a port Mullet doesn't probe:
-
-  ```yaml
-  providers:
-    my_server:
-      type: openai_compatible
-      base_url: http://localhost:8080/v1
-      models:
-        default: my-model
-  ```
-
-- Knowledge pools live in `~/.mullet/pools/`, or wherever `TRAWL_POOLS_DIR` points.
-- A pool can also crawl a website on every `mullet reindex`, from its sitemap, with linked PDFs and Office files. [docs/REINDEX.md](docs/REINDEX.md#web-sources-crawled-websites) has the options.
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-There are more than 17,800 tests. GitHub Actions runs them on Python 3.10, 3.11 and 3.12, and ruff checks for errors. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`mullet --help` lists every command. GitHub Actions runs the tests on Linux and macOS; see [CONTRIBUTING.md](CONTRIBUTING.md) to work on Mullet.
 
 ## Licence
 

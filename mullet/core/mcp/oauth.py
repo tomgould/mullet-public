@@ -38,8 +38,8 @@ class MulletTokenStorage:
         self._server_name = _sanitize_server_name(server_name)
 
     def _base_dir(self) -> Path:
-        home = Path.home() / ".mullet"
-        d = home / _TOKEN_DIR_NAME
+        from mullet.core.paths import data_dir
+        d = data_dir() / _TOKEN_DIR_NAME
         d.mkdir(parents=True, exist_ok=True)
         return d
 

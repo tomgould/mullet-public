@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/user_prompt_detect_override.py.
+"""Tests for mullet/hooks/user_prompt_detect_override.py, through its scripts/hooks shim.
 
 Uses subprocess to invoke the hook with synthetic JSON on stdin so the test is
 fully black-box (no import of the hook module). State is isolated per test via

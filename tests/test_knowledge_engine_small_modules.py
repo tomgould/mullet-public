@@ -1,7 +1,6 @@
 """Tests for small pure modules in mullet/knowledge/engine/."""
 import time
 import pytest
-from unittest.mock import patch
 
 
 # ===========================================================================
@@ -28,7 +27,7 @@ class TestBm25Vocabulary:
 # ===========================================================================
 
 from mullet.knowledge.engine.cache import (
-    cached, _make_key, _clear_prefix, _info_prefix, clear_all_caches, _CACHE
+    cached, _make_key, clear_all_caches, _CACHE
 )
 
 @pytest.fixture(autouse=True)

@@ -187,7 +187,7 @@ def _mock_local_provider(model="qwen2.5-coder-14b-instruct"):
     return p
 
 
-def test_doctor_warns_on_context_mismatch(capsys):
+def test_doctor_warns_on_context_mismatch(capsys, fake_claude):
     from mullet.cli.main import _run_doctor
     with patch("mullet.cli.main.detect_local_provider", return_value=_mock_local_provider()), \
          patch("mullet.cli.main.get_local_loaded_context", return_value=4096), \
@@ -199,7 +199,7 @@ def test_doctor_warns_on_context_mismatch(capsys):
     assert "context-overflow" in out
 
 
-def test_doctor_ok_when_loaded_context_meets_declared(capsys):
+def test_doctor_ok_when_loaded_context_meets_declared(capsys, fake_claude):
     from mullet.cli.main import _run_doctor
     with patch("mullet.cli.main.detect_local_provider", return_value=_mock_local_provider()), \
          patch("mullet.cli.main.get_local_loaded_context", return_value=32768), \
@@ -209,7 +209,7 @@ def test_doctor_ok_when_loaded_context_meets_declared(capsys):
     assert "opencode.json declares" not in out
 
 
-def test_doctor_falls_back_to_flat_floor_when_model_not_in_opencode_json(capsys):
+def test_doctor_falls_back_to_flat_floor_when_model_not_in_opencode_json(capsys, fake_claude):
     """A local model opencode.json doesn't know about at all still gets the
     old flat '< 4096 = very small' floor as a fallback signal."""
     from mullet.cli.main import _run_doctor

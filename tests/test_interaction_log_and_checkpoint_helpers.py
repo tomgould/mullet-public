@@ -1,10 +1,7 @@
-"""Tests for interaction_log pure helpers and CheckpointManager."""
+"""Tests for interaction_log pure helpers."""
 
-import os
-from pathlib import Path
 
 from mullet.core.logging.interaction_log import _extract_preview, _extract_last_user_message
-from mullet.core.agent.checkpoint import CheckpointManager
 
 
 # ---------------------------------------------------------------------------
@@ -100,101 +97,3 @@ class TestExtractLastUserMessage:
             {"role": "assistant", "content": "reply"},
         ]
         assert _extract_last_user_message(messages) == ""
-
-
-# ---------------------------------------------------------------------------
-# CheckpointManager — create, list, cleanup
-# ---------------------------------------------------------------------------
-
-class TestCheckpointManagerInit:
-    def test_creates_base_dir(self, tmp_path):
-        base = str(tmp_path / "checkpoints")
-        mgr = CheckpointManager(base_dir=base)
-        assert os.path.isdir(base)
-
-    def test_default_max_snapshots(self, tmp_path):
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        assert mgr.max_snapshots == 5
-
-    def test_custom_max_snapshots(self, tmp_path):
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"), max_snapshots=3)
-        assert mgr.max_snapshots == 3
-
-
-class TestCheckpointManagerCreateSnapshot:
-    def test_create_returns_timestamp_string(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "file.txt").write_text("content")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        ts = mgr.create_snapshot(str(work))
-        assert isinstance(ts, str)
-        assert len(ts) == 14  # YYYYMMDDHHmmss
-
-    def test_create_makes_snapshot_dir(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "file.txt").write_text("content")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        ts = mgr.create_snapshot(str(work))
-        snapshot_dir = Path(mgr.base_dir) / ts
-        assert snapshot_dir.is_dir()
-
-    def test_create_writes_metadata(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "f.txt").write_text("x")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        ts = mgr.create_snapshot(str(work), label="my-label")
-        meta = Path(mgr.base_dir) / ts / "metadata.txt"
-        assert meta.exists()
-        content = meta.read_text()
-        assert "my-label" in content
-
-
-class TestCheckpointManagerListSnapshots:
-    def test_empty_returns_empty_list(self, tmp_path):
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        assert mgr.list_snapshots() == []
-
-    def test_returns_list_of_dicts(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "f.txt").write_text("x")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        mgr.create_snapshot(str(work))
-        snapshots = mgr.list_snapshots()
-        assert isinstance(snapshots, list)
-        assert isinstance(snapshots[0], dict)
-
-    def test_snapshot_has_expected_keys(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "f.txt").write_text("x")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        mgr.create_snapshot(str(work))
-        s = mgr.list_snapshots()[0]
-        assert "id" in s
-        assert "label" in s
-        assert "work_dir" in s
-
-    def test_label_stored_correctly(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "f.txt").write_text("x")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"))
-        mgr.create_snapshot(str(work), label="test-label")
-        s = mgr.list_snapshots()[0]
-        assert s["label"] == "test-label"
-
-
-class TestCheckpointManagerCleanup:
-    def test_cleanup_removes_old_snapshots(self, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "f.txt").write_text("x")
-        mgr = CheckpointManager(base_dir=str(tmp_path / "ckpts"), max_snapshots=2)
-        for _ in range(3):
-            mgr.create_snapshot(str(work))
-        snapshots = mgr.list_snapshots()
-        assert len(snapshots) <= 2

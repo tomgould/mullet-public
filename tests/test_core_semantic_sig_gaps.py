@@ -1,7 +1,6 @@
 """Gap tests for mullet.core.semantic_sig — targets uncovered lines."""
 
 import json
-import math
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 

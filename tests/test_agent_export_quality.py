@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from mullet.core.agent.export import export_json, export_markdown
 from mullet.core.agent.quality import QualityScore, score_result

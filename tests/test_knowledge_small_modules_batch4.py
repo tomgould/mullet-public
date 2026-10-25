@@ -1,10 +1,8 @@
 """Tests for 6 small zero-coverage knowledge modules — batch 4."""
 
-import os
 import json
 import pytest
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock
 
 # ===========================================================================

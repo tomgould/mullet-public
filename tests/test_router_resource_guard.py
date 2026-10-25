@@ -1,10 +1,7 @@
 """Tests for mullet.core.router.resource_guard."""
 
-import gc
 import logging
-import os
 import threading
-import time
 from unittest.mock import MagicMock, patch
 
 import psutil

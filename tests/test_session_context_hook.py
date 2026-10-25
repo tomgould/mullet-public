@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/session_context.py"""
+"""Tests for mullet/hooks/session_context.py"""
 import importlib.util
 import io
 import json
@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-_HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "session_context.py"
+_HOOK = Path(__file__).resolve().parent.parent / "mullet" / "hooks" / "session_context.py"
 
 
 def _load_hook():

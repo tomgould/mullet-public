@@ -1,6 +1,6 @@
 """Coverage gap tests for openai_compat — lines missed in existing test suites."""
 import sys
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -100,6 +100,27 @@ def test_create_with_reasoning_config():
         p.create([{"role": "user", "content": "hi"}], reasoning_config={"effort": "high"})
 
     assert capture.kwargs.get("reasoning") == {"effort": "high"}
+
+
+def test_create_with_reasoning_effort():
+    p = OpenAICompatibleProvider(base_url="http://localhost:1234/v1")
+    p.model = "ornith-1.5-35b-a3b"
+
+    def capture(**kwargs):
+        capture.calls.append(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock(message=MagicMock(content="ok", tool_calls=None), finish_reason="stop")]
+        resp.model = p.model
+        resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        return resp
+    capture.calls = []
+
+    with patch.object(p.client.chat.completions, "create", side_effect=capture):
+        p.create([{"role": "user", "content": "hi"}], reasoning_effort="none")
+        p.create([{"role": "user", "content": "hi"}])
+
+    assert capture.calls[0].get("reasoning_effort") == "none"
+    assert "reasoning_effort" not in capture.calls[1]
 
 
 def test_create_with_openrouter_provider_prefs():

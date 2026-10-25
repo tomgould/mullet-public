@@ -273,7 +273,6 @@ class TestConfigCountsMissingLines:
     def test_rules_recursive_oserror_swallowed(self, tmp_path):
         """_count_rules_recursive swallows OSError on rglob (lines 79-80)."""
         from mullet.hud.config_counts import _count_rules_recursive
-        import pathlib
         rules_dir = tmp_path / "rules"
         rules_dir.mkdir()
         (rules_dir / "file.md").write_text("# test")

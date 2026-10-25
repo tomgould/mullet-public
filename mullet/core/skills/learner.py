@@ -6,9 +6,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from mullet.core.paths import data_dir
+
 logger = logging.getLogger(__name__)
 
-SKILLS_DIR = Path.home() / ".mullet" / "learned_skills"
+# Tests point this at a temporary directory; None means learned_skills/ in
+# the data directory.
+SKILLS_DIR: Path | None = None
+
+
+def _skills_dir() -> Path:
+    return SKILLS_DIR or data_dir() / "learned_skills"
 
 
 @dataclass
@@ -55,8 +63,9 @@ def extract_skill(task: str, tool_calls: list[str], result_summary: str) -> Opti
 
 def save_skill(skill: LearnedSkill) -> Path:
     """Save a learned skill to disk."""
-    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    path = SKILLS_DIR / f"{skill.name}.json"
+    skills_dir = _skills_dir()
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    path = skills_dir / f"{skill.name}.json"
 
     # If exists, increment success count
     if path.exists():
@@ -73,14 +82,14 @@ def save_skill(skill: LearnedSkill) -> Path:
 
 def find_similar_skill(task: str) -> Optional[LearnedSkill]:
     """Find a previously learned skill that matches the current task."""
-    if not SKILLS_DIR.exists():
+    if not _skills_dir().exists():
         return None
 
     task_words = set(task.lower().split())
     best_match = None
     best_score = 0
 
-    for f in SKILLS_DIR.glob("*.json"):
+    for f in _skills_dir().glob("*.json"):
         try:
             skill = LearnedSkill.from_dict(json.loads(f.read_text()))
             pattern_words = set(skill.pattern.lower().split())
@@ -98,10 +107,10 @@ def find_similar_skill(task: str) -> Optional[LearnedSkill]:
 
 def list_skills() -> list[LearnedSkill]:
     """List all learned skills."""
-    if not SKILLS_DIR.exists():
+    if not _skills_dir().exists():
         return []
     skills = []
-    for f in sorted(SKILLS_DIR.glob("*.json")):
+    for f in sorted(_skills_dir().glob("*.json")):
         try:
             skills.append(LearnedSkill.from_dict(json.loads(f.read_text())))
         except Exception:

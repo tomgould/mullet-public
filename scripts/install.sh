@@ -1,46 +1,80 @@
 #!/usr/bin/env bash
-# Mullet one-liner installer
+# Mullet installer for Linux and macOS.
 # Usage: curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
 #
-# Installs from the GitHub repository https://github.com/tomgould/mullet-public
-# into its own virtualenv. It never installs from PyPI: the "mullet" package
-# there is an unrelated project. Run it again to update.
+# Installs Mullet from the public GitHub repository as a tool of its own, with
+# `uv tool install` when uv is available and `pipx install` otherwise. The
+# install is not editable, so Mullet never runs from a tree it may be editing.
+# It never installs from PyPI: the "mullet" package there is an unrelated
+# project. Run it again to update.
+#
+# Optional settings:
+#   MULLET_REF=<branch or tag>   install that ref instead of the default branch
+#   MULLET_EXTRAS=gemini,...     install extras (gemini, bedrock, postgres, all)
+#   MULLET_FORCE=1               replace a `mullet` command installed some other way
 set -euo pipefail
+
 REPO_URL="https://github.com/tomgould/mullet-public.git"
-echo "Installing Mullet..."
-command -v git >/dev/null 2>&1 || { echo "Error: git is required. Install it first (e.g. apt install git / xcode-select --install)." >&2; exit 1; }
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-case "$OS" in linux|darwin) ;; *) echo "Error: unsupported OS '$OS' — Linux or macOS required." >&2; exit 1 ;; esac
-PYTHON_CMD=""
-for cmd in python3.12 python3.11 python3.10 python3; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-        ver=$($cmd -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-        major=${ver%%.*} minor=${ver#*.}
-        if [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; }; then
-            PYTHON_CMD=$cmd; break
-        fi
+
+fail() { echo "Error: $*" >&2; exit 1; }
+
+case "$(uname -s)" in
+    Linux|Darwin) ;;
+    *) fail "Mullet supports Linux and macOS only (on Windows, use WSL)." ;;
+esac
+command -v git >/dev/null 2>&1 || fail "git is required. Install it first (apt install git, or xcode-select --install)."
+
+SPEC="git+${REPO_URL}"
+[ -n "${MULLET_REF:-}" ] && SPEC="${SPEC}@${MULLET_REF}"
+[ -n "${MULLET_EXTRAS:-}" ] && SPEC="mullet[${MULLET_EXTRAS}] @ ${SPEC}"
+
+# An older version of this script made a virtualenv and linked its commands
+# into ~/.local/bin; drop those links so the new install can take their place.
+OLD_VENV="$HOME/.local/share/mullet-venv"
+for bin in mullet mullet-mcp mullet-hud mullet-statusline mullet-onboard; do
+    link="$HOME/.local/bin/$bin"
+    if [ -L "$link" ] && case "$(readlink "$link")" in "$OLD_VENV"/*) true ;; *) false ;; esac; then
+        rm -f "$link"
+        echo "Removed the old installer's link $link"
     fi
 done
-[ -z "$PYTHON_CMD" ] && { echo "Error: Python >= 3.10 is required. Install it first (e.g. apt install python3.10 / brew install python@3.10)." >&2; exit 1; }
-VENV_DIR="$HOME/.local/share/mullet-venv"
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtualenv at $VENV_DIR..."
-    "$PYTHON_CMD" -m venv "$VENV_DIR"
-fi
-SRC_DIR="$HOME/.local/share/mullet-src"
-if [ -d "$SRC_DIR/.git" ]; then
-    echo "Updating existing source clone in $SRC_DIR..."
-    git -C "$SRC_DIR" pull --quiet --ff-only
+
+FORCE=()
+[ "${MULLET_FORCE:-}" = "1" ] && FORCE=(--force)
+
+IN_THE_WAY="If another mullet command is in the way, run this again with MULLET_FORCE=1."
+if command -v uv >/dev/null 2>&1; then
+    echo "Installing Mullet from $SPEC ..."
+    # --reinstall-package fetches the latest commit when Mullet is already installed.
+    uv tool install ${FORCE[@]+"${FORCE[@]}"} --python 3.12 --reinstall-package mullet "$SPEC" \
+        || fail "uv could not install Mullet (see above). $IN_THE_WAY"
+    BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
+    PATH_HINT="uv tool update-shell"
+elif command -v pipx >/dev/null 2>&1; then
+    echo "Installing Mullet from $SPEC ..."
+    # pipx leaves an installed package alone unless forced, so an update forces.
+    if pipx list --short 2>/dev/null | grep -q '^mullet '; then
+        FORCE=(--force)
+    fi
+    pipx install ${FORCE[@]+"${FORCE[@]}"} "$SPEC" \
+        || fail "pipx could not install Mullet (see above). $IN_THE_WAY"
+    BIN_DIR="${PIPX_BIN_DIR:-$HOME/.local/bin}"
+    PATH_HINT="pipx ensurepath"
 else
-    echo "Cloning $REPO_URL into $SRC_DIR..."
-    git clone --quiet "$REPO_URL" "$SRC_DIR"
+    fail "this installer needs uv or pipx. Install uv (https://docs.astral.sh/uv/) or pipx (https://pipx.pypa.io/), then run it again."
 fi
-# Editable install: the Claude Code hooks run from the clone's scripts/ folder.
-"$VENV_DIR/bin/pip" install --quiet -e "$SRC_DIR"
-mkdir -p "$HOME/.local/bin"
-for bin in mullet mullet-mcp mullet-hud mullet-statusline mullet-onboard; do
-    src="$VENV_DIR/bin/$bin"
-    [ -f "$src" ] && ln -sf "$src" "$HOME/.local/bin/$bin"
-done
-echo "Success! Mullet installed."
-echo "Run \`mullet doctor\` to verify your install, then \`mullet mcp\` to start the MCP server."
+
+echo
+echo "Mullet is installed."
+if ! command -v mullet >/dev/null 2>&1; then
+    echo "$BIN_DIR is not on your PATH yet: run \`$PATH_HINT\`, then open a new terminal."
+fi
+if [ -d "$OLD_VENV" ] || [ -d "$HOME/.local/share/mullet-src" ]; then
+    echo "The old installer's $OLD_VENV and $HOME/.local/share/mullet-src are no longer used; delete them when you like."
+fi
+cat <<'EOF'
+
+Next steps:
+  mullet doctor          check Python, Claude Code, git and the job sandbox
+  mullet setup-claude    register Mullet with Claude Code (--dry-run shows the changes first)
+EOF

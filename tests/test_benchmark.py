@@ -1,6 +1,14 @@
 """Tests for the benchmark system."""
 
+import pytest
+
 from mullet.cli.benchmark import BENCHMARK_TASKS, BenchmarkResult, run_benchmark, print_benchmark_summary
+
+
+@pytest.fixture(autouse=True)
+def _no_local_model(monkeypatch):
+    """Never reach a real local model server (LM Studio may be running)."""
+    monkeypatch.setattr("mullet.core.providers.local_detection.detect_local_provider", lambda *a, **k: None)
 
 
 def test_benchmark_tasks_defined():

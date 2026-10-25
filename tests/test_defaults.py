@@ -33,7 +33,7 @@ def test_provider_config():
 
 def test_user_config_dir():
     path = MulletConfig.user_config_dir()
-    assert path.name == ".mullet"
+    assert path == Path.home() / ".config" / "mullet"
 
 
 def test_user_skills_dir():

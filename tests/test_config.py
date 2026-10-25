@@ -82,8 +82,8 @@ def test_setup_logging():
 
 
 def test_user_config_dir():
-    path = MulletConfig.user_config_dir()
-    assert ".mullet" in str(path)
+    from mullet.core.paths import config_dir
+    assert MulletConfig.user_config_dir() == config_dir()
 
 
 def test_user_skills_dir():

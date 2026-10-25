@@ -1,9 +1,7 @@
 """Tests for mullet/core/router/preflight.py targeting >=85%% coverage."""
 
 import json
-import os
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

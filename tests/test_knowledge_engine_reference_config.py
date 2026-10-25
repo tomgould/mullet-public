@@ -1,12 +1,9 @@
 """Tests for mullet/knowledge/engine/reference_config.py."""
-import pytest
 from mullet.knowledge.engine.reference_config import (
     ReferencePattern,
     ReferenceConfig,
     load_reference_config,
     get_default_config,
-    DOMAIN_PATTERNS,
-    DEFAULT_SEMANTIC_PATTERNS,
 )
 
 

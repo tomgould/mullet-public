@@ -15,7 +15,7 @@ def create_pool_silent(
     """Create a minimal pool directory and config.yaml without prompting.
 
     Args:
-        slug: Directory name under ~/.mullet/pools/.
+        slug: Directory name under the pools directory (see get_pools_dir).
         machine_name: The machine_name field written into config.yaml.
         embedding_model: Embedding model identifier.
 

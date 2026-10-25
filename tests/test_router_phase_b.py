@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 
 from mullet.core.router.complexity import (
     PROVIDER_TIER_CAPABILITIES,

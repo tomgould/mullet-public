@@ -139,8 +139,8 @@ def check_budget() -> BudgetCheck:
     """Check current usage and return budget status."""
     limits = fetch_usage()
     if not limits:
-        # Can't reach API — assume GO but be cautious
-        return BudgetCheck(status=BudgetStatus.GO, message="Usage API unavailable, proceeding cautiously")
+        # No recent figures from Claude Code's statusline: assume GO but be cautious
+        return BudgetCheck(status=BudgetStatus.GO, message="No recent usage figures, proceeding cautiously")
 
     # Calculate daily budget from weekly remaining
     weekly_remaining = 100.0 - limits.weekly_pct

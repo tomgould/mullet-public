@@ -26,7 +26,10 @@ class LibraryPoolRegistry:
     _pools: dict[str, LibraryPoolConfig]
 
     def __init__(self, path: Path | None = None) -> None:
-        self._path = path or Path.home() / ".mullet" / "library_pools.json"
+        if path is None:
+            from mullet.core.paths import data_dir
+            path = data_dir() / "library_pools.json"
+        self._path = path
         self._pools = {}
         self._load()
 

@@ -1,9 +1,17 @@
+import inspect
 import json
-from unittest.mock import MagicMock, patch
+import os
+import stat
+import time
+from unittest.mock import patch
 
 import pytest
 
-from mullet.hud.usage import RateLimits, fetch_usage, parse_resets_at
+import mullet.hud.usage as usage_mod
+from mullet.hud.cli import HudDeps, main
+from mullet.hud.stdin_limits import fill_missing_windows, parse_stdin_limits
+from mullet.hud.types import HudRenderContext
+from mullet.hud.usage import RateLimits, fetch_usage, parse_resets_at, record_usage
 
 
 class TestRateLimits:
@@ -28,94 +36,186 @@ class TestRateLimits:
         assert r.has_sonnet_limit is True
 
 
-class TestFetchUsage:
+class TestRecordAndFetch:
     @pytest.fixture(autouse=True)
-    def _patch_cache_and_reset_state(self, monkeypatch, tmp_path):
-        """Patch cache file to a temp path and reset module-level state."""
-        import mullet.hud.usage as usage_mod
+    def _cache(self, monkeypatch, tmp_path):
+        self.cache = tmp_path / "usage-cache.json"
+        monkeypatch.setattr(usage_mod, "_CACHE_FILE", self.cache)
 
-        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "test-usage-cache.json")
-        monkeypatch.setattr(usage_mod, "_last_fetch_attempt", 0.0)
+    def _write(self, age: float, limits: dict) -> None:
+        self.cache.write_text(json.dumps({"ts": time.time() - age, "limits": limits}))
 
-    def _make_api_response(self, seven_day_sonnet=None):
-        """Build a JSON API response blob."""
-        data = {
-            "five_hour": {"utilization": 30.0, "resets_at": "2026-01-15T12:00:00Z"},
-            "seven_day": {"utilization": 25.0, "resets_at": "2026-01-16T00:00:00Z"},
-        }
-        if seven_day_sonnet is not None:
-            data["seven_day_sonnet"] = seven_day_sonnet
-        return json.dumps(data).encode()
-
-    def test_sets_has_sonnet_limit_true_when_present(self, monkeypatch):
-        import mullet.hud.usage as usage_mod
-
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: "fake-token")
-
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = self._make_api_response(
-            seven_day_sonnet={"utilization": 15.0, "resets_at": "2026-01-16T06:00:00Z"}
+    def test_roundtrip(self):
+        limits = RateLimits(
+            five_hour_pct=42.0, five_hour_resets="2099-01-15T12:00:00+00:00",
+            weekly_pct=17.5, weekly_resets="2099-01-20T00:00:00+00:00",
+            sonnet_weekly_pct=3.0, has_sonnet_limit=True,
         )
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_usage()
+        record_usage(limits)
+        assert fetch_usage() == limits
 
-        assert result is not None
-        assert result.has_sonnet_limit is True
-        assert result.sonnet_weekly_pct == 15.0
+    def test_cache_is_private_to_the_user(self):
+        record_usage(RateLimits(five_hour_pct=1.0))
+        assert stat.S_IMODE(os.stat(self.cache).st_mode) == 0o600
 
-    def test_sets_has_sonnet_limit_false_when_null(self, monkeypatch):
-        import mullet.hud.usage as usage_mod
+    def test_no_cache_means_unknown(self):
+        assert fetch_usage() is None
 
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: "fake-token")
+    def test_recent_figures_are_returned(self):
+        self._write(usage_mod._MAX_AGE - 60, {"five_hour_pct": 80.0})
+        assert fetch_usage().five_hour_pct == 80.0
 
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = self._make_api_response(seven_day_sonnet=None)
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_usage()
+    def test_stale_figures_are_ignored(self):
+        self._write(usage_mod._MAX_AGE + 60, {"five_hour_pct": 80.0})
+        assert fetch_usage() is None
 
-        assert result is not None
-        assert result.has_sonnet_limit is False
-        assert result.sonnet_weekly_pct == 0.0
+    def test_corrupt_cache_means_unknown(self):
+        self.cache.write_text("bad json")
+        assert fetch_usage() is None
 
-    def test_parses_sonnet_weekly_pct_from_seven_day_sonnet(self, monkeypatch):
-        import mullet.hud.usage as usage_mod
+    def test_write_failure_is_logged_not_raised(self, monkeypatch, tmp_path):
+        blocked = tmp_path / "blocked"
+        blocked.mkdir()
+        monkeypatch.setattr(usage_mod, "_CACHE_FILE", blocked)
+        record_usage(RateLimits())
+        assert os.listdir(tmp_path) == ["blocked"]
 
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: "fake-token")
+    def test_record_replaces_the_previous_figures(self):
+        record_usage(RateLimits(five_hour_pct=10.0))
+        record_usage(RateLimits(five_hour_pct=20.0))
+        assert fetch_usage().five_hour_pct == 20.0
+        assert [p.name for p in self.cache.parent.iterdir()] == [self.cache.name]
 
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = self._make_api_response(
-            seven_day_sonnet={"utilization": 42.0, "resets_at": "2026-01-17T00:00:00Z"}
+
+class TestNoClaudeCredentials:
+    """Mullet must never read Claude's login or call the usage API itself."""
+
+    def test_fetch_makes_no_network_call(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "usage-cache.json")
+        with patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+            assert fetch_usage() is None
+
+    def test_credentials_file_is_never_opened(self, monkeypatch, tmp_path):
+        creds = tmp_path / ".claude" / ".credentials.json"
+        creds.parent.mkdir()
+        creds.write_text('{"claudeAiOauth": {"accessToken": "x"}}')
+        creds.chmod(0)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "usage-cache.json")
+        opened = []
+        real_open = open
+
+        def spy(path, *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, *args, **kwargs)
+
+        # Path.read_text opens through io.open, so watch both names.
+        with patch("builtins.open", spy), patch("io.open", spy):
+            fetch_usage()
+            record_usage(RateLimits())
+            fetch_usage()
+        assert not any(".claude" in p for p in opened)
+
+    def test_module_has_no_credential_code(self):
+        source = inspect.getsource(usage_mod)
+        for needle in (".credentials", "accessToken", "oauth", "urlopen"):
+            assert needle not in source
+
+
+class TestResetWindows:
+    @pytest.fixture(autouse=True)
+    def _cache(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "usage-cache.json")
+
+    def test_a_window_past_its_reset_reads_as_zero(self):
+        record_usage(RateLimits(
+            five_hour_pct=96.0, five_hour_resets="2020-01-01T00:00:00+00:00",
+            weekly_pct=40.0, weekly_resets="2099-01-01T00:00:00+00:00",
+        ))
+        limits = fetch_usage()
+        assert limits.five_hour_pct == 0.0
+        assert limits.weekly_pct == 40.0
+
+    def test_a_window_without_a_reset_time_is_kept(self):
+        record_usage(RateLimits(five_hour_pct=50.0))
+        assert fetch_usage().five_hour_pct == 50.0
+
+
+class TestFillMissingWindows:
+    previous = RateLimits(
+        five_hour_pct=30.0, five_hour_resets="2099-01-01T05:00:00+00:00",
+        weekly_pct=92.0, weekly_resets="2099-01-07T00:00:00+00:00",
+    )
+
+    def test_a_partial_tick_keeps_the_last_weekly_figure(self):
+        stdin = {"rate_limits": {"five_hour": {"used_percentage": 40, "resets_at": 4070912400}}}
+        limits = fill_missing_windows(parse_stdin_limits(stdin), stdin, self.previous)
+        assert limits.five_hour_pct == 40.0
+        assert limits.weekly_pct == 92.0
+        assert limits.weekly_resets == self.previous.weekly_resets
+
+    def test_a_partial_tick_keeps_the_last_five_hour_figure(self):
+        stdin = {"rate_limits": {"seven_day": {"used_percentage": 93}}}
+        limits = fill_missing_windows(parse_stdin_limits(stdin), stdin, self.previous)
+        assert limits.five_hour_pct == 30.0
+        assert limits.weekly_pct == 93.0
+
+    def test_a_full_tick_replaces_both(self):
+        stdin = {"rate_limits": {"five_hour": {"used_percentage": 1}, "seven_day": {"used_percentage": 2}}}
+        limits = fill_missing_windows(parse_stdin_limits(stdin), stdin, self.previous)
+        assert (limits.five_hour_pct, limits.weekly_pct) == (1.0, 2.0)
+
+    def test_nothing_to_keep_without_previous_figures(self):
+        stdin = {"rate_limits": {"five_hour": {"used_percentage": 40}}}
+        limits = fill_missing_windows(parse_stdin_limits(stdin), stdin, None)
+        assert limits.weekly_pct == 0.0
+
+
+class TestHudRecordsStdinLimits:
+    def _deps(self, stdin_limits, recorded):
+        return HudDeps(
+            read_stdin=lambda: {"cwd": "/tmp"},
+            parse_stdin_limits=lambda data: stdin_limits,
+            fetch_usage_fallback=lambda: None,
+            record_usage=recorded.append,
+            scan_processes=lambda: [],
+            build_context=lambda cwd: HudRenderContext(cwd=cwd),
+            render=lambda ctx, cfg: "",
+            get_terminal_cols=lambda: 120,
+            emit=lambda line: None,
         )
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_usage()
 
-        assert result is not None
-        assert result.sonnet_weekly_pct == 42.0
+    def test_limits_from_claude_code_are_recorded(self):
+        recorded = []
+        limits = RateLimits(five_hour_pct=12.0)
+        main(self._deps(limits, recorded))
+        assert recorded == [limits]
 
-    def test_cache_roundtrip_preserves_has_sonnet_limit(self, monkeypatch):
-        import mullet.hud.usage as usage_mod
+    def test_partial_tick_records_the_merged_copy_but_shows_its_own(self):
+        recorded, shown = [], []
+        stdin = {"cwd": "/tmp", "rate_limits": {"five_hour": {"used_percentage": 12}}}
+        deps = self._deps(None, recorded)
+        deps.read_stdin = lambda: stdin
+        deps.parse_stdin_limits = parse_stdin_limits
+        deps.fetch_usage_fallback = lambda: RateLimits(weekly_pct=92.0)
+        deps.render = lambda ctx, cfg: shown.append(ctx.weekly_pct) or ""
+        main(deps)
+        assert recorded[0].five_hour_pct == 12.0
+        assert recorded[0].weekly_pct == 92.0
+        assert shown == [0.0]
 
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: "fake-token")
+    def test_nothing_recorded_without_limits(self):
+        recorded = []
+        main(self._deps(None, recorded))
+        assert recorded == []
 
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = self._make_api_response(
-            seven_day_sonnet={"utilization": 20.0, "resets_at": "2026-01-16T00:00:00Z"}
-        )
-        # First call — hits API and writes cache
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result1 = fetch_usage()
+    def test_record_failure_does_not_break_the_hud(self):
+        def boom(limits):
+            raise OSError("disk full")
 
-        assert result1 is not None
-        assert result1.has_sonnet_limit is True
-
-        # Second call — should read from cache; patch urlopen to explode so we
-        # know the cache path is taken.
-        with patch("urllib.request.urlopen", side_effect=Exception("should not be called")):
-            result2 = fetch_usage()
-
-        assert result2 is not None
-        assert result2.has_sonnet_limit is True
-        assert result2.sonnet_weekly_pct == 20.0
+        deps = self._deps(RateLimits(five_hour_pct=12.0), [])
+        deps.record_usage = boom
+        main(deps)
 
 
 class TestParseResetsAt:
@@ -141,112 +241,3 @@ class TestParseResetsAt:
 
     def test_malformed_iso(self):
         assert parse_resets_at("2026-13-45T99:00:00Z") is None
-
-
-class TestUsageMissingLines:
-    """Cover previously-missed lines in mullet/hud/usage.py."""
-
-    def test_get_access_token_no_creds_file(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HOME", str(tmp_path))
-        import mullet.hud.usage as usage_mod
-
-        token = usage_mod._get_access_token()
-        assert token is None
-
-    def test_get_access_token_valid_creds(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HOME", str(tmp_path))
-        import mullet.hud.usage as usage_mod
-
-        creds = tmp_path / ".claude" / ".credentials.json"
-        creds.parent.mkdir(parents=True)
-        creds.write_text('{"claudeAiOauth": {"accessToken": "my-secret-token"}}')
-        token = usage_mod._get_access_token()
-        assert token == "my-secret-token"
-
-    def test_get_access_token_bad_json(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HOME", str(tmp_path))
-        import mullet.hud.usage as usage_mod
-
-        creds = tmp_path / ".claude" / ".credentials.json"
-        creds.parent.mkdir(parents=True)
-        creds.write_text("not json")
-        token = usage_mod._get_access_token()
-        assert token is None
-
-    def test_get_access_token_oserror(self, monkeypatch, tmp_path):
-        import os
-
-        monkeypatch.setenv("HOME", str(tmp_path))
-        import mullet.hud.usage as usage_mod
-
-        creds = tmp_path / ".claude" / ".credentials.json"
-        creds.parent.mkdir(parents=True)
-        creds.write_text('{"claudeAiOauth": {"accessToken": "tok"}}')
-        os.chmod(str(creds), 0o000)
-        try:
-            token = usage_mod._get_access_token()
-            assert token is None
-        finally:
-            os.chmod(str(creds), 0o644)
-
-    def test_read_cache_exception_returns_none(self, monkeypatch, tmp_path):
-        import mullet.hud.usage as usage_mod
-
-        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "cache.json")
-        (tmp_path / "cache.json").write_text("bad json")
-        result = usage_mod._read_cache()
-        assert result is None
-
-    def test_write_cache_oserror(self, monkeypatch, tmp_path):
-        import mullet.hud.usage as usage_mod
-
-        cache = tmp_path / "cache.json"
-        cache.mkdir()
-        monkeypatch.setattr(usage_mod, "_CACHE_FILE", cache)
-        limits = usage_mod.RateLimits()
-        # Should not raise
-        usage_mod._write_cache(limits)
-
-    def test_fetch_usage_retry_cooldown_returns_cached(self, monkeypatch, tmp_path):
-        import time
-        import mullet.hud.usage as usage_mod
-
-        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "cache.json")
-        # Stale cache
-        (tmp_path / "cache.json").write_text(
-            '{"ts": ' + str(time.time() - 400) + ', "limits": {}}'
-        )
-        monkeypatch.setattr(usage_mod, "_last_fetch_attempt", time.time())
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: "token")
-        result = usage_mod.fetch_usage()
-        assert result is not None
-
-    def test_fetch_usage_no_token_returns_cached(self, monkeypatch, tmp_path):
-        import time
-        import mullet.hud.usage as usage_mod
-
-        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "cache.json")
-        # Stale cache
-        (tmp_path / "cache.json").write_text(
-            '{"ts": ' + str(time.time() - 400) + ', "limits": {}}'
-        )
-        monkeypatch.setattr(usage_mod, "_last_fetch_attempt", 0.0)
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: None)
-        result = usage_mod.fetch_usage()
-        assert result is not None
-
-    def test_fetch_usage_api_error_returns_cached(self, monkeypatch, tmp_path):
-        import time
-        from unittest.mock import patch
-        import mullet.hud.usage as usage_mod
-
-        monkeypatch.setattr(usage_mod, "_CACHE_FILE", tmp_path / "cache.json")
-        # Stale cache
-        (tmp_path / "cache.json").write_text(
-            '{"ts": ' + str(time.time() - 400) + ', "limits": {}}'
-        )
-        monkeypatch.setattr(usage_mod, "_last_fetch_attempt", 0.0)
-        monkeypatch.setattr(usage_mod, "_get_access_token", lambda: "token")
-        with patch("urllib.request.urlopen", side_effect=OSError("api fail")):
-            result = usage_mod.fetch_usage()
-        assert result is not None

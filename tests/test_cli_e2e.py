@@ -3,16 +3,20 @@
 These test the actual mullet command as users would invoke it.
 """
 
+import os
 import subprocess
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _run_mullet(*args, timeout=15):
-    """Run mullet as subprocess."""
+    """Run mullet as subprocess, from this checkout."""
     return subprocess.run(
         [sys.executable, "-m", "mullet.cli.main"] + list(args),
         capture_output=True, text=True, timeout=timeout,
-        cwd="/tmp",
+        cwd="/tmp", env={**os.environ, "PYTHONPATH": str(ROOT)},
     )
 
 
@@ -20,8 +24,7 @@ def test_help():
     result = _run_mullet("--help")
     assert result.returncode == 0
     assert "Cloud in the front" in result.stdout
-    assert "autopilot" in result.stdout
-    assert "ralph" in result.stdout
+    assert "mullet job --help" in result.stdout
 
 
 def test_version():
@@ -43,12 +46,12 @@ def test_tools_list():
 def test_skills_list():
     result = _run_mullet("--skills")
     assert result.returncode == 0
-    assert "/autopilot" in result.stdout
-    assert "/ralph" in result.stdout
+    assert "/brainstorm" in result.stdout
+    assert "/mullet-job" in result.stdout
     assert "/code-review" in result.stdout
 
 
-def test_doctor():
+def test_doctor(fake_claude):
     result = _run_mullet("doctor")
     assert result.returncode == 0
     assert "System Health Check" in result.stdout
@@ -138,18 +141,6 @@ def test_config():
 def test_stats():
     result = _run_mullet("stats")
     assert result.returncode == 0
-
-
-def test_autopilot_no_task():
-    result = _run_mullet("autopilot")
-    assert result.returncode != 0
-    assert "requires" in result.stderr.lower()
-
-
-def test_ralph_no_task():
-    result = _run_mullet("ralph")
-    assert result.returncode != 0
-    assert "requires" in result.stderr.lower()
 
 
 def test_tools_shows_git():

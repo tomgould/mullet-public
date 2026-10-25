@@ -40,7 +40,7 @@ import json
 from unittest.mock import patch, MagicMock
 from mullet.core.tools.web import (
     web_search, fetch_page, _ddg_html_search, _ddg_api_search,
-    register, WEB_SEARCH_SCHEMA, FETCH_PAGE_SCHEMA,
+    register,
 )
 
 

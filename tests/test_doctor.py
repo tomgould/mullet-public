@@ -1,16 +1,25 @@
 """Tests for the doctor command."""
 
+import os
 import subprocess
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_doctor_runs():
-    """mullet doctor should run without errors."""
-    result = subprocess.run(
+def _doctor(timeout: int = 30) -> subprocess.CompletedProcess:
+    """Run `mullet doctor` from this checkout; use with the fake_claude fixture."""
+    return subprocess.run(
         [sys.executable, "-m", "mullet.cli.main", "doctor"],
-        capture_output=True, text=True, timeout=15,
-        cwd="/tmp",
+        capture_output=True, text=True, timeout=timeout,
+        cwd="/tmp", env={**os.environ, "PYTHONPATH": str(ROOT)},
     )
+
+
+def test_doctor_runs(fake_claude):
+    """mullet doctor should run without errors."""
+    result = _doctor()
     assert result.returncode == 0
     assert "System Health Check" in result.stdout
     assert "Python" in result.stdout
@@ -18,35 +27,17 @@ def test_doctor_runs():
     assert "Tools" in result.stdout
 
 
-def test_doctor_shows_checks():
-    """Doctor should show pass/fail counts."""
-    result = subprocess.run(
-        [sys.executable, "-m", "mullet.cli.main", "doctor"],
-        capture_output=True, text=True, timeout=15,
-        cwd="/tmp",
-    )
+def test_doctor_shows_checks(fake_claude):
+    """Doctor should show pass/fail counts, and check the Claude Code CLI."""
+    result = _doctor()
     assert "checks passed" in result.stdout
+    assert "9.9.9 (Claude Code)" in result.stdout
+    assert "Version drift" not in result.stdout
 
 
-def test_doctor_shows_version_drift_row():
-    """mullet doctor should include a version drift / git-sync check row."""
-    result = subprocess.run(
-        [sys.executable, "-m", "mullet.cli.main", "doctor"],
-        capture_output=True, text=True, timeout=15,
-        cwd="/tmp",
-    )
-    assert result.returncode == 0
-    # The row label must appear; the status (ok/warn) varies by network availability
-    assert "Version" in result.stdout or "version" in result.stdout
-
-
-def test_doctor_shows_pool_coverage_row():
+def test_doctor_shows_pool_coverage_row(fake_claude):
     """mullet doctor should show a pool coverage summary row with healthy/total counts."""
-    result = subprocess.run(
-        [sys.executable, "-m", "mullet.cli.main", "doctor"],
-        capture_output=True, text=True, timeout=20,
-        cwd="/tmp",
-    )
+    result = _doctor()
     assert result.returncode == 0
     # Must have a row that mentions pool counts, e.g. "Pool coverage  3/5 healthy"
     assert "Pool coverage" in result.stdout or "pools healthy" in result.stdout or "pools configured" in result.stdout
@@ -81,5 +72,5 @@ def test_skills_command():
         capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == 0
-    assert "autopilot" in result.stdout
-    assert "ralph" in result.stdout
+    assert "brainstorm" in result.stdout
+    assert "mullet-job" in result.stdout

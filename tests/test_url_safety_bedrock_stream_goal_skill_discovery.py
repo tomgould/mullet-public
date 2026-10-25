@@ -1,10 +1,9 @@
-"""Tests for is_safe_url, BedrockStreamHandler, GoalDetector, and SkillDiscovery."""
+"""Tests for is_safe_url, BedrockStreamHandler, and SkillDiscovery."""
 
 import json
 
 from mullet.core.tools.url_safety import is_safe_url
 from mullet.core.providers.bedrock_stream import BedrockStreamEvent, BedrockStreamHandler
-from mullet.core.orchestration.autopilot_goals import GoalDetector
 from mullet.core.skills.discovery import SkillDiscovery
 
 
@@ -146,46 +145,6 @@ class TestBedrockStreamHandler:
         events = [_make_chunk({"content_block_start": {}})]
         result = list(self.handler.parse_stream(iter(events)))
         assert isinstance(result[0], BedrockStreamEvent)
-
-
-# ---------------------------------------------------------------------------
-# GoalDetector
-# ---------------------------------------------------------------------------
-
-class TestGoalDetector:
-    def setup_method(self):
-        self.detector = GoalDetector()
-
-    def test_exact_match_returns_true(self):
-        assert self.detector.is_goal_met("deploy application", "deploy application") is True
-
-    def test_empty_task_returns_false(self):
-        assert self.detector.is_goal_met("", "any result") is False
-
-    def test_unrelated_result_returns_false(self):
-        task = "deploy application to production"
-        result = "the weather is sunny today"
-        assert self.detector.is_goal_met(task, result) is False
-
-    def test_sufficient_keyword_match_returns_true(self):
-        task = "deploy application"
-        result = "application has been deployed successfully"
-        assert self.detector.is_goal_met(task, result) is True
-
-    def test_returns_bool(self):
-        result = self.detector.is_goal_met("test task", "test result")
-        assert isinstance(result, bool)
-
-    def test_case_insensitive_matching(self):
-        task = "Deploy Application"
-        result = "deploy application"
-        assert self.detector.is_goal_met(task, result) is True
-
-    def test_short_words_ignored(self):
-        # Words ≤2 chars are filtered out by keyword extraction
-        task = "go to it"  # all short words → no keywords → returns False
-        result = "go to it"
-        assert self.detector.is_goal_met(task, result) is False
 
 
 # ---------------------------------------------------------------------------

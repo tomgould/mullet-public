@@ -14,17 +14,11 @@ from mullet.core.agent.types import DelegationResult
 
 # ── _log_spend ────────────────────────────────────────────────────────────────
 
-def test_log_spend_writes_to_db(tmp_path):
-    db_file = tmp_path / "spend.db"
-    # Patch the db path so _log_spend writes to our temp file
-    with patch("mullet.core.agent.delegation.Path") as mock_path_cls:
-        mock_home = MagicMock()
-        mock_path_cls.home.return_value = mock_home
-        # Path.home() / ".mullet" / "delegation_spend.db" → db_file
-        mock_home.__truediv__.return_value.__truediv__.return_value = db_file
-        db_file.parent.mkdir(parents=True, exist_ok=True)
+def test_log_spend_writes_to_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    db_file = tmp_path / "mullet" / "delegation_spend.db"
 
-        _log_spend("test goal", "kimi", 1000, True)
+    _log_spend("test goal", "kimi", 1000, True)
 
     # Reopen to verify (the function closes its own connection)
     conn = sqlite3.connect(str(db_file))
@@ -37,15 +31,11 @@ def test_log_spend_writes_to_db(tmp_path):
     assert row[3] == 1
 
 
-def test_log_spend_truncates_long_goal(tmp_path):
+def test_log_spend_truncates_long_goal(tmp_path, monkeypatch):
     long_goal = "x" * 500
-    db_file = tmp_path / "spend2.db"
-    with patch("mullet.core.agent.delegation.Path") as mock_path_cls:
-        mock_home = MagicMock()
-        mock_path_cls.home.return_value = mock_home
-        mock_home.__truediv__.return_value.__truediv__.return_value = db_file
-        db_file.parent.mkdir(parents=True, exist_ok=True)
-        _log_spend(long_goal, "local", 0, False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    db_file = tmp_path / "mullet" / "delegation_spend.db"
+    _log_spend(long_goal, "local", 0, False)
 
     conn = sqlite3.connect(str(db_file))
     row = conn.execute("SELECT goal FROM spend LIMIT 1").fetchone()
@@ -56,9 +46,7 @@ def test_log_spend_truncates_long_goal(tmp_path):
 
 def test_log_spend_never_crashes_on_db_error():
     with patch("mullet.core.agent.delegation.sqlite3.connect", side_effect=Exception("DB error")):
-        with patch("mullet.core.agent.delegation.Path") as mock_path:
-            mock_path.home.return_value.__truediv__ = lambda *a: MagicMock()
-            _log_spend("goal", "provider", 0, True)  # must not raise
+        _log_spend("goal", "provider", 0, True)  # must not raise
 
 
 # ── delegate_with_fallback ────────────────────────────────────────────────────

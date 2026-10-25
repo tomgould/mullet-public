@@ -148,8 +148,8 @@ def main(argv: list[str] | None = None) -> int:
 
     step = 1
 
-    # 1. pip install
-    print(f"{step}. pip install -e .")
+    # 1. install
+    print(f"{step}. Install with scripts/install.sh (uses uv or pipx); in a source checkout, pip install -e . works too")
     step += 1
 
     # 2. .env
@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     if has_gemini:
         env_keys.append("GOOGLE_API_KEY=...")
 
-    print(f"{step}. Create .env from .env.example in the repo root:")
+    print(f"{step}. Put your provider keys in ~/.config/mullet/.env (see .env.example):")
     if env_keys:
         for key in env_keys:
             print(f"      {key}")
@@ -201,8 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("--- High-RAM guidance ---")
         print(f"{step}. With >10 GB RAM you can run larger models for better quality:")
-        print("      - qwen3.5-9b")
-        print("      - qwen2.5-coder-7b")
+        print("      - ornith-1.5-9b (7 GB)")
+        print("      - ornith-1.5-35b-a3b (MoE, about 20 GB loaded; for 32 GB+ machines)")
         step += 1
 
     # Apple Silicon notes
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{step}. ANTHROPIC_API_KEY is optional and billed per token. Without it, Anthropic work runs")
     print("      through Claude Code or the official claude CLI, under your subscription.")
     step += 1
-    print(f"{step}. Keys go in .env in the repo root, not in ~/.zshrc or ~/.bashrc.")
+    print(f"{step}. Keys go in ~/.config/mullet/.env (or $MULLET_CONFIG_DIR/.env), not in ~/.zshrc or ~/.bashrc.")
     step += 1
     print(f"{step}. The [gpu] extra is for Linux+NVIDIA only — do not install it on Mac.")
     step += 1

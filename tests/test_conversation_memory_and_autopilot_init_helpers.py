@@ -1,21 +1,13 @@
-"""Tests for conversation_memory and autopilot_init pure helpers."""
+"""Tests for conversation_memory pure helpers."""
 
 import time
 import pytest
-from pathlib import Path
 
 from mullet.core.knowledge.conversation_memory import (
     ConversationSummary,
     ConversationMemory,
     summarize_messages,
     extract_topics,
-)
-from mullet.cli.autopilot_init import (
-    TEMPLATES,
-    STATE_FILES,
-    run_autopilot_init,
-    require_goal,
-    _target_dir,
 )
 
 
@@ -297,141 +289,3 @@ class TestExtractTopics:
         msgs = [{"role": "user", "content": "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda Mu Nu Xi Omicron Pi Rho Sigma Tau Upsilon"}]
         topics = extract_topics(msgs)
         assert len(topics) <= 10
-
-
-# ---------------------------------------------------------------------------
-# TEMPLATES / STATE_FILES
-# ---------------------------------------------------------------------------
-
-class TestAutopilotConstants:
-    def test_templates_is_tuple(self):
-        assert isinstance(TEMPLATES, tuple)
-
-    def test_templates_nonempty(self):
-        assert len(TEMPLATES) > 0
-
-    def test_has_greenfield_template(self):
-        assert "greenfield-api" in TEMPLATES
-
-    def test_state_files_is_tuple(self):
-        assert isinstance(STATE_FILES, tuple)
-
-    def test_state_files_has_goal(self):
-        assert "goal.md" in STATE_FILES
-
-    def test_state_files_count(self):
-        assert len(STATE_FILES) == 5
-
-
-# ---------------------------------------------------------------------------
-# _target_dir
-# ---------------------------------------------------------------------------
-
-class TestTargetDir:
-    def test_returns_path(self, tmp_path):
-        result = _target_dir(tmp_path)
-        assert isinstance(result, Path)
-
-    def test_path_contains_autopilot(self, tmp_path):
-        result = _target_dir(tmp_path)
-        assert "autopilot" in str(result)
-
-    def test_path_contains_mullet(self, tmp_path):
-        result = _target_dir(tmp_path)
-        assert ".mullet" in str(result)
-
-
-# ---------------------------------------------------------------------------
-# run_autopilot_init
-# ---------------------------------------------------------------------------
-
-class TestRunAutopilotInit:
-    def test_help_returns_zero(self, tmp_path):
-        rc = run_autopilot_init(["--help"], cwd=tmp_path)
-        assert rc == 0
-
-    def test_list_returns_zero(self, tmp_path):
-        rc = run_autopilot_init(["--list"], cwd=tmp_path)
-        assert rc == 0
-
-    def test_unknown_template_returns_nonzero(self, tmp_path):
-        rc = run_autopilot_init(["--template", "nonexistent"], cwd=tmp_path)
-        assert rc != 0
-
-    def test_unknown_arg_returns_nonzero(self, tmp_path):
-        rc = run_autopilot_init(["--unknown-flag"], cwd=tmp_path)
-        assert rc != 0
-
-    def test_default_init_returns_zero(self, tmp_path):
-        rc = run_autopilot_init([], cwd=tmp_path)
-        assert rc == 0
-
-    def test_creates_state_files(self, tmp_path):
-        run_autopilot_init([], cwd=tmp_path)
-        ap_dir = tmp_path / ".mullet" / "autopilot"
-        for fname in STATE_FILES:
-            assert (ap_dir / fname).exists(), f"{fname} not created"
-
-    def test_each_template_works(self, tmp_path):
-        for tmpl in TEMPLATES:
-            dest = tmp_path / tmpl
-            dest.mkdir()
-            rc = run_autopilot_init(["--template", tmpl], cwd=dest)
-            assert rc == 0
-
-    def test_force_overwrites_existing(self, tmp_path):
-        run_autopilot_init([], cwd=tmp_path)
-        goal = tmp_path / ".mullet" / "autopilot" / "goal.md"
-        goal.write_text("custom content here")
-        run_autopilot_init(["--force"], cwd=tmp_path)
-        new_content = goal.read_text()
-        assert new_content != "custom content here"
-
-    def test_no_force_does_not_overwrite(self, tmp_path):
-        run_autopilot_init([], cwd=tmp_path)
-        goal = tmp_path / ".mullet" / "autopilot" / "goal.md"
-        goal.write_text("preserved content")
-        run_autopilot_init([], cwd=tmp_path)
-        assert goal.read_text() == "preserved content"
-
-
-# ---------------------------------------------------------------------------
-# require_goal
-# ---------------------------------------------------------------------------
-
-class TestRequireGoal:
-    def test_missing_goal_returns_false(self, tmp_path):
-        ok, msg = require_goal(cwd=tmp_path)
-        assert ok is False
-        assert "not found" in msg.lower() or "goal.md" in msg
-
-    def test_unfilled_template_returns_false(self, tmp_path):
-        run_autopilot_init([], cwd=tmp_path)
-        ok, msg = require_goal(cwd=tmp_path)
-        assert ok is False
-
-    def test_filled_goal_returns_true(self, tmp_path):
-        run_autopilot_init([], cwd=tmp_path)
-        goal = tmp_path / ".mullet" / "autopilot" / "goal.md"
-        # Write a substantially different goal with 3+ meaningful lines
-        goal.write_text(
-            "# Goal\n\n"
-            "We need to build a user authentication system.\n"
-            "This must support OAuth2 and JWT tokens.\n"
-            "The system should pass all security tests.\n"
-            "Deploy by end of sprint with full test coverage.\n"
-        )
-        ok, msg = require_goal(cwd=tmp_path)
-        assert ok is True
-
-    def test_too_short_goal_returns_false(self, tmp_path):
-        run_autopilot_init([], cwd=tmp_path)
-        goal = tmp_path / ".mullet" / "autopilot" / "goal.md"
-        goal.write_text("# Goal\nJust one line.\n")
-        ok, msg = require_goal(cwd=tmp_path)
-        assert ok is False
-
-    def test_returns_tuple(self, tmp_path):
-        result = require_goal(cwd=tmp_path)
-        assert isinstance(result, tuple)
-        assert len(result) == 2

@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from mullet.config.defaults import load_config
+from mullet.core.paths import config_file
 from mullet.core.providers.health import HealthTracker
 from mullet.core.router.budget import BudgetTracker, BudgetLimits
 from mullet.core.router.config import load_routing_config, load_provider_configs, ProviderConfig
@@ -35,7 +36,7 @@ def load_from_yaml(path: str | None = None) -> dict:
     # No explicit path — search well-known locations.
     candidates = [
         "mullet.yaml",
-        str(Path.home() / ".mullet" / "config.yaml"),
+        str(config_file("config.yaml")),
     ]
     for candidate in candidates:
         if Path(candidate).exists():
@@ -163,11 +164,12 @@ def _build_provider_entries(configs: dict[str, ProviderConfig]) -> dict[str, Pro
 
 
 def _detect_local() -> ProviderEntry | None:
-    """Try to detect a local LLM server."""
+    """Try to detect a local LLM server (LOCAL_LLM_URL, OLLAMA_URL, then port 8000)."""
     import urllib.request
-    for port in [1234, 11434, 8000]:
+    from mullet.core.env import local_llm_url, ollama_url
+    for base_url in (local_llm_url(), f"{ollama_url()}/v1", "http://localhost:8000/v1"):
         try:
-            url = f"http://localhost:{port}/v1/models"
+            url = f"{base_url}/models"
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=2) as resp:
                 if resp.status == 200:

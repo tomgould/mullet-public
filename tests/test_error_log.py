@@ -18,23 +18,17 @@ def reset_logging_handlers():
         logging.getLogger().removeHandler(handler)
     logging.getLogger().setLevel(logging.NOTSET) # Reset level
 
-def test_get_error_log_path_with_tmp_path(tmp_path):
+def test_get_error_log_path_with_tmp_path(tmp_path, monkeypatch):
     """Test that get_error_log_path returns the correct path and creates directories."""
-    # Override os.path.expanduser for this test
-    original_expanduser = os.path.expanduser
-    os.path.expanduser = lambda path: str(tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    log_path = get_error_log_path()
+    expected_dir = tmp_path / "mullet" / "logs"
+    expected_path = expected_dir / "errors.log"
 
-    try:
-        log_path = get_error_log_path()
-        expected_dir = tmp_path / ".mullet" / "logs"
-        expected_path = expected_dir / "errors.log"
-
-        assert log_path == str(expected_path)
-        assert os.path.isdir(expected_dir)
-        # The file itself is not created by get_error_log_path, only the directory
-        assert not os.path.exists(expected_path)
-    finally:
-        os.path.expanduser = original_expanduser # Restore original
+    assert log_path == str(expected_path)
+    assert os.path.isdir(expected_dir)
+    # The file itself is not created by get_error_log_path, only the directory
+    assert not os.path.exists(expected_path)
 
 def test_setup_error_log_creates_handler(tmp_path):
     """Test that setup_error_log adds a RotatingFileHandler to the root logger."""

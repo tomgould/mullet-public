@@ -5,7 +5,6 @@ import sys
 import time
 from unittest.mock import MagicMock
 
-import pytest
 
 from mullet.server.global_context import GlobalContextManager, GlobalSource
 

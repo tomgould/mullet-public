@@ -5,7 +5,6 @@ and wait_for_lm_studio.  Achieves 100 % branch coverage.
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.knowledge.engine.health import (
     CircuitBreaker,

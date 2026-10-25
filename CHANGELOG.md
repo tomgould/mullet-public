@@ -6,6 +6,90 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-25
+
+### Added
+- **Gated jobs.** `mullet job plan|show|approve|run|status|tail|stop|resume|report|list|discard|merge`
+  runs a large coding job unattended. A planner proposes a task tree, you approve it, and
+  each step runs in a private clone. A step passes only when gates G0 to G7 pass. You get a
+  branch and an evidence report; `mullet job merge` copies the branch into your repo and
+  never pushes.
+- **Sandbox.** Workers and gate commands run in bubblewrap on Linux, with no network, a
+  hidden home directory and an allowlisted environment. The clone's git directory is out of
+  the worker's reach. If the sandbox can't start, the job refuses to run. Jobs refuse to
+  start on macOS for now.
+- **SQLite ledger and report.** A step's status is set only from gate results. The report
+  is built from the ledger, and anything a worker says about itself is labelled as a claim.
+- **Claude Code worker.** It runs your own `claude -p`. `ANTHROPIC_API_KEY` is left out
+  unless a job is planned with `--billing api`. A usage limit pauses the job until the
+  reset.
+- **Notifications** when a job blocks, pauses or finishes: desktop, and Slack in working
+  hours. Set with `MULLET_NOTIFY`, `MULLET_SLACK_WEBHOOK`, `MULLET_NOTIFY_HOURS` and
+  `MULLET_NOTIFY_TZ`.
+- **Portable install.** `scripts/install.sh` installs from GitHub with uv or pipx. Config
+  goes in `~/.config/mullet` and state, data and caches follow the XDG directories.
+  `mullet paths` prints them and `mullet migrate-state` moves an older `~/.mullet`.
+- **`mullet setup-claude`** records what it changes, and `--uninstall` undoes exactly that.
+  Hooks are opt-in, run with `mullet hook <name>`. `mullet doctor` checks Claude Code, the
+  sandbox and a stray `ANTHROPIC_API_KEY`.
+- **opencode worker and the delegation ladder.** With a `ladder:` section in the config
+  and opencode allowed by a repo's profile, each step goes up a ladder of workers, one
+  attempt per rung: an OpenRouter `:free` model (verified-public GitHub repos only), a
+  model in LM Studio, Kimi on Moonshot's API, paid OpenRouter models, and Claude. The
+  order follows the step's kind and Claude's paced weekly usage; a spending cap covers the
+  paid rungs. Workers reach their provider through a key proxy pinned to one model, and
+  paid OpenRouter requests always ask for hosts that keep no prompts and, by default,
+  serve no 4-bit copies (`ladder.routing` sets more per model). `mullet job ladder`,
+  `mullet job retry <job> <step> --rung <rung>` and `--ladder/--no-ladder/--max-spend` on
+  `mullet job plan`; the report shows each attempt's rung, model and cost.
+- **`mullet_opencode` is a gated single-step ladder job.** Its change reaches your working
+  tree only after the gates pass, with `git apply --3way` on clean, unchanged files.
+- **Night mode.** `mullet night on [--until HH:MM] | off | status`: local attempts get
+  longer, one more try below Claude and a wait for machine headroom; it ends at its time
+  or when you come back. `ladder.local_by_day: false` keeps the local rung for night mode.
+- **`mullet local`** keeps LM Studio usable: `status`, `restart`, `check --fix`, and
+  `watchdog --install` for a two-minute systemd timer that restarts a stuck server.
+- **`mullet reap`** stops idle or orphaned Mullet work: pytest-xdist workers, opencode runs
+  of finished jobs, idle LM Studio models, orphaned `mullet mcp` servers and stale
+  `/tmp/mullet-*` directories. It matches exact command lines and parentage only, and
+  `--dry-run` lists what it would do. `--install-timer` adds a three-minute systemd timer
+  that only reports for its first 24 hours.
+- **`mullet ladder report [--since YYYY-MM-DD | --days N] [--json]`** adds up every job's
+  attempts by rung, step kind and model from the ledger alone: passes, escalations,
+  provider errors, dollars, tokens and time, an estimate of the Claude work avoided, and a
+  short "what to change" list when there is enough data.
+- **Machine guard.** One GPU lease across Mullet's processes and limits on VRAM, RAM, GPU
+  temperature and load; reindexing waits for headroom, and one full test suite runs at a
+  time across jobs.
+- Not in 2.0.0: a macOS sandbox. Until then jobs refuse to start on macOS.
+
+### Changed
+- Claude workers run one at a time across jobs, as they share a subscription; opencode
+  workers have their own slots (`MULLET_API_WORKERS`, default 3).
+- Jobs on the same repo, base commit and profile share one G0 baseline for a day.
+- The test suite runs in parallel (about 4.5 minutes) and every test
+  is cut off from the network, provider keys and the real home directory.
+- One loader reads `.env`, from the config directory. Keys in the working directory's
+  `.env` are no longer picked up.
+- Reindex, evaluate and memory work from an installed copy, not only from a checkout.
+- The public README describes jobs first.
+
+### Removed
+- `ultrawork`, `ralph`, `autopilot`, `team` and `eco`, and the overnight loop.
+- Substring verifiers that read PASS or APPROVAL out of a model's reply.
+- The `gemini_cli` provider.
+- Unsafe autonomous paths, including automatic commits and pushes to `origin master`.
+
+### Security
+- The HUD no longer reads Claude Code's OAuth token. Usage figures come from the rate
+  limits Claude Code passes to the statusline command.
+- Delegates and opencode no longer receive keys from the current directory's `.env`.
+- Reviews before each phase closed gate bypasses (skipped tests counted as passing, a
+  committed `.gitattributes` hiding changes from the diff) and a prompt-injection route
+  into the G7 reviewer, which now sees the diff fenced with a random marker.
+
+The entries below record the changes since 1.9.0 in the order they were made.
+
 ### Added (2026-10-20: switch delegation off)
 - **`MULLET_DELEGATION=off`** (environment or `.env`; default `on`) stops Mullet sending
   work to any model provider. `mullet_run`, `mullet_delegate`, `mullet_swarm`,
@@ -517,7 +601,7 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [1.3.0-harness] - 2026-05-09
 
-### Added — harness overnight UX polish
+### Added: harness overnight UX polish
 
 **New commands:**
 - `!` shell shorthand — alias for `/run`, identical to Claude Code behaviour

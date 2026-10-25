@@ -8,9 +8,7 @@ Covers: handle_health, handle_models, handle_status, handle_info,
 Skips: handle_chat_completions (too complex — covered separately).
 """
 
-import json
 import os
-import pytest
 from aiohttp import web
 from unittest.mock import MagicMock, patch, AsyncMock
 

@@ -1,18 +1,20 @@
-# Mullet on Mac — Complete Setup Guide
+# Mullet on Mac: Complete Setup Guide
 
-> **Mullet is a smart router for AI coding assistants.** Instead of sending every question to expensive AI models, Mullet automatically picks the cheapest provider that can handle the job — from a free local model on your Mac to cloud APIs like Kimi, Gemini, or Anthropic. By the end of this guide, you'll have Mullet running inside Claude Code, saving you money on every coding task while keeping responses fast and high-quality.
+> **Mullet runs large coding jobs unattended and checks every step itself.** It also gives Claude Code a knowledge-search server (Trawl) and optional tools that hand work to cheaper models (Kimi, OpenRouter, Gemini, or a model on your own Mac).
+>
+> **What works on a Mac today:** the MCP server, Trawl search, the delegation tools and local models. **`mullet job` does not start on macOS yet.** Jobs run inside a bubblewrap sandbox, which is Linux-only, and a macOS sandbox is coming but not built. Use a Linux machine to run jobs. This guide sets up everything else.
 
 ## Table of Contents
 
 - [1. Before You Start](#1-before-you-start)
 - [2. Install Homebrew](#2-install-homebrew)
-- [3. Install Python 310](#3-install-python-310)
+- [3. Install Python 3.10+](#3-install-python-310)
 - [4. Install Git](#4-install-git)
 - [5. Install Claude Code](#5-install-claude-code)
-- [6. Get Your API Keys](#6-get-your-api-keys)
-  - [6a. Kimi K2 — Recommended Primary Provider](#6a-kimi-k2--recommended-primary-provider)
-  - [6b. Anthropic — Optional Orchestrator](#6b-anthropic--optional-orchestrator)
-  - [6c. Google Gemini — Optional Fallback](#6c-google-gemini--optional-fallback)
+- [6. Get Your API Keys (Optional)](#6-get-your-api-keys-optional)
+  - [6a. Kimi K2 (Recommended)](#6a-kimi-k2-recommended)
+  - [6b. Anthropic (Optional)](#6b-anthropic-optional)
+  - [6c. Google Gemini (Optional)](#6c-google-gemini-optional)
 - [7. Install Mullet](#7-install-mullet)
 - [8. Set Your API Keys](#8-set-your-api-keys)
 - [9. Run mullet doctor](#9-run-mullet-doctor)
@@ -21,7 +23,7 @@
   - [Option B: Ollama Lighter, terminal-based](#option-b-ollama-lighter-terminal-based)
 - [11. Wire Mullet into Claude Code](#11-wire-mullet-into-claude-code)
 - [12. Test That Everything Works](#12-test-that-everything-works)
-- [13. Knowledge Pools Optional — Skip if Overwhelmed](#13-knowledge-pools-optional--skip-if-overwhelmed)
+- [13. Knowledge Pools (Optional, Skip if Overwhelmed)](#13-knowledge-pools-optional-skip-if-overwhelmed)
 - [14. Troubleshooting](#14-troubleshooting)
 - [15. Pro Tip: Planning with Opus](#15-pro-tip-planning-with-opus)
 - [16. Next Steps](#16-next-steps)
@@ -30,12 +32,13 @@
 
 ## 1. Before You Start
 
-Here's what you'll need. Don't worry — everything below is explained step by step.
+Here's what you'll need. Don't worry: everything below is explained step by step.
 
 - **macOS 12 Monterey or later.** To check: click the **Apple menu** in the top-left corner of your screen, then choose **About This Mac**. If the version number is 12 or higher, you're good to go.
-- **At least 8 GB of RAM** and **20 GB of free disk space.** Local AI models need room to breathe.
-- **30–45 minutes** the first time you run through this. (The next time will take two minutes. You're doing great.)
-- **A credit card handy** for API keys. Kimi, our recommended primary provider, costs roughly **$1 to get started**.
+- **At least 8 GB of RAM** and **20 GB of free disk space** if you want a local model. Local AI models need room to breathe. Mullet itself is small.
+- **30 to 45 minutes** the first time you run through this. (The next time will take two minutes. You're doing great.)
+- **A Claude Code login** (a Claude subscription). Mullet works alongside it.
+- **A credit card handy**, only if you want cloud API keys. They are optional. Kimi, the recommended one, costs roughly **$1 to get started**. Trawl search and local models need no key at all.
 
 ---
 
@@ -49,7 +52,7 @@ First, let's check if it's already on your Mac. Open **Terminal** (press `Cmd + 
 brew --version
 ```
 
-If you see something like `Homebrew 4.x.x`, you're all set — skip to [Section 3](#3-install-python-310).
+If you see something like `Homebrew 4.x.x`, you're all set. Skip to [Section 3](#3-install-python-310).
 
 If you see `command not found`, paste this one line into Terminal and press `Return`:
 
@@ -57,7 +60,7 @@ If you see `command not found`, paste this one line into Terminal and press `Ret
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-This will ask for your Mac password (the same one you use to log in). Type it — you won't see any dots on screen for security reasons — and press `Return`.
+This will ask for your Mac password (the same one you use to log in). Type it (you won't see any dots on screen, for security reasons) and press `Return`.
 
 **What Homebrew does:** It downloads and manages software in the background so you don't have to hunt down installers yourself. This is the only time you'll need to do this.
 
@@ -80,7 +83,7 @@ In Terminal, type:
 python3 --version
 ```
 
-**If you see `Python 3.10.x` or higher** (for example, `Python 3.12.4`), you're good — skip to [Section 4](#4-install-git).
+**If you see `Python 3.10.x` or higher** (for example, `Python 3.12.4`), you're good. Skip to [Section 4](#4-install-git).
 
 **If you see `command not found` or a version below 3.10**, run:
 
@@ -104,7 +107,7 @@ You should now see `Python 3.12.x` (or similar).
 
 ## 4. Install Git
 
-**Git** is a tool for downloading and updating code from the internet. We'll use it to fetch Mullet.
+**Git** is a tool for downloading and updating code from the internet. The Mullet installer uses it to fetch Mullet from GitHub.
 
 Check if you already have it:
 
@@ -112,9 +115,9 @@ Check if you already have it:
 git --version
 ```
 
-**If you see something like `git version 2.39.x`**, you're all set — skip to [Section 5](#5-install-claude-code).
+**If you see something like `git version 2.39.x`**, you're all set. Skip to [Section 5](#5-install-claude-code).
 
-**If macOS pops up a window saying "The git command requires the command line developer tools,"** click **Install**. This is Apple's way of offering you Git — it's perfectly safe, and it only takes a minute.
+**If macOS pops up a window saying "The git command requires the command line developer tools,"** click **Install**. This is Apple's way of offering you Git. It's perfectly safe, and it only takes a minute.
 
 **If nothing happens or you see `command not found`**, install Git via Homebrew:
 
@@ -132,7 +135,7 @@ git --version
 
 ## 5. Install Claude Code
 
-**Claude Code** is Anthropic's AI coding assistant that runs in your Terminal. Mullet plugs directly into it to route your questions to the cheapest, fastest AI model for each task.
+**Claude Code** is Anthropic's AI coding assistant that runs in your Terminal. Mullet plugs directly into it: it adds search over your code and docs, and optional tools that hand work to cheaper models.
 
 Claude Code is installed via **npm**, a tool that comes with **Node.js**. Let's check if Node is already installed:
 
@@ -162,61 +165,52 @@ The `-g` flag means "install globally" so you can run it from anywhere.
 claude --version
 ```
 
-You should see something like `Claude Code 0.x.x`.
+You should see a version number followed by `(Claude Code)`.
 
-**Note:** This is the tool Mullet plugs into. You won't pay Anthropic for every request — Mullet will route most of your questions to cheaper providers instead.
+Then run `claude` once and log in with your Claude account when it asks.
+
+**Note:** Mullet never reads or reuses your Claude login. Claude Code keeps it, and Mullet's jobs run your own logged-in `claude`.
 
 ---
 
-## 6. Get Your API Keys
+## 6. Get Your API Keys (Optional)
 
-An **API key** is like a password that lets Mullet talk to AI services on your behalf. You'll add these keys to your Mac once, and Mullet will use them automatically.
+An **API key** is like a password that lets Mullet talk to AI services on your behalf. Keys are **optional**. You only need them for Mullet's delegation tools, which hand work to cheaper models. Trawl search, `mullet doctor` and a local model work without any key.
 
-You only **need** the Kimi key to get started. The others are optional but helpful.
+If you want to try delegation, start with the Kimi key. The others are optional extras. You'll add the keys to one file on your Mac in [Section 8](#8-set-your-api-keys).
 
-### 6a. Kimi K2 — Recommended Primary Provider
+### 6a. Kimi K2 (Recommended)
 
-**Kimi** (by Moonshot AI) is Mullet's default workhorse — fast, capable, and affordable.
+**Kimi** (by Moonshot AI) is the usual first choice for delegated work: fast, capable, and affordable.
 
-1. Open your web browser and go to **[platform.moonshot.cn](https://platform.moonshot.cn)**.
+1. Open your web browser and go to **[platform.moonshot.ai](https://platform.moonshot.ai)**.
+   - If you are in mainland China, use [platform.moonshot.cn](https://platform.moonshot.cn) and add `KIMI_BASE_URL=https://api.moonshot.cn/v1` to your `.env` file in [Section 8](#8-set-your-api-keys). Mullet uses the international address by default.
 2. Click **Sign Up** and create an account with your email.
 3. Once logged in, go to the **Billing** or **Top Up** section and add **$5** (about the cost of a coffee). This lasts a surprisingly long time.
 4. Go to the **API Keys** section and click **Create API Key**.
 5. Give it a name like `mullet-mac` and click **Create**.
-6. **Copy the key immediately** — it looks like this: `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-   - The `sk-` at the beginning is normal. That's how you know it's a Kimi key.
+6. **Copy the key immediately.** It looks like this: `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+   - The `sk-` at the beginning is normal.
 7. Paste it somewhere safe (like Apple Notes) for now. We'll add it to your Mac in [Section 8](#8-set-your-api-keys).
 
-**Cost:**
+**Cost:** Kimi charges per token (a token is roughly three-quarters of a word). Prices change, so check the pricing page on the Moonshot site. For everyday coding questions, you'll spend pennies.
 
-| What you pay | Price |
-|---|---|
-| Input (what you send) | ~$0.60 per 1 million tokens |
-| Output (what you receive) | ~$2.50 per 1 million tokens |
+### 6b. Anthropic (Optional)
 
-*One million tokens is roughly 750,000 words — about three full novels. For everyday coding questions, you'll spend pennies.*
+**Anthropic** makes Claude, the AI behind Claude Code. You do **not** need an Anthropic API key to use Claude Code or Mullet. Claude Code uses your subscription login.
 
-### 6b. Anthropic — Optional (Orchestrator)
+An Anthropic key is billed per token, separately from your subscription. If it is set when Mullet runs `claude -p`, that call bills the API instead of your subscription. Most people should skip this key. Mullet's jobs leave it out unless you plan one with `--billing api`, and `mullet doctor` warns you when it is set.
 
-**Anthropic** makes Claude, the AI behind Claude Code. Mullet uses Anthropic's most powerful model (Opus) only for complex planning and orchestration tasks — not for everyday coding.
+If you do want one:
 
 1. Go to **[console.anthropic.com](https://console.anthropic.com)**.
 2. Sign up and add a payment method.
-3. Go to **API Keys** → **Create Key**.
+3. Go to **API Keys**, then **Create Key**.
 4. Copy the key (it also starts with `sk-`).
 
-**Cost:**
+### 6c. Google Gemini (Optional)
 
-| What you pay | Price |
-|---|---|
-| Input | ~$3.00 per 1 million tokens |
-| Output | ~$15.00 per 1 million tokens |
-
-*Don't panic at the price — Mullet sends only a tiny fraction of requests here. It's used sparingly when the orchestrator needs to make smart routing decisions.*
-
-### 6c. Google Gemini — Optional Fallback
-
-**Gemini** (by Google) offers a generous free tier, making it a great safety net.
+**Gemini** (by Google) offers a free tier, which makes it a handy extra provider.
 
 1. Go to **[aistudio.google.com](https://aistudio.google.com)**.
 2. Sign in with your Google account.
@@ -224,30 +218,47 @@ You only **need** the Kimi key to get started. The others are optional but helpf
 4. Click **Create API Key** in a new project.
 5. Copy the key (it looks like a long random string).
 
-**Cost:** The free tier covers most casual usage. If you exceed it, paid rates are very low.
+**Cost:** The free tier covers most casual usage. Check Google's pricing page for the paid rates.
+
+Gemini also needs a small extra Python package. [Section 7](#7-install-mullet) shows how to add it.
 
 ---
 
 ## 7. Install Mullet
 
-Now for the main event. These commands download Mullet from the internet and set it up on your Mac.
+Now for the main event. One command downloads Mullet from GitHub and installs it as its own tool, so it can't clash with other Python projects on your Mac.
 
-In Terminal, run these commands one at a time:
-
-```bash
-git clone https://github.com/tomgould/mullet-public.git
-cd mullet-public
-pip install -e .
-```
-
-**What `-e .` means:** The `-e` stands for "editable." It installs Mullet in a special way so that if the code is updated later, you get the changes instantly without reinstalling. The `.` means "install the project in this folder." Think of it like creating a shortcut instead of making a copy.
-
-**Make sure your Mac can find Mullet** — run this now so it works immediately and every time you open Terminal:
+The installer needs **git** and **Python 3.10+** (you have both from the earlier sections), plus **uv** or **pipx**. If you have neither, install uv:
 
 ```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
+brew install uv
 ```
+
+Then run the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
+```
+
+To update Mullet later, run the same command again.
+
+**Optional extras.** To add Gemini support, set `MULLET_EXTRAS` for the run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | MULLET_EXTRAS=gemini bash
+```
+
+The extras are `gemini`, `bedrock` and `postgres`. **Avoid `all` on a Mac**: it includes the NVIDIA-only `pynvml` package, which won't install here. Don't use the `gpu` extra either.
+
+**Never run `pip install mullet`.** The package of that name on PyPI is someone else's project, not this one.
+
+**If `mullet` is not found** after the install, your Mac doesn't yet look in the folder where uv puts tools. Run:
+
+```bash
+uv tool update-shell
+```
+
+(If you used pipx, run `pipx ensurepath` instead.) Then open a **new Terminal window**.
 
 **Verify it worked:**
 
@@ -255,69 +266,68 @@ source ~/.zshrc
 mullet --version
 ```
 
-You should see something like:
+You should see `mullet` followed by the version number.
 
-```
-mullet 0.x.x
-```
+> **Developer note:** If you want to change Mullet's own code, clone the repository instead, create a virtual environment, and run `pip install -e ".[dev]"`. Ordinary users should use the installer above.
 
 ---
 
 ## 8. Set Your API Keys
 
-Now we'll tell your Mac to remember your API keys so Mullet can use them automatically.
+Skip this section if you didn't get any keys. Mullet works without them for Trawl search and local models.
 
-We'll edit a hidden file called **`.zshrc`** using **nano**, a simple text editor that runs inside Terminal. (We use nano instead of other editors because it's friendly for beginners.)
+Mullet reads its keys from one file: **`~/.config/mullet/.env`**. Put them there, not in `~/.zshrc`. (If you set `MULLET_CONFIG_DIR`, the file is `$MULLET_CONFIG_DIR/.env` instead.)
 
-1. Open nano:
-
-```bash
-nano ~/.zshrc
-```
-
-2. Use the **Down arrow key** to scroll to the very bottom of the file.
-3. Add these lines, **replacing the placeholder text with your actual keys**:
+1. Create the folder and the file, and make the file private to you:
 
 ```bash
-# Mullet API Keys
-export KIMI_API_KEY="sk-your-actual-kimi-key-here"
-export ANTHROPIC_API_KEY="sk-your-actual-anthropic-key-here"
-export GEMINI_API_KEY="your-actual-gemini-key-here"
+mkdir -p ~/.config/mullet
+touch ~/.config/mullet/.env
+chmod 600 ~/.config/mullet/.env
 ```
 
-If you only got the Kimi key, that's perfectly fine — just add that one line and skip the others.
+2. Open it in **nano**, a simple text editor that runs inside Terminal:
+
+```bash
+nano ~/.config/mullet/.env
+```
+
+3. Add a line for each key you have, **replacing the placeholder text with your actual key**. Use plain `NAME=value` lines, with no `export` and no quotes:
+
+```
+KIMI_API_KEY=sk-your-actual-kimi-key-here
+OPENROUTER_API_KEY=your-actual-openrouter-key-here
+GOOGLE_API_KEY=your-actual-gemini-key-here
+```
+
+If you only got the Kimi key, that's perfectly fine. Add just that line. `ANTHROPIC_API_KEY` is also read from this file, but see [Section 6b](#6b-anthropic-optional) before adding it.
 
 4. Save and exit nano:
    - Press `Control + O` (that's the letter O, not zero). Nano will ask "File Name to Write."
    - Press `Return` to confirm.
    - Press `Control + X` to exit.
 
-5. Tell your Terminal to reload the file:
+You don't need to restart Terminal. Mullet reads the file each time it runs.
+
+**How the file is read:**
+- A variable already set in your Terminal wins over the file.
+- A `.env` file inside one of your own projects is never read.
+
+**Verify a key is set without printing it:**
 
 ```bash
-source ~/.zshrc
+grep -c '^KIMI_API_KEY=' ~/.config/mullet/.env
 ```
 
-**Verify your keys are set:**
+`1` means the line is there. `0` means it isn't. Avoid `echo $KIMI_API_KEY`: it prints your key on screen, and anyone looking over your shoulder (or any screen share) would see it.
 
-```bash
-echo $KIMI_API_KEY
-```
-
-You should see your key printed on the screen (something starting with `sk-`). If you see a blank line, double-check that you saved the file correctly.
-
-**Do the same for the other keys if you added them:**
-
-```bash
-echo $ANTHROPIC_API_KEY
-echo $GEMINI_API_KEY
-```
+Repeat with `OPENROUTER_API_KEY` or `GOOGLE_API_KEY` for the others.
 
 ---
 
 ## 9. Run mullet doctor
 
-Mullet comes with a built-in health check that tells you whether everything is set up correctly.
+Mullet comes with a built-in health check that tells you whether everything is set up correctly. It only reads your setup and works offline, so it is safe to run at any time.
 
 Run:
 
@@ -328,13 +338,17 @@ mullet doctor
 You'll see output like this:
 
 ```
-✓ Python 3.12 found
-✓ Git installed
-✓ Kimi API key valid
-! Anthropic API key not set (optional)
-· Local LLM not detected (optional)
-✗ Node.js not found
+  ✓ Python               3.12.4
+  ✓ Claude Code CLI      2.1.302 (Claude Code)
+  ✓ Git                  2.39.5
+  · Job sandbox          Unavailable: no sandbox backend for darwin yet
+  · Local LLM            Not detected (optional)
+  ✓ Kimi API             KIMI_API_KEY set
+  · Google Gemini        GOOGLE_API_KEY not set
+  · Claude Code setup    Not set up: run mullet setup-claude
 ```
+
+The exact lines depend on your setup. At the bottom you'll see a count such as `21/24 checks passed`.
 
 **Here's what each symbol means:**
 
@@ -345,19 +359,28 @@ You'll see output like this:
 | · | Cyan | Informational. Something isn't set up yet, but it's okay to skip for now. |
 | ✗ | Red | Problem that needs fixing before Mullet works properly. |
 
-At the bottom, you'll see a line like:
+**The job sandbox line:** On a Mac it will say the sandbox is unavailable. That is expected. It is why `mullet job` won't start here.
 
-```
-5/7 checks passed
-```
+**A key warning:** If you see a yellow `ANTHROPIC_API_KEY` line, a key is set in your environment and `claude -p` will bill the API instead of your subscription. Remove it if you didn't mean that.
 
-**Don't panic if some things are yellow.** Yellow items are optional. Red items are the ones to fix. If you see red, jump to the [Troubleshooting](#14-troubleshooting) section for the fix.
+**Don't panic if some things are yellow.** Yellow items are optional. Red items are the ones to fix. If you see red, jump to the [Troubleshooting](#14-troubleshooting) section.
+
+For a deeper check, run `mullet doctor --full`. It also probes your providers and asks GitHub whether a newer Mullet exists.
 
 ---
 
 ## 10. Set Up a Free Local LLM
 
-A **local LLM** is an AI model that runs entirely on your own Mac — no internet required, no API costs, and your code stays private. Mullet can route simple questions to your local model for free, reserving your paid API keys for harder tasks.
+A **local LLM** is an AI model that runs entirely on your own Mac: no internet required, no API costs, and your code stays private. Mullet can hand simple questions to your local model for free. This section is optional.
+
+**Pick a model that fits your RAM.** Open **About This Mac** to check.
+
+| Your Mac's RAM | Model to use |
+|---|---|
+| 10 GB or less | A 2B to 3B model. Don't try 7B or larger: it will be slow and may freeze your Mac. |
+| 16 GB or more | `Qwen2.5-Coder-7B-Instruct` (used in the steps below). |
+
+The steps below use the 7B model. On a smaller Mac, search for a 2B to 3B coding model instead and follow the same steps.
 
 You have two options. **Pick one.**
 
@@ -378,8 +401,8 @@ You have two options. **Pick one.**
    - In LM Studio, click the **search icon** on the left sidebar (it looks like a magnifying glass).
    - In the search bar at the top, type: **`Qwen2.5-Coder-7B-Instruct`**
    - Click the model name in the results, then click **Download**.
-   - This downloads about **4 GB** of data. Grab a coffee — it may take 10–20 minutes depending on your internet.
-   - **What this model is:** A 7-billion-parameter AI trained specifically for coding tasks. It's small enough to run smoothly on most Macs but smart enough to handle simple coding questions.
+   - This downloads about **4 GB** of data. Grab a coffee. It may take 10 to 20 minutes depending on your internet.
+   - **What this model is:** A 7-billion-parameter AI trained specifically for coding tasks. It's small enough to run on a Mac with 16 GB of RAM or more, and smart enough to handle simple coding questions.
 
 4. **Load the model:**
    - Once downloaded, click the **chat icon** on the left sidebar.
@@ -414,7 +437,7 @@ Install it via Homebrew:
 brew install ollama
 ```
 
-Download the same coding model:
+Download the same coding model (on a Mac with 10 GB of RAM or less, pull a 2B to 3B model instead):
 
 ```bash
 ollama pull qwen2.5-coder:7b
@@ -444,19 +467,24 @@ You should see a green **✓ Local LLM** line. Ollama runs on port **11434**, an
 
 ## 11. Wire Mullet into Claude Code
 
-This is the magic step. One command installs Mullet's hooks, MCP server, delegation rules, skills, agents, and status bar into Claude Code.
+One command registers Mullet's MCP server and skills with Claude Code. Run it with `--dry-run` first to see exactly what it will change:
 
-Run:
+```bash
+mullet setup-claude --dry-run
+```
+
+If you're happy with the list, run it for real:
 
 ```bash
 mullet setup-claude
 ```
 
 **What this does:**
-- Installs the **MCP server** so Claude Code can call Mullet's tools
-- Adds **delegation rules** so Claude automatically routes tasks through Mullet
-- Copies **skills** and **agents** into Claude Code's configuration
-- Sets up the **status bar HUD** so you can see which provider is being used in real time
+- Registers the **MCP server** for every project (`claude mcp add --scope user mullet -- <mullet> mcp`), so Claude Code can call Mullet's tools
+- Installs the `mullet-job` and `pool-improve` **skills** into `~/.claude/skills/`
+- Adds **hooks** only if you ask: `mullet setup-claude --hooks list` describes them, and `--hooks name1,name2` adds the ones you name
+- Sets the status bar only if you ask: `--statusline`
+- Never edits your `CLAUDE.md`. `mullet setup-claude --uninstall` removes exactly what it added
 
 **Important:** After this command finishes, you must **fully quit and reopen Claude Code**.
 
@@ -467,11 +495,11 @@ mullet setup-claude
 
 ## 12. Test That Everything Works
 
-Let's run three quick tests to confirm Mullet is alive and routing correctly.
+Let's run three quick tests to confirm Mullet is alive and working.
 
-### Test 1 — CLI works
+### Test 1: CLI works
 
-Ask Mullet a simple question directly from Terminal:
+Ask Mullet a simple question directly from Terminal. This needs a provider, so set up a key ([Section 8](#8-set-your-api-keys)) or a local model ([Section 10](#10-set-up-a-free-local-llm)) first:
 
 ```bash
 mullet "what Python version am I running?"
@@ -479,9 +507,9 @@ mullet "what Python version am I running?"
 
 **Expected output:**
 
-You should see an answer within a few seconds, routed to either your **local LLM** (if it's running) or **Kimi** (if not). At the top of the output, you may see a line telling you which provider was chosen.
+You should see an answer within a few seconds, routed to either your **local LLM** (if it's running) or a cloud provider you have a key for. Add `--verbose` to see which provider was chosen.
 
-### Test 2 — See routing before spending money
+### Test 2: See routing before spending money
 
 Mullet can show you what it *would* do without actually making an expensive API call:
 
@@ -492,19 +520,24 @@ mullet explain "refactor the authentication module"
 **Expected output:**
 
 ```
-Complexity: medium
-Provider: Kimi K2
-Estimated cost: $0.0042
+Routing Analysis: "refactor the authentication module"
+
+  Simple message: No
+  Complexity score: 80.0/100
+  Routing tier: ADVANCED
+  ...
+  Provider: Premium cloud (Sonnet/Opus)
+  Estimated cost: $0.0210
 ```
 
-This tells you:
+The exact numbers vary. This tells you:
 - How hard Mullet thinks your request is
-- Which AI it would send it to
+- Which kind of model it would send it to
 - About how much it would cost
 
 No actual LLM call is made during `explain`, so this test is completely free.
 
-### Test 3 — MCP works inside Claude Code
+### Test 3: MCP works inside Claude Code
 
 1. Open Claude Code in any project folder:
 
@@ -515,20 +548,22 @@ claude
 2. At the Claude prompt, type exactly:
 
 ```
-Use mullet_run to summarise what this project does.
+Use trawl_list_pools to show my knowledge pools.
 ```
 
 **Expected output:**
 
-Claude should recognize the `mullet_run` tool and display a **tool call** in the chat. You may see a box or panel showing that Claude is invoking a Mullet MCP tool. If that happens, congratulations — Mullet is fully wired into Claude Code.
+Claude should recognise the `trawl_list_pools` tool and display a **tool call** in the chat. The list may be empty if you haven't made a pool yet. If Claude calls the tool, congratulations: Mullet is fully wired into Claude Code.
 
-If Claude says it doesn't know that tool, see [Troubleshooting](#14-troubleshooting).
+To try a delegation tool, you need a key or local model. Ask: `Use mullet_run to summarise what this project does.`
+
+If Claude says it doesn't know the tool, see [Troubleshooting](#14-troubleshooting).
 
 ---
 
-## 13. Knowledge Pools (Optional — Skip if Overwhelmed)
+## 13. Knowledge Pools (Optional, Skip if Overwhelmed)
 
-**Knowledge Pools** let Mullet index your codebase so Claude can search it intelligently instead of pasting entire files into the conversation.
+**Knowledge Pools** let Mullet index your codebase so Claude can search it intelligently instead of pasting entire files into the conversation. This is Trawl, Mullet's search engine. It works on a Mac.
 
 If you're feeling overwhelmed, **skip this for now.** You can always come back to it later.
 
@@ -554,6 +589,8 @@ Use trawl_search to find where the user authentication is handled.
 
 Claude will use Mullet's semantic search to find the right files without you having to tell it where to look.
 
+Pools are stored in the folder that `mullet paths pools` prints. Set `TRAWL_POOLS_DIR` to keep them somewhere else.
+
 For full details, see the **[SKILLS.md](SKILLS.md)** document.
 
 ---
@@ -564,20 +601,33 @@ Something not working? You're not alone. Here's a quick lookup table.
 
 | Problem | Fix |
 |---|---|
-| `mullet: command not found` after install | Add `~/.local/bin` to your PATH. Open `nano ~/.zshrc`, scroll to the bottom, and add:<br>`export PATH="$HOME/.local/bin:$PATH"`<br>Save (`Control + O`, `Return`, `Control + X`), then run `source ~/.zshrc`. |
-| `pip: command not found` | Use `pip3` instead of `pip`, or reinstall Python via `brew install python@3.12`. |
-| `mullet doctor` shows no providers | Check that your keys are exported. Run `echo $KIMI_API_KEY` — if it prints nothing, revisit [Section 8](#8-set-your-api-keys). |
+| `mullet: command not found` after install | Run `uv tool update-shell` (or `pipx ensurepath` if you used pipx), then open a **new Terminal window**. |
+| The installer says it needs uv or pipx | Run `brew install uv`, then run the installer again. |
+| The installer says git is required | Follow [Section 4](#4-install-git), then run the installer again. |
+| `mullet job` says it can't start on macOS | Expected. Jobs need the Linux sandbox. Run jobs on a Linux machine. |
+| `pip install` fails with a Gemini or `pynvml` error | You asked for the `all` or `gpu` extra. Reinstall with `MULLET_EXTRAS=gemini` (see [Section 7](#7-install-mullet)). |
+| `mullet doctor` shows no providers | Check that your keys are in `~/.config/mullet/.env`. Run `grep -c '^KIMI_API_KEY=' ~/.config/mullet/.env`. If it prints `0`, revisit [Section 8](#8-set-your-api-keys). Keys in `~/.zshrc` still work as environment variables, but the file is the supported place. |
 | MCP tools not appearing in Claude Code | Run `mullet setup-claude` again. Then **fully quit Claude Code** (`Cmd + Q`) and reopen it. Simply closing the window is not enough. |
-| LM Studio detected but context warning | Load a **7B+ model** like Qwen2.5-Coder-7B. Also check the **Context Length** slider in LM Studio's model settings — set it to at least 4096. |
-| Kimi key rejected | Make sure your key starts with `sk-`. Check that you have credits at **[platform.moonshot.cn](https://platform.moonshot.cn)**. |
-| Claude Code says "mullet MCP server failed to start" | In Terminal, run `mullet mcp`. If you see an error, that error message tells you what's wrong (often a missing Python package). |
-| `python3 -m pip install` fails with permissions error | Add the `--user` flag:<br>`pip install --user -e .` |
+| LM Studio detected but context warning | Check the **Context Length** slider in LM Studio's model settings and set it to at least 4096. On a Mac with more than 10 GB of RAM, a 7B model like Qwen2.5-Coder-7B works well. On 10 GB or less, stay with a 2B to 3B model. |
+| Kimi key rejected | Check that you have credits at **[platform.moonshot.ai](https://platform.moonshot.ai)**. If your key came from the `.cn` site, set `KIMI_BASE_URL=https://api.moonshot.cn/v1` in `~/.config/mullet/.env`. |
+| Claude Code bills the API, not my subscription | `ANTHROPIC_API_KEY` is set somewhere. `mullet doctor` flags it. Remove it from your shell profile or `~/.config/mullet/.env`. |
+| Claude Code says "mullet MCP server failed to start" | In Terminal, run `mullet mcp`. If you see an error, that error message tells you what's wrong. |
+| Older `~/.mullet` folder still in use | It keeps working. To move it to the new locations, quit Claude Code, run `mullet migrate-state --dry-run` to preview, then `mullet migrate-state`. |
 
 Still stuck? Run the full diagnostic and share the output:
 
 ```bash
 mullet doctor --full
 ```
+
+Mullet keeps its files in these places. `mullet paths` prints them:
+
+| What | Where |
+|---|---|
+| Config and keys | `~/.config/mullet` |
+| State | `~/.local/state/mullet` |
+| Data (pools, skills, jobs) | `~/.local/share/mullet` |
+| Caches | `~/.cache/mullet` |
 
 ---
 
@@ -589,7 +639,9 @@ Before starting any big coding task in Claude Code, try this command:
 /model opusplan
 ```
 
-Type it in the Claude Code chat window. This switches Claude to **Opus** (Anthropic's most powerful model) just for the planning phase, so you get a thorough, well-thought-out plan before any code is written. Once the plan is approved and implementation starts, Mullet automatically routes the actual code work to cheaper models (Kimi or local LLM) — so you get Opus-quality thinking without paying Opus prices for every line of code.
+Type it in the Claude Code chat window. This makes Claude Code use **Opus** (Anthropic's most powerful model) for the planning phase and a cheaper model while it writes the code. You get a thorough plan before any code is written, without Opus prices for every line.
+
+This is a Claude Code feature, not a Mullet one. Mullet adds to it: when you ask, Claude can use Mullet's delegation tools to hand a task to Kimi, OpenRouter or a local model.
 
 **When to use it:**
 - Starting a new feature from scratch
@@ -597,19 +649,19 @@ Type it in the Claude Code chat window. This switches Claude to **Opus** (Anthro
 - Refactoring a large section of code
 - Any task where getting the approach right matters more than speed
 
-It's one of the most powerful combos in the Mullet toolkit.
-
 ---
 
 ## 16. Next Steps
 
-You're all set! Mullet is now saving you money on every AI-assisted coding task.
+You're all set. Mullet now gives Claude Code search over your code and optional cheaper-model tools.
 
 **Where to go from here:**
 
 - **Quick reference for daily commands:** See **[QUICKSTART.md](QUICKSTART.md)**
 - **How Mullet routes requests and chooses providers:** See **[ARCHITECTURE.md](ARCHITECTURE.md)**
 - **Full installation reference (including Linux):** See **[INSTALL.md](INSTALL.md)**
+- **Run `mullet job` on a Linux machine:** `mullet job plan "<goal>"` makes a task tree to approve. Then `approve`, `run`, `status`, `tail -f`, `report` and `merge <id>` take it through to a branch and an evidence report. See **[ONBOARDING_LINUX.md](ONBOARDING_LINUX.md)**.
+- **Coming, not built yet:** job sandboxing on macOS, a ladder of Claude, OpenRouter, Kimi, free and local models for job steps, and `mullet job bench`.
 - **Something broken?** Run `mullet doctor --full` and paste the output into a GitHub issue.
 
-**Welcome to the Mullet family.** Happy coding — and happy saving.
+Happy coding.

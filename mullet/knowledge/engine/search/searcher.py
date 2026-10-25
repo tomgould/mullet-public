@@ -221,7 +221,8 @@ class HybridSearcher:
             self.passage_prefix = ""
 
         # Initialize embedding model (try GPU, fall back to CPU)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        from mullet.knowledge.engine.model_cache import embedding_device
+        device = embedding_device()
         try:
             self.embedder = SentenceTransformer(self.embedding_model, device=device)
         except RuntimeError as e:

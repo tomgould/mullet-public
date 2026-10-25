@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sync sources + reindex every Trawl pool, smallest first.
-# Designed for overnight runs. Logs to ~/.mullet/logs/.
+# Designed for overnight runs. Logs to the logs folder in Mullet's state dir (`mullet paths state`).
 #
 # Usage:
 #   ./scripts/overnight_reindex_all.sh              # run in foreground
@@ -12,7 +12,7 @@
 #   --dry-run      print what would run, don't execute
 #   --pools p1,p2  comma-separated pool list, overrides auto-discovery
 #
-# Pool discovery (default): every dir under ~/.mullet/pools containing a
+# Pool discovery (default): every dir under `mullet paths pools` containing a
 # config.yaml. Ordered smallest → largest by `du -sb` so the run yields fast
 # wins early. Pools whose machine_name starts with `test_init_` are skipped.
 
@@ -40,7 +40,8 @@ while (( $# )); do
   esac
 done
 
-POOLS_DIR="${HOME}/.mullet/pools"
+command -v mullet >/dev/null || { echo "mullet is not on PATH" >&2; exit 2; }
+POOLS_DIR="$(mullet paths pools)"
 
 if [[ -n "$POOLS_OVERRIDE" ]]; then
   # Comma-separated explicit list, in order given.
@@ -74,7 +75,7 @@ else
   )
 fi
 
-LOG_DIR="${HOME}/.mullet/logs"
+LOG_DIR="$(mullet paths state)/logs"
 mkdir -p "$LOG_DIR"
 LOG="${LOG_DIR}/overnight-reindex-$(date +%Y%m%d-%H%M).log"
 

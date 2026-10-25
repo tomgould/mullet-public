@@ -56,7 +56,6 @@ class BedrockProvider(Provider):
         return self._call_with_retry(kwargs, messages)
 
     def _call_with_retry(self, kwargs, messages, max_retries=3):
-        last_error = None
         for attempt in range(max_retries + 1):
             _t0 = time.monotonic()
             try:
@@ -79,7 +78,6 @@ class BedrockProvider(Provider):
                     logger.warning("bedrock: failed to log successful interaction: %s", _exc)
                 return llm_response
             except Exception as e:
-                last_error = e
                 error_str = str(e).lower()
                 retryable = any(x in error_str for x in ["throttlingexception", "serviceunavailableexception", "429", "500"])
                 if retryable and attempt < max_retries:

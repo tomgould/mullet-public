@@ -178,7 +178,7 @@ class TestResolveKimiKey:
         result = _resolve_kimi_key()
         assert result is None or isinstance(result, str)
 
-    def test_reads_from_mcp_json(self, tmp_path, monkeypatch):
+    def test_ignores_mcp_json_in_cwd(self, tmp_path, monkeypatch):
         monkeypatch.delenv("KIMI_API_KEY", raising=False)
         monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
         mcp = tmp_path / ".mcp.json"
@@ -191,7 +191,7 @@ class TestResolveKimiKey:
         }))
         monkeypatch.chdir(tmp_path)
         result = _resolve_kimi_key()
-        assert result == "from-mcp-file"
+        assert result is None
 
 
 

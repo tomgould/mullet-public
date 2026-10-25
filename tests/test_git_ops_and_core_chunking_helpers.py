@@ -1,4 +1,4 @@
-"""Tests for git_ops pure helpers and core/knowledge/chunking strategies."""
+"""Tests for git_ops pure helpers."""
 
 import pytest
 from mullet.knowledge.sources.git_ops import (
@@ -6,13 +6,6 @@ from mullet.knowledge.sources.git_ops import (
     CloneResult,
     _sanitise_output,
     _validate_name,
-)
-from mullet.core.knowledge.chunking import (
-    Chunk,
-    ChunkMetadata,
-    SentenceChunker,
-    RecursiveChunker,
-    enrich_chunks,
 )
 
 
@@ -124,132 +117,3 @@ class TestValidateName:
     def test_slash_raises(self):
         with pytest.raises(GitError):
             _validate_name("my/repo")
-
-
-# ---------------------------------------------------------------------------
-# ChunkMetadata and Chunk
-# ---------------------------------------------------------------------------
-
-class TestChunkMetadata:
-    def test_source_stored(self):
-        meta = ChunkMetadata(source="/tmp/test.py", chunk_index=0)
-        assert meta.source == "/tmp/test.py"
-
-    def test_chunk_index_stored(self):
-        meta = ChunkMetadata(source="test.py", chunk_index=3)
-        assert meta.chunk_index == 3
-
-    def test_char_start_default_zero(self):
-        meta = ChunkMetadata(source="test.py", chunk_index=0)
-        assert meta.char_start == 0
-
-    def test_heading_path_default_empty(self):
-        meta = ChunkMetadata(source="test.py", chunk_index=0)
-        assert meta.heading_path == ""
-
-
-class TestChunk:
-    def test_text_stored(self):
-        meta = ChunkMetadata(source="f.py", chunk_index=0)
-        chunk = Chunk(text="hello world", metadata=meta)
-        assert chunk.text == "hello world"
-
-    def test_metadata_stored(self):
-        meta = ChunkMetadata(source="f.py", chunk_index=1)
-        chunk = Chunk(text="content", metadata=meta)
-        assert chunk.metadata.chunk_index == 1
-
-
-# ---------------------------------------------------------------------------
-# SentenceChunker
-# ---------------------------------------------------------------------------
-
-class TestSentenceChunker:
-    def test_returns_list(self):
-        sc = SentenceChunker()
-        assert isinstance(sc.chunk("Hello world."), list)
-
-    def test_empty_text_returns_empty(self):
-        sc = SentenceChunker()
-        assert sc.chunk("") == []
-
-    def test_short_text_single_chunk(self):
-        sc = SentenceChunker(max_chars=1000, min_chars=0)
-        result = sc.chunk("Hello world.")
-        assert len(result) == 1
-        assert result[0].text == "Hello world."
-
-    def test_long_text_split(self):
-        sc = SentenceChunker(max_chars=50, min_chars=10)
-        text = "First sentence. Second sentence. Third sentence."
-        result = sc.chunk(text)
-        assert len(result) >= 1
-
-    def test_chunks_are_chunk_instances(self):
-        sc = SentenceChunker()
-        result = sc.chunk("Hello.")
-        if result:
-            assert isinstance(result[0], Chunk)
-
-    def test_metadata_source_set(self):
-        sc = SentenceChunker()
-        result = sc.chunk("Hello.", source="/tmp/test.txt")
-        if result:
-            assert result[0].metadata.source == "/tmp/test.txt"
-
-    def test_chunk_index_sequential(self):
-        sc = SentenceChunker(max_chars=20, min_chars=5)
-        text = "First sentence here. Second one now. Third one follows."
-        result = sc.chunk(text)
-        if len(result) >= 2:
-            assert result[0].metadata.chunk_index < result[1].metadata.chunk_index
-
-
-# ---------------------------------------------------------------------------
-# RecursiveChunker
-# ---------------------------------------------------------------------------
-
-class TestRecursiveChunker:
-    def test_returns_list(self):
-        rc = RecursiveChunker(max_chars=100)
-        assert isinstance(rc.chunk("hello world"), list)
-
-    def test_empty_text_returns_empty(self):
-        rc = RecursiveChunker(max_chars=100)
-        assert rc.chunk("") == []
-
-    def test_short_text_single_chunk(self):
-        rc = RecursiveChunker(max_chars=1000)
-        result = rc.chunk("This is some text that meets the minimum chunk size threshold.")
-        assert len(result) == 1
-
-    def test_chunks_are_chunk_instances(self):
-        rc = RecursiveChunker(max_chars=1000)
-        result = rc.chunk("test")
-        if result:
-            assert isinstance(result[0], Chunk)
-
-
-# ---------------------------------------------------------------------------
-# enrich_chunks
-# ---------------------------------------------------------------------------
-
-class TestEnrichChunks:
-    def test_returns_list(self):
-        chunks = []
-        assert isinstance(enrich_chunks(chunks, "test.py"), list)
-
-    def test_empty_input_returns_empty(self):
-        assert enrich_chunks([], "test.py") == []
-
-    def test_sets_source_path(self):
-        meta = ChunkMetadata(source="", chunk_index=0)
-        chunk = Chunk(text="hello", metadata=meta)
-        result = enrich_chunks([chunk], "/tmp/myfile.py")
-        assert result[0].metadata.source == "/tmp/myfile.py"
-
-    def test_chunk_count_preserved(self):
-        meta = ChunkMetadata(source="", chunk_index=0)
-        chunks = [Chunk(text=f"chunk {i}", metadata=meta) for i in range(3)]
-        result = enrich_chunks(chunks, "file.py")
-        assert len(result) == 3

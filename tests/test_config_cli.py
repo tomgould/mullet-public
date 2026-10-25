@@ -130,7 +130,7 @@ class TestCmdConfigReset:
 # ---- comprehensive coverage for remaining lines -----------------------------
 
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from mullet.cli.config_cli import _cmd_budget, _find_mullet_dir, _write_budget_yaml
 from mullet.core.providers.spend_caps import BudgetConfig, SpendCap
@@ -161,7 +161,7 @@ class TestCmdConfigUnknownAction:
 class TestCmdConfigEdit:
     def test_edit_no_editor_found(self, tmp_path, capsys):
         p1, p2 = _patch_config(tmp_path)
-        with p1, p2, patch("mullet.cli.config_cli.os.environ.get", return_value=""), \
+        with p1, p2, patch.dict("os.environ", {"EDITOR": ""}), \
              patch("mullet.cli.config_cli.subprocess.run", return_value=MagicMock(returncode=1)):
             rc = cmd_config(["edit"])
         assert rc == 1
@@ -188,7 +188,7 @@ class TestCmdConfigEdit:
         def mock_named_temp(*args, **kwargs):
             yield mock_tf
 
-        with p1, p2, patch("mullet.cli.config_cli.os.environ.get", return_value="nano"), \
+        with p1, p2, patch.dict("os.environ", {"EDITOR": "nano"}), \
              patch("mullet.cli.config_cli.subprocess.run", side_effect=mock_run), \
              patch("mullet.cli.config_cli.tempfile.NamedTemporaryFile", mock_named_temp):
             rc = cmd_config(["edit"])
@@ -218,7 +218,7 @@ class TestCmdConfigEdit:
         def mock_named_temp(*args, **kwargs):
             yield mock_tf
 
-        with p1, p2, patch("mullet.cli.config_cli.os.environ.get", return_value=""), \
+        with p1, p2, patch.dict("os.environ", {"EDITOR": ""}), \
              patch("mullet.cli.config_cli.subprocess.run", side_effect=mock_run), \
              patch("mullet.cli.config_cli.tempfile.NamedTemporaryFile", mock_named_temp):
             rc = cmd_config(["edit"])
@@ -246,7 +246,7 @@ class TestCmdConfigEdit:
         def mock_named_temp(*args, **kwargs):
             yield mock_tf
 
-        with p1, p2, patch("mullet.cli.config_cli.os.environ.get", return_value="nano"), \
+        with p1, p2, patch.dict("os.environ", {"EDITOR": "nano"}), \
              patch("mullet.cli.config_cli.subprocess.run", side_effect=mock_run), \
              patch("mullet.cli.config_cli.tempfile.NamedTemporaryFile", mock_named_temp):
             rc = cmd_config(["edit"])
@@ -272,7 +272,7 @@ class TestCmdConfigEdit:
         def mock_named_temp(*args, **kwargs):
             yield mock_tf
 
-        with p1, p2, patch("mullet.cli.config_cli.os.environ.get", return_value="nano"), \
+        with p1, p2, patch.dict("os.environ", {"EDITOR": "nano"}), \
              patch("mullet.cli.config_cli.subprocess.run", side_effect=mock_run), \
              patch("mullet.cli.config_cli.tempfile.NamedTemporaryFile", mock_named_temp):
             rc = cmd_config(["edit"])
@@ -298,7 +298,7 @@ class TestCmdConfigEdit:
         def mock_named_temp(*args, **kwargs):
             yield mock_tf
 
-        with p1, p2, patch("mullet.cli.config_cli.os.environ.get", return_value="nano"), \
+        with p1, p2, patch.dict("os.environ", {"EDITOR": "nano"}), \
              patch("mullet.cli.config_cli.subprocess.run", side_effect=mock_run), \
              patch("mullet.cli.config_cli.tempfile.NamedTemporaryFile", mock_named_temp):
             rc = cmd_config(["edit"])

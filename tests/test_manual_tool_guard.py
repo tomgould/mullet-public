@@ -1,5 +1,5 @@
-"""Tests for scripts/hooks/manual_tool_guard.py and the escalation extension
-in scripts/hooks/delegation_reminder.py."""
+"""Tests for mullet/hooks/manual_tool_guard.py and the escalation extension
+in mullet/hooks/delegation_reminder.py."""
 
 import importlib
 import importlib.util
@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-_HOOK_DIR = Path(__file__).resolve().parent.parent / "scripts" / "hooks"
+_HOOK_DIR = Path(__file__).resolve().parent.parent / "mullet" / "hooks"
 
 
 def _load(name: str):

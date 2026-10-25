@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/agent_hud_tracker.py"""
+"""Tests for mullet/hooks/agent_hud_tracker.py"""
 import importlib.util
 import json
 import os
@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-_HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "agent_hud_tracker.py"
+_HOOK = Path(__file__).resolve().parent.parent / "mullet" / "hooks" / "agent_hud_tracker.py"
 
 
 def _load_hook():

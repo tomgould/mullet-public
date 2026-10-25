@@ -5,7 +5,6 @@ import os
 from unittest import mock
 from unittest.mock import patch, MagicMock
 import httpx
-from pathlib import Path
 
 from mullet.core.tools.image_gen import IMAGE_GEN_SCHEMA, image_gen_handler, register, _save_image
 

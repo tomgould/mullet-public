@@ -12,10 +12,17 @@ import re
 from pathlib import Path
 from typing import Literal
 
+from mullet.core.paths import data_dir
+
 logger = logging.getLogger(__name__)
 
-NOTEPAD_DIR = os.path.expanduser("~/.mullet/notepad")
-os.makedirs(NOTEPAD_DIR, exist_ok=True)
+# Tests point this at a temporary directory; None means notepad/ in the data
+# directory. It is created on the first write.
+NOTEPAD_DIR: str | None = None
+
+
+def _notepad_dir() -> str:
+    return NOTEPAD_DIR or str(data_dir() / "notepad")
 
 
 NOTEPAD_SCHEMA = {
@@ -56,9 +63,10 @@ def _sanitize_key(key: str) -> str:
 
 def _get_notepad_path(key: str) -> str:
     sanitized = _sanitize_key(key)
-    path = Path(os.path.join(NOTEPAD_DIR, f"{sanitized}.md")).resolve()
-    # Verify resolved path is under NOTEPAD_DIR
-    if not path.is_relative_to(Path(NOTEPAD_DIR).resolve()):
+    notepad_dir = _notepad_dir()
+    path = Path(os.path.join(notepad_dir, f"{sanitized}.md")).resolve()
+    # Verify resolved path is under the notepad directory
+    if not path.is_relative_to(Path(notepad_dir).resolve()):
         raise ValueError(f"Path traversal blocked for key: {key}")
     return str(path)
 
@@ -75,6 +83,7 @@ def notepad_handler(
     if action == "write":
         if content is None:
             return json.dumps({"error": "Content is required for 'write' action."})
+        os.makedirs(os.path.dirname(notepad_path), exist_ok=True)
         with open(notepad_path, "w") as f:
             f.write(content)
         return json.dumps({"status": "success", "action": "write", "key": key})
@@ -89,6 +98,7 @@ def notepad_handler(
     elif action == "append":
         if content is None:
             return json.dumps({"error": "Content is required for 'append' action."})
+        os.makedirs(os.path.dirname(notepad_path), exist_ok=True)
         with open(notepad_path, "a") as f:
             f.write(content)
         return json.dumps({"status": "success", "action": "append", "key": key})
@@ -100,7 +110,9 @@ def notepad_handler(
         return json.dumps({"status": "success", "action": "clear", "key": key, "message": "Notepad already empty."})
 
     elif action == "list":
-        notepad_files = [f for f in os.listdir(NOTEPAD_DIR) if f.endswith(".md")]
+        notepad_dir = _notepad_dir()
+        names = os.listdir(notepad_dir) if os.path.isdir(notepad_dir) else []
+        notepad_files = [f for f in names if f.endswith(".md")]
         keys = [os.path.splitext(f)[0] for f in notepad_files]
         return json.dumps({"status": "success", "action": "list", "keys": keys})
 

@@ -14,10 +14,18 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
-LEARNING_DIR = Path.home() / ".mullet" / "routing_history"
+# Tests point this at a temporary directory; None means routing_history/ in
+# the state directory.
+LEARNING_DIR: Path | None = None
 MAX_HISTORY = 500
+
+
+def _learning_dir() -> Path:
+    return LEARNING_DIR or state_dir() / "routing_history"
 
 
 @dataclass
@@ -65,8 +73,9 @@ def record_outcome(task: str, tier: str, provider: str,
     )
 
     try:
-        LEARNING_DIR.mkdir(parents=True, exist_ok=True)
-        path = LEARNING_DIR / "outcomes.jsonl"
+        learning_dir = _learning_dir()
+        learning_dir.mkdir(parents=True, exist_ok=True)
+        path = learning_dir / "outcomes.jsonl"
         with open(path, "a") as f:
             f.write(json.dumps({
                 "keywords": outcome.task_keywords,
@@ -149,7 +158,7 @@ def suggest_tier(task: str) -> str | None:
 
 def _load_history() -> list[dict]:
     """Load routing history from disk."""
-    path = LEARNING_DIR / "outcomes.jsonl"
+    path = _learning_dir() / "outcomes.jsonl"
     if not path.exists():
         return []
 

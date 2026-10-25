@@ -1,7 +1,5 @@
 """Gap tests for mullet/core/router/complexity.py — targets uncovered branches."""
 
-import asyncio
-import pytest
 from unittest.mock import patch
 
 from mullet.core.router.complexity import (

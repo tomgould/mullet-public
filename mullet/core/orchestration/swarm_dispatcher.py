@@ -185,9 +185,9 @@ class SwarmDispatcher:
             return AnthropicProvider(api_key=api_key, model=model_id)
 
         if provider_name == "local":
+            from mullet.core.env import local_llm_url
             from mullet.core.providers.openai_compat import OpenAICompatibleProvider
-            base_url = os.environ.get("LOCAL_LLM_URL", "http://localhost:1234/v1")
-            return OpenAICompatibleProvider(base_url=base_url, model=model_id)
+            return OpenAICompatibleProvider(base_url=local_llm_url(), model=model_id)
 
         raise ValueError(f"swarm: unknown provider_name {provider_name!r}")
 

@@ -5,9 +5,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-import mullet.core.memory_sync as ms_mod
 from mullet.core.memory_sync import (
     _get_store,
     _write_fallback,

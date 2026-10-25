@@ -1,7 +1,6 @@
 """Tests for mullet.cli.watch — run_watch and error paths."""
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.cli.watch import _scan_files, run_watch
 

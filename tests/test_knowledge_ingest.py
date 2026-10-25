@@ -1,15 +1,11 @@
 """Tests for mullet/core/knowledge/ingest.py."""
 
-import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from mullet.core.knowledge.ingest import (
     FileManifest,
-    IngestResult,
     chunk_text,
     discover_files,
     ingest_directory,

@@ -1,9 +1,9 @@
 """Parse Claude Code stdin rate_limits + context_window into RateLimits.
 
 Claude Code pipes a JSON payload to the statusline command every tick that
-includes the authoritative `rate_limits` and `context_window` data. Reading
-those fields is faster than hitting the OAuth usage API (no network, no 5-min
-cache lag) and matches the values Claude Code itself displays.
+includes the authoritative `rate_limits` and `context_window` data. They match
+the values Claude Code itself displays, and they are the only source of usage
+figures Mullet has: it never reads Claude's credentials to ask the API.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -60,3 +60,29 @@ def parse_stdin_limits(stdin_data: dict) -> Optional[RateLimits]:
         weekly_pct=seven_pct or 0.0,
         weekly_resets=_unix_to_iso(seven.get("resets_at")),
     )
+
+
+def _window_present(rl: dict, name: str) -> bool:
+    window = rl.get(name)
+    return isinstance(window, dict) and _clamp_pct(window.get("used_percentage")) is not None
+
+
+def fill_missing_windows(
+    limits: RateLimits, stdin_data: dict, previous: Optional[RateLimits]
+) -> RateLimits:
+    """Keep ``previous`` figures for any window this tick left out.
+
+    :func:`parse_stdin_limits` reads a missing window as 0%, which is right for
+    display but would wipe the last real figure if recorded as it is.
+    """
+    if previous is None:
+        return limits
+    rl = stdin_data.get("rate_limits") if isinstance(stdin_data, dict) else None
+    rl = rl if isinstance(rl, dict) else {}
+    if not _window_present(rl, "five_hour"):
+        limits.five_hour_pct = previous.five_hour_pct
+        limits.five_hour_resets = previous.five_hour_resets
+    if not _window_present(rl, "seven_day"):
+        limits.weekly_pct = previous.weekly_pct
+        limits.weekly_resets = previous.weekly_resets
+    return limits

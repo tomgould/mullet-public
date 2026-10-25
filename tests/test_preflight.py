@@ -7,8 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mullet.core.router.preflight import (
-    PreflightResult, analyze_prompt, _load_cache, _save_to_cache, _cache_key,
-    _parse_meta_json, _try_local_llm, _try_gemini_flash, _heuristic, _CACHE,
+    PreflightResult, analyze_prompt, _load_cache, _save_to_cache, _parse_meta_json, _try_local_llm, _try_gemini_flash,
 )
 from mullet.core.router.complexity import Tier
 
@@ -101,6 +100,23 @@ def test_local_llm_happy_path():
     assert result.analyzer == "local_llm"
     assert result.complexity_tier == Tier.STANDARD
     assert result.expected_output_tokens == 1000
+
+
+def test_local_llm_turns_thinking_off():
+    """_try_local_llm asks for reasoning_effort="none" so a reasoning model answers within 200 tokens."""
+    mock_provider = MagicMock()
+    mock_provider.create.return_value = _make_response(_valid_json_response(complexity="LOW"))
+
+    with patch(
+        "mullet.core.providers.local_detection.detect_local_provider",
+        return_value=mock_provider,
+    ):
+        result = _try_local_llm("rename get_user to fetch_user")
+
+    assert result is not None and result.analyzer == "local_llm"
+    kwargs = mock_provider.create.call_args.kwargs
+    assert kwargs["reasoning_effort"] == "none"
+    assert kwargs["max_tokens"] == 200
 
 
 def test_local_unavailable_falls_back_to_gemini(monkeypatch):

@@ -8,8 +8,25 @@ import time
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+from urllib.parse import urlparse
+
+from mullet.core.env import local_llm_host, local_preferred_models
 
 logger = logging.getLogger(__name__)
+
+# Local models pick_best_model() reaches for first, highest preference first.
+# Override with MULLET_LOCAL_PREFERRED_MODELS or providers.local.preferred_models.
+DEFAULT_PREFERRED_MODELS: Tuple[str, ...] = (
+    "ornith-1.5-35b-a3b",
+    "qwen3.6-35b-a3b",
+    "ornith-1.5-9b",
+)
+
+# `lms load` settings when Mullet loads a model itself. The context length is
+# passed explicitly so it doesn't depend on LM Studio's global default.
+LOAD_CONTEXT_LENGTH = 32768
+LOAD_TTL_S = 600       # LM Studio unloads the model after this long idle
+LOAD_TIMEOUT_S = 120   # a cold load of a 20 GB MoE can take well over 30 s
 
 _LMS_SEARCH_PATHS = [
     str(Path.home() / ".cache/lm-studio/bin/lms"),  # common Linux install
@@ -35,15 +52,56 @@ def _find_lms_cli() -> str:
     return "lms"
 
 
+def preferred_models() -> List[str]:
+    """Local model IDs to pick first, highest preference first.
+
+    ``MULLET_LOCAL_PREFERRED_MODELS`` (comma-separated) wins, then the
+    ``preferred_models`` list under ``providers.local`` in the config file,
+    then ``DEFAULT_PREFERRED_MODELS``.
+    """
+    return local_preferred_models() or _config_preferred_models() or list(DEFAULT_PREFERRED_MODELS)
+
+
+# providers.local.preferred_models from the config file, or [] if unset or unreadable.
+def _config_preferred_models() -> List[str]:
+    try:
+        from mullet.config.loader import load_from_yaml
+        local = (load_from_yaml().get("providers") or {}).get("local")
+        value = local.get("preferred_models") if isinstance(local, dict) else None
+    except Exception as exc:
+        logger.debug("preferred_models: could not read the config file: %s", exc)
+        return []
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+# Index of model_id in preferred, or len(preferred) if it isn't listed.
+# Case-insensitive; a quant suffix ("@q6_k") or publisher prefix ("ornith-ai/")
+# on the LM Studio ID is ignored when matching.
+def _preference_rank(model_id: str, preferred: List[str]) -> int:
+    full = model_id.lower()
+    base = full.split("@", 1)[0].rsplit("/", 1)[-1]
+    for rank, name in enumerate(preferred):
+        if name.lower() in (full, base):
+            return rank
+    return len(preferred)
+
+
 class LMStudioManager:
     """Inspect and manage the local LM Studio server (model listing, load/unload)."""
 
     LMS_CLI = _find_lms_cli()
 
-    def __init__(self, port: int = 1234):
-        """Bind to the LM Studio HTTP API on *port* (default 1234)."""
-        self.port = port
-        self.base_url = f"http://localhost:{port}"
+    def __init__(self, port: int | None = None):
+        """Bind to the LM Studio HTTP API on localhost:*port*, or at ``LOCAL_LLM_URL``."""
+        if port is not None:
+            self.base_url = f"http://localhost:{port}"
+        else:
+            self.base_url = local_llm_host()
+        self.port = urlparse(self.base_url).port or port
 
     def _make_request(self, endpoint: str) -> Optional[Dict]:
         """Helper to make HTTP GET requests and parse JSON."""
@@ -83,15 +141,19 @@ class LMStudioManager:
 
         Selection strategy:
         1. Among models whose context window fits context_needed:
-           a. Prefer loaded (already hot — no load delay)
-           b. Among loaded, prefer smallest context that still fits (avoids VRAM waste)
-        2. If nothing fits context_needed, fall back to any loaded LLM (with a warning)
-        3. Else any non-embedding LLM, then any LLM
+           a. Prefer loaded (already hot, no load delay, nothing evicted)
+           b. Then the order of preferred_models(), so with several loaded the
+              highest-preference one wins, and with none loaded the first
+              preferred model available is picked
+           c. Then the smallest context that still fits (avoids VRAM waste)
+        2. If nothing fits context_needed, fall back to the largest, loaded first (with a warning)
+        Embedding, CLIP, rerank and vision-encoder models are never picked.
         """
         from mullet.core.providers.model_info import get_model_info
 
         _SKIP = ("embedding", "clip", "rerank", "vision-encoder")
 
+        preferred = preferred_models()
         all_models = self.get_models()
         candidates = []
 
@@ -118,8 +180,8 @@ class LMStudioManager:
         overflow = [(m, info, loaded, ctx) for m, info, loaded, ctx in candidates if ctx < context_needed]
 
         if fitting:
-            # Sort: loaded first, then by smallest fitting context (lean resource use)
-            fitting.sort(key=lambda x: (not x[2], x[3]))
+            # Sort: loaded first, then preference order, then smallest fitting context
+            fitting.sort(key=lambda x: (not x[2], _preference_rank(x[0].get("id", ""), preferred), x[3]))
             return fitting[0][0]
 
         # Nothing fits — warn and fall back to largest available
@@ -134,11 +196,11 @@ class LMStudioManager:
             )
             return overflow[0][0]
     
-    def _run_lms_command(self, args: List[str]) -> Tuple[bool, str]:
-        """Helper to run lms CLI commands."""
+    def _run_lms_command(self, args: List[str], timeout: Optional[float] = None) -> Tuple[bool, str]:
+        """Helper to run lms CLI commands, killing them after *timeout* seconds if given."""
         command = [self.LMS_CLI] + args
         try:
-            result = subprocess.run(command, check=False, capture_output=True, text=True)
+            result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
             if result.returncode == 0:
                 logger.debug(f"LMS command {' '.join(command)} successful: {result.stdout.strip()}")
                 return True, result.stdout.strip()
@@ -148,19 +210,22 @@ class LMStudioManager:
         except FileNotFoundError:
             logger.error(f"LMS CLI not found at {self.LMS_CLI}. Please ensure LM Studio is installed and the CLI is accessible.")
             return False, f"LMS CLI not found at {self.LMS_CLI}"
+        except subprocess.TimeoutExpired:
+            logger.error(f"LMS command {' '.join(command)} timed out after {timeout}s")
+            return False, f"timed out after {timeout}s"
         except Exception as e:
             logger.error(f"Error running LMS command {' '.join(command)}: {e}")
             return False, str(e)
 
-    def ensure_loaded(self, model_id: str, ttl: int = 60) -> bool:
+    def ensure_loaded(self, model_id: str, ttl: int = LOAD_TTL_S) -> bool:
         """Check if model_id is already loaded. If not, run:
-           `lms load --ttl {ttl} --yes {model_id}`
-        Wait up to 30s for load to complete (poll /api/v0/models every 2s).
+           `lms load --ttl {ttl} --context-length {LOAD_CONTEXT_LENGTH} --yes {model_id}`
+        Wait up to LOAD_TIMEOUT_S for load to complete (poll /api/v0/models every 2s).
         Return True if loaded, False on timeout/error.
         Log progress to logger (DEBUG level).
         """
         start_time = time.time()
-        timeout = 30
+        timeout = LOAD_TIMEOUT_S
         poll_interval = 2
 
         # Check if already loaded
@@ -171,20 +236,26 @@ class LMStudioManager:
 
         # If not loaded, attempt to load
         logger.debug(f"Attempting to load model {model_id} with TTL {ttl}s.")
-        success, output = self._run_lms_command(["load", "--ttl", str(ttl), "--yes", model_id])
+        success, output = self._run_lms_command(
+            ["load", "--ttl", str(ttl), "--context-length", str(LOAD_CONTEXT_LENGTH), "--yes", model_id],
+            timeout=timeout,
+        )
         if not success:
             logger.error(f"Failed to initiate load for model {model_id}: {output}")
             return False
 
-        # Poll until loaded or timeout
-        while time.time() - start_time < timeout:
+        # Poll until loaded or timeout. Check at least once: `lms load` blocks
+        # until the load finishes, which can use up most of the timeout.
+        while True:
             loaded_models = self.get_loaded_models()
             if any(m.get("id") == model_id for m in loaded_models):
                 logger.debug(f"Model {model_id} successfully loaded after {int(time.time() - start_time)}s.")
                 return True
+            if time.time() - start_time >= timeout:
+                break
             logger.debug(f"Waiting for model {model_id} to load...")
             time.sleep(poll_interval)
-        
+
         logger.error(f"Timeout waiting for model {model_id} to load after {timeout}s.")
         return False
     
@@ -198,7 +269,7 @@ class LMStudioManager:
             logger.error(f"Failed to unload model {model_id}: {output}")
         return success
     
-    def reload_current_model(self, ttl: int = 60) -> bool:
+    def reload_current_model(self, ttl: int = LOAD_TTL_S) -> bool:
         """Unload and reload the currently active model to clear KV cache.
 
         Called after a context-size-exceeded error so the model starts fresh.
@@ -215,7 +286,7 @@ class LMStudioManager:
         self.unload(model_id)
         return self.ensure_loaded(model_id, ttl=ttl)
 
-    def get_or_load_provider(self, ttl: int = 60) -> Tuple[Optional[str], bool]:
+    def get_or_load_provider(self, ttl: int = LOAD_TTL_S) -> Tuple[Optional[str], bool]:
         """High-level: pick best model, ensure it's loaded (with TTL), return (model_id, was_already_loaded).
         Returns (None, False) if no models available or load fails.
         """

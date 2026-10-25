@@ -2352,7 +2352,8 @@ def _pool_provider_key(provider_type):
 
 def _build_local_provider(llm_config):
     from mullet.knowledge.engine.llm import LMStudioProvider
-    host = llm_config.get("lmstudio_host", "http://localhost:1234")
+    from mullet.core.env import local_llm_host
+    host = llm_config.get("lmstudio_host") or local_llm_host()
     model = llm_config.get("lmstudio_model", "default")
     return LMStudioProvider(base_url=f"{host}/v1", model=model)
 

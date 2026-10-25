@@ -11,8 +11,9 @@ Don't save task progress or temporary state — save stable facts.
 import json
 import logging
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
+
+from mullet.core.paths import data_dir
 
 if TYPE_CHECKING:
     from mullet.core.knowledge.manager import KnowledgeManager
@@ -35,7 +36,7 @@ class AgentMemory:
 
     def __init__(self, knowledge: "KnowledgeManager | None" = None):
         self._knowledge = knowledge
-        self._local_path = Path.home() / ".mullet" / "memory.json"
+        self._local_path = data_dir() / "memory.json"
         self._entries: dict[str, dict] = {}  # key -> {"content": str, "expires_at": float|None}
         self._load()
 

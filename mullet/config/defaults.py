@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mullet.core import paths
+
 
 @dataclass
 class ProviderConfig:
@@ -55,13 +57,13 @@ class MulletConfig:
 
     @staticmethod
     def user_config_dir() -> Path:
-        """Return `~/.mullet`, the user-level config root."""
-        return Path.home() / ".mullet"
+        """Return the user-level config directory (see ``mullet.core.paths``)."""
+        return paths.config_dir()
 
     @staticmethod
     def user_skills_dir() -> Path:
-        """Return `~/.mullet/skills`, where user-defined skills live."""
-        return Path.home() / ".mullet" / "skills"
+        """Return the directory where user-defined skills live."""
+        return paths.data_dir() / "skills"
 
 
 def load_config(path: str | None = None) -> MulletConfig:
@@ -70,7 +72,7 @@ def load_config(path: str | None = None) -> MulletConfig:
         return _load_yaml_config(path)
 
     # Try default locations
-    for candidate in ["mullet.yaml", str(MulletConfig.user_config_dir() / "config.yaml")]:
+    for candidate in ["mullet.yaml", str(paths.config_file("config.yaml"))]:
         if Path(candidate).exists():
             return _load_yaml_config(candidate)
 

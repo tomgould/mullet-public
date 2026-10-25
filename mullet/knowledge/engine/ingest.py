@@ -428,8 +428,8 @@ class DocumentIngestor:
         self.passage_prefix = passage_prefix
 
         # Use ModelCache to share models across clients (avoids redundant GPU loads)
-        from mullet.knowledge.engine.model_cache import get_model_cache
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        from mullet.knowledge.engine.model_cache import embedding_device, get_model_cache
+        device = embedding_device()
         try:
             self.embedder = get_model_cache().get_embedder(embedding_model, device)
             logger.info(f"Initialized ingestor with model: {embedding_model} on {device}")

@@ -531,7 +531,7 @@ class TestSpeedModeBadge:
 # ---------------------------------------------------------------------------
 
 from mullet.core.router.complexity import (
-    confidence_breakdown, ComplexitySignals, LexicalSignals, StructuralSignals, ContextSignals
+    confidence_breakdown, ComplexitySignals, LexicalSignals, StructuralSignals
 )
 
 

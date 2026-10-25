@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 from mullet.core.observations import record, Observation
-from mullet.cli.observations_cmd import run, _tool_color, _fmt_row, _project_root, _HAS_COLOR
+from mullet.cli.observations_cmd import _tool_color, _fmt_row, _project_root, _HAS_COLOR
 
 
 def _seed(tmp_path, n=5, sid="cmd-ses"):
@@ -196,7 +196,6 @@ class TestProjectRoot:
 
 import builtins
 import json
-import sys
 from unittest.mock import patch
 
 from mullet.core.observation_summary import SessionSummary

@@ -13,9 +13,17 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
-ANALYTICS_DIR = Path.home() / ".mullet" / "analytics"
+# Tests point this at a temporary directory; None means analytics/ in the
+# state directory.
+ANALYTICS_DIR: Path | None = None
+
+
+def _analytics_dir() -> Path:
+    return ANALYTICS_DIR or state_dir() / "analytics"
 
 
 @dataclass
@@ -107,8 +115,9 @@ class ToolAnalytics:
 
     def save(self):
         """Persist analytics to disk."""
-        ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
-        path = ANALYTICS_DIR / f"session_{int(self._session_start)}.json"
+        analytics_dir = _analytics_dir()
+        analytics_dir.mkdir(parents=True, exist_ok=True)
+        path = analytics_dir / f"session_{int(self._session_start)}.json"
         try:
             path.write_text(json.dumps(self.get_summary(), indent=2))
         except Exception as e:
@@ -117,12 +126,12 @@ class ToolAnalytics:
     @staticmethod
     def load_history(days: int = 30) -> list[dict]:
         """Load analytics from past sessions."""
-        if not ANALYTICS_DIR.exists():
+        if not _analytics_dir().exists():
             return []
 
         cutoff = time.time() - (days * 86400)
         sessions = []
-        for path in sorted(ANALYTICS_DIR.glob("session_*.json"), reverse=True):
+        for path in sorted(_analytics_dir().glob("session_*.json"), reverse=True):
             # Extract timestamp from filename (session_<timestamp>.json)
             try:
                 ts_str = path.stem.split("_", 1)[1]

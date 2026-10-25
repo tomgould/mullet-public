@@ -133,7 +133,7 @@ class TestCloneResult:
         assert isinstance(r.changed_files, list)
 
 
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import subprocess
 from mullet.knowledge.sources.git_ops import _run_git, clone_repo, fetch_repo, get_default_branch
 

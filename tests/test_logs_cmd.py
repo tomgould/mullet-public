@@ -11,7 +11,6 @@ from mullet.cli import logs_cmd
 from mullet.cli.logs_cmd import (
     _format_latency,
     _format_time,
-    run_logs_tail,
     run_logs_stats,
     run_logs_suggest,
     run_logs_tail,
@@ -292,11 +291,11 @@ class TestRunLogsSuggest:
 
 
 def test_get_db_path_returns_path():
-    """Line 9: _get_db_path returns ~/.mullet/interactions.db."""
+    """Line 9: _get_db_path returns interactions.db in the state directory."""
     from mullet.cli.logs_cmd import _get_db_path
+    from mullet.core.paths import state_dir
     p = _get_db_path()
-    assert p.name == "interactions.db"
-    assert ".mullet" in str(p)
+    assert p == state_dir() / "interactions.db"
 
 
 def test_run_logs_tail_sqlite_error_printed(tmp_path, capsys):

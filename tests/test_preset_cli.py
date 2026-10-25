@@ -1,10 +1,9 @@
 """Tests for mullet.cli.preset_cli."""
 from __future__ import annotations
 
-import pytest
 
 from mullet.cli.preset_cli import cmd_preset
-from mullet.core.presets import BUILTIN_PRESETS, BUILTIN_PRESET_NAMES, PresetManager
+from mullet.core.presets import PresetManager
 
 
 class TestCmdPresetList:

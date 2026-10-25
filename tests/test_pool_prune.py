@@ -62,6 +62,22 @@ def test_purge_sidecars_removes_db_rows(tmp_path):
     assert remaining == ["kept"]
 
 
+def test_purge_sidecars_reads_mullet_db_from_the_data_dir(tmp_path):
+    state, data = tmp_path / "state", tmp_path / "data"
+    state.mkdir()
+    data.mkdir()
+    for db, table in ((data / "mullet.db", "projects"), (state / "interactions.db", "calls")):
+        conn = sqlite3.connect(str(db))
+        conn.execute(f"CREATE TABLE {table} (id TEXT PRIMARY KEY, pool_name TEXT)")
+        conn.execute(f"INSERT INTO {table} VALUES ('1', 'pool')")
+        conn.commit()
+        conn.close()
+
+    rows, warnings = _purge_pool_sidecars("pool", "pool", state, data)
+    assert rows == 2
+    assert warnings == []
+
+
 def test_purge_sidecars_missing_db_silent(tmp_path):
     home = tmp_path / ".mullet"
     home.mkdir()

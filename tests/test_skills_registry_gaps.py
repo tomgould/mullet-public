@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mullet.core.skills.registry import SkillRegistry
-from mullet.core.skills.types import Skill, SkillMatch, SkillMetadata
+from mullet.core.skills.types import Skill, SkillMetadata
 
 
 # ---------------------------------------------------------------------------

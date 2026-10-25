@@ -1,19 +1,14 @@
 """Gap-filling tests for mullet/core/knowledge/sources.py — target ≥93%."""
 
-import json
-import os
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.core.knowledge.sources import (
     GitHubSource,
     GitHubConnector,
     WebSource,
     WebCrawler,
-    _is_cloudflare_challenge,
 )
 
 

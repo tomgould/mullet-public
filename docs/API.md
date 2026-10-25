@@ -13,7 +13,7 @@ Returns server status, provider availability.
 ```json
 {
   "status": "ok",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "active_tasks": 0,
   "providers": {"local": {"available": true, "model": "default"}}
 }
@@ -63,7 +63,7 @@ OpenAI-compatible chat completions. Supports streaming (SSE).
 }
 ```
 
-**Orchestration modes:** Set `mullet.mode` to `"autopilot"`, `"ralph"`, or `"ultrawork"` to run in full orchestration mode instead of a single agent turn.
+**Modes:** `standard` is the only mode. The old orchestration modes (`autopilot`, `ralph`, `ultrawork`) were removed, and any other `mullet.mode` gets an error. For multi-step work, use `mullet job`.
 
 ### Status
 
@@ -71,15 +71,15 @@ OpenAI-compatible chat completions. Supports streaming (SSE).
 GET /api/v1/status
 ```
 
-Current system state: providers, active orchestration modes, task count.
+Current system state: providers, task count and `active_modes`, which is normally an empty list now that the orchestration modes are gone.
 
 ```json
 {
   "status": "ok",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "active_tasks": 0,
   "providers": {"local": true, "anthropic": false, "openrouter": false},
-  "active_modes": ["ralph"],
+  "active_modes": [],
   "local_provider": {"name": "local", "model": "default"}
 }
 ```
@@ -120,12 +120,9 @@ Returns: complexity score, tier, signals, learning suggestion, project context.
 GET /metrics
 ```
 
-Prometheus-compatible metrics. No authentication required.
+Prometheus-compatible metrics. It needs a token in enterprise mode (`MULLET_MODE=enterprise`).
 
-Available metrics:
-- `mullet_requests_total` — request count by endpoint
-- `mullet_active_tasks` — currently running tasks
-- `mullet_uptime_seconds` — server uptime
+The output has `mullet_uptime_seconds` plus counters, gauges and histograms for request counts, token usage, LLM latency, tool calls and active tasks.
 
 ### Tools
 
@@ -186,7 +183,7 @@ ws://localhost:3000/ws
 | Event | Payload |
 |---|---|
 | `authenticate` | `{token: "mllt_xxx"}` |
-| `start_task` | `{prompt, mode, project, options}` |
+| `start_task` | `{prompt, mode, project, options}` (`mode` is `standard`) |
 | `kill_task` | `{task_id}` |
 | `list_projects` | `{}` |
 | `search` | `{project, query}` |
@@ -232,7 +229,6 @@ Available when running `mullet mcp`:
 |---|---|---|---|
 | `task` | string | required | The task to execute |
 | `tier` | string | auto | Force routing tier: `LOW`, `STANDARD`, `ADVANCED`, `CRITICAL`, `PREMIUM` |
-| `mode` | string | `"standard"` | Execution mode: `standard`, `ultrawork`, `ralph` |
 | `files` | array | `[]` | Ignored: `mullet_run` has no file access. Use `mullet_opencode` for file edits |
 | `apply` | boolean | `false` | Deprecated: `true` returns an error. Use `mullet_opencode` for file edits |
 | `target_dir` | string | cwd | Base directory to resolve file paths against |
@@ -253,11 +249,43 @@ Available when running `mullet mcp`:
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `task` | string | required | Coding task to perform (natural language) |
-| `cwd` | string | cwd | Project directory |
-| `model` | string | auto | Model override, e.g. `"moonshot/kimi-k2.7-code"`. If omitted, the active preset's `opencode_model` is used; if the preset is `native_only` (e.g. `claude-only`), `mullet_opencode` refuses and defers to Claude Code. |
+| `task` | string | required | Natural language coding task for the agent |
+| `files` | array | `[]` | File paths or globs the task may change (the job's scope). Defaults to the whole repo. |
+| `cwd` | string | cwd | Project directory or repository root. Defaults to the git repo containing the files, else the server's working directory. |
+| `timeout` | integer | 20 | Maximum run time in minutes (default 20, max 60). |
+| `providers` | array | auto | Rungs to allow on the ladder: `kimi`, `openrouter`, `free`, `local`, `claude`. Omit to use the whole ladder. |
+| `model` | string | ignored | Deprecated: accepted and ignored, with a note in the result. |
+| `apply` | boolean | ignored | Deprecated: accepted and ignored, with a note in the result. |
 
-`mullet_opencode` edits files in place and never stages or commits; there is no `timeout`, `apply` or `commit_message` parameter. See [opencode_integration.md](opencode_integration.md) for the return value.
+`mullet_opencode` runs the task as a single-step Mullet job on the delegation ladder. The diff is applied to the working tree with `git apply --3way` only when the node PASSED and the target files are clean and unchanged since the base. Changes are left unstaged and are never committed or pushed.
+
+### `mullet_opencode` Return value
+
+```json
+{
+  "status": "applied",
+  "reason": null,
+  "job_id": "job_abc123",
+  "report_path": "/path/to/job/report.md",
+  "rung": "kimi",
+  "model": "moonshot/kimi-k2.7-code",
+  "cost": 0.012,
+  "gates": [
+    "G0 scope: passed",
+    "G1 secrets: passed",
+    "G2 test_weakening: passed",
+    "G3 risky edits: passed",
+    "G4 build: passed",
+    "G5 tests: passed",
+    "G6 diff: passed",
+    "G7 review: passed"
+  ],
+  "files_changed": ["mullet/tools/opencode_tool.py"],
+  "notes": []
+}
+```
+
+Status values: `applied`, `passed_not_applied`, `failed`, `blocked`, `unverified`, `timeout`. See [opencode_integration.md](opencode_integration.md) for details.
 
 ### `mullet_swarm` Parameters
 

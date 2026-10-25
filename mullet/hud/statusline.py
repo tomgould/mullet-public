@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Optional
 
+from mullet.core.paths import state_dir
 from mullet.hud.guard import BudgetStatus, check_budget
 
 
@@ -60,7 +61,7 @@ def render_statusline() -> str:
 
     provider: Optional[str] = None
     try:
-        log_path = Path.home() / ".mullet" / "routing.log"
+        log_path = state_dir() / "routing.log"
         provider = _active_provider_from_log(log_path)
     except Exception:
         pass

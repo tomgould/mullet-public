@@ -1,6 +1,8 @@
 # Development Loop Agreement
 
-Canonical procedure for autonomous Claude loops on this project. Generic enough to port to other projects — swap the "Mullet project defaults" section for their equivalents.
+Canonical procedure for multi-cycle Claude Code sessions on this project. Generic enough to port to other projects — swap the "Mullet project defaults" section for their equivalents.
+
+Unattended work on a repository runs as `mullet job` instead (see [MULLET2.md](MULLET2.md)). A job checks every step with gates Mullet runs itself and hands back a branch for review.
 
 Version 2026-04-24 (rev. 2).
 
@@ -128,7 +130,7 @@ If unsure, err toward the more ceremonious mode. Escalating mid-cycle is fine; d
   - Did tests actually catch bugs or just pass coincidentally?
   - Did peer review add value or just re-state the tests?
   - Token cost: how many delegate calls, roughly how many tokens, any runaway?
-- **Output:** if there's an actionable process improvement, add a line to `docs/PROCESS_IMPROVEMENTS.md`. That file aggregates learnings across cycles — read it at the start of every new overnight loop.
+- **Output:** if there's an actionable process improvement, add a line to `docs/PROCESS_IMPROVEMENTS.md`. That file aggregates learnings across cycles — read it at the start of every new session.
 - **Session-end:** run the `/session-review` skill (or `python3 scripts/session_review.py --apply`). It measures adherence against `docs/DESIGN_PRINCIPLES.md` (if the project has one) and prints a numbered list of improvements; `--apply` doesn't change anything itself, so apply them by hand or with `mullet_opencode`. This is how design principles improve over time — retros feed directly back into the principles doc.
 - Pick next task. Back to 4.1.
 

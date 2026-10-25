@@ -1,9 +1,7 @@
 """Tests for mullet.core.router.auto_swarm."""
 
-import os
 from unittest.mock import patch
 
-import pytest
 
 from mullet.core.router.auto_swarm import (
     _is_doc,

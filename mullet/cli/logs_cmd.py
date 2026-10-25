@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 def _get_db_path() -> Path:
     """Get the path to the interactions database."""
-    return Path.home() / ".mullet" / "interactions.db"
+    from mullet.core.logging.interaction_log import default_db_path
+    return default_db_path()
 
 
 def _format_time(ts: str) -> str:

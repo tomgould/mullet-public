@@ -5,9 +5,9 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from mullet.core.agent.memory import AgentMemory
+from mullet.core.paths import data_dir
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def test_save_to_knowledge_manager_exception(monkeypatch, tmp_path):
     mem.save("key1", "value1")
 
     assert mem.recall_all()["key1"] == "value1"
-    assert (tmp_path / ".mullet" / "memory.json").exists()
+    assert (data_dir() / "memory.json").exists()
 
 
 def test_forget_with_knowledge_manager_success(monkeypatch, tmp_path):
@@ -177,7 +177,6 @@ def test_build_memory_prompt_no_entries():
 def test_build_memory_prompt_truncates(monkeypatch, tmp_path):
     """Prompt truncates when exceeding MAX_MEMORY_CHARS (lines 137-145)."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    from mullet.core.agent.memory import MAX_MEMORY_CHARS
     mem = AgentMemory()
     for i in range(10):
         mem.save(f"key{i}", "x" * 500)
@@ -196,7 +195,7 @@ def test_cleanup_expired_removes_and_saves(monkeypatch, tmp_path):
     removed = mem.cleanup_expired_memories()
     assert removed == 1
     assert "dead" not in mem.recall_all()
-    data = json.loads((tmp_path / ".mullet" / "memory.json").read_text())
+    data = json.loads((data_dir() / "memory.json").read_text())
     assert "dead" not in data
 
 

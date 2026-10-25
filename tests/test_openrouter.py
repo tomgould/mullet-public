@@ -529,9 +529,10 @@ def test_select_openrouter_model_huge_context_trumps_tier():
 
 def _run_doctor(env_overrides: dict, extra_args: list[str] | None = None,
                 timeout: int = 20) -> subprocess.CompletedProcess:
-    """Run `python -m mullet.cli.main doctor` with a sanitised environment."""
+    """Run `python -m mullet.cli.main doctor` from this checkout with a sanitised environment."""
     env = os.environ.copy()
     env["OPENROUTER_API_KEY"] = ""
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env.update(env_overrides)
     args = [sys.executable, "-m", "mullet.cli.main", "doctor"]
     if extra_args:
@@ -542,7 +543,7 @@ def _run_doctor(env_overrides: dict, extra_args: list[str] | None = None,
     )
 
 
-def test_openrouter_doctor_key_missing():
+def test_openrouter_doctor_key_missing(fake_claude):
     result = _run_doctor({})
     assert result.returncode == 0, result.stderr
     assert "OpenRouter API" in result.stdout

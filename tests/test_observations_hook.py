@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/mullet_observation_capture.py.
+"""Tests for mullet/hooks/observation_capture.py, through its scripts/hooks shim.
 
 Invokes the hook as a subprocess to mirror real PostToolUse execution.
 """

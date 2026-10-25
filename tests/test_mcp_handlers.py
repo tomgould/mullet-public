@@ -118,7 +118,7 @@ def test_provider_for_tier_standard_prefers_kimi(monkeypatch):
 
 
 def test_provider_for_tier_no_keys_and_no_local_returns_none(monkeypatch):
-    """When no API keys, no local LLM, AND no Claude Max OAuth token, returns None."""
+    """When no API keys, no local LLM, returns None."""
     from mullet.server.mcp_handlers import _provider_for_tier
     monkeypatch.delenv("KIMI_API_KEY", raising=False)
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
@@ -126,9 +126,7 @@ def test_provider_for_tier_no_keys_and_no_local_returns_none(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    with patch("mullet.core.providers.local_detection.detect_local_provider", return_value=None), \
-         patch("mullet.core.providers.gemini_cli.is_gemini_cli_available", return_value=False), \
-         patch("mullet.core.providers.claude_max._read_oauth_token", return_value=None):
+    with patch("mullet.core.providers.local_detection.detect_local_provider", return_value=None):
         result = _provider_for_tier("LOW")
         assert result is None
 
@@ -576,17 +574,6 @@ def test_handle_mullet_delegate_no_providers_defaults_to_none(
     assert mock_runner.called
     ar_allowed = mock_runner.call_args.kwargs.get("allowed_providers")
     assert ar_allowed is None
-
-
-def test_read_oauth_token_permanently_disabled():
-    """claude_max._read_oauth_token() must always return None -- reusing a
-    Claude Max/Pro/Free OAuth token in a third-party tool violates
-    Anthropic's ToS. This must hold even with a real-looking credentials
-    file present, not just when one is absent."""
-    from mullet.core.providers import claude_max
-    with patch("pathlib.Path.exists", return_value=True), \
-         patch("pathlib.Path.read_text", return_value='{"claudeAiOauth": {"accessToken": "sk-ant-oat01-fake"}}'):
-        assert claude_max._read_oauth_token() is None
 
 
 def test_sanitize_paths_path_traversal_detected(tmp_path):

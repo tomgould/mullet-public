@@ -2,7 +2,6 @@
 
 import asyncio
 import sys
-import threading
 import time
 import warnings
 from concurrent.futures import Future
@@ -14,7 +13,6 @@ try:
 except ImportError:  # pragma: no cover
     from unittest.mock import MagicMock as AsyncMock
 
-import pytest
 
 from mullet.core.tools.mcp_client import (
     MCPClient,
@@ -652,7 +650,7 @@ def test_to_mullet_schema_null_schema():
 
 
 def test_load_mcp_servers():
-    from mullet.core.tools.mcp_client import load_mcp_servers, DEFAULT_TIMEOUT
+    from mullet.core.tools.mcp_client import load_mcp_servers
     config = {
         "srv1": {"command": "node", "args": ["s.js"], "env": {"X": "1"}},
         "srv2": {"command": "python", "timeout": 30},

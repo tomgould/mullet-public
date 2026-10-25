@@ -1,6 +1,6 @@
 """Tests: OpenRouter :free models should not retry on 429."""
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 
 def _make_provider(model: str):

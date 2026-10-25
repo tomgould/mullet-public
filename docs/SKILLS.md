@@ -9,7 +9,7 @@ A skill is a SKILL.md file that instructs the Mullet agent how to perform a spec
 ### 1. Create the directory
 
 ```bash
-mkdir -p ~/.mullet/skills/my-skill
+mkdir -p "$(mullet paths data)/skills/my-skill"   # ~/.local/share/mullet/skills on a fresh install
 ```
 
 ### 2. Write the SKILL.md
@@ -33,8 +33,8 @@ Instructions for the agent...
 ### 3. Use it
 
 ```bash
-mullet /my-skill              # Slash command
-mullet "my trigger phrase"     # Auto-detected from triggers
+/my-skill                      # Slash command in the mullet REPL
+mullet --skills                # List every skill Mullet can see
 ```
 
 ## Frontmatter Fields
@@ -45,7 +45,7 @@ mullet "my trigger phrase"     # Auto-detected from triggers
 | `description` | Yes | One-line description for skill index |
 | `triggers` | No | Keywords that auto-activate the skill |
 | `tags` | No | Categories for grouping |
-| `mode` | No | Orchestration mode to activate (autopilot, ralph, ultrawork, team) |
+| `mode` | No | Read but ignored. The orchestration modes it used to name (autopilot, ralph, ultrawork, team) were removed. |
 | `version` | No | Semantic version string (defaults to "1.0.0") |
 
 ## Body Structure
@@ -69,19 +69,12 @@ How to verify the work is correct.
 
 ## Skill Pipelines
 
-Skills can be chained together using orchestration modes rather than pipeline declarations in frontmatter. The mode field activates specific orchestration behaviors:
-
-- **autopilot**: Full autonomous execution with planning and verification
-- **ralph**: Deterministic, don't-stop-until-done execution
-- **ultrawork**: Parallel task execution
-- **team**: Coordinated multi-agent execution
-
-The orchestration system handles skill chaining based on the selected mode.
+Skills are not chained by frontmatter. The orchestration modes that used to chain them (autopilot, ralph, ultrawork, team) were removed. For multi-step work on a repository, use `mullet job`; the `mullet-job` skill walks Claude Code through it.
 
 ## Scope Priority
 
 1. **Project skills** (`.mullet/skills/`) — highest priority
-2. **User skills** (`~/.mullet/skills/`)
+2. **User skills** (`skills/` in the data directory, `mullet paths data`; `~/.mullet/skills/` on an install that has not been migrated)
 3. **Built-in skills** (bundled with mullet)
 
 `mullet.yaml` accepts `skills.external_dirs`, but the CLI and MCP server don't load
@@ -91,18 +84,16 @@ Project skills override user skills with the same name.
 
 ## Built-in Skills
 
-| Skill | Triggers | Mode |
-|---|---|---|
-| autopilot | "autopilot", "full auto" | autopilot |
-| brainstorm | "brainstorm", "design", "explore options" | — |
-| code-review | "code review" | — |
-| eco | "eco", "save tokens" | — |
-| plan | "plan", "design" | — |
-| pool-improve | "improve pool", "fix pool config" | — |
-| ralph | "ralph", "don't stop" | ralph |
-| session-review | "session review", "wrap up", "end session" | — |
-| team | "team", "coordinated" | team |
-| ultrawork | "ultrawork", "parallel" | ultrawork |
+| Skill | What it does |
+|---|---|
+| brainstorm | Explore options and get approval before implementing |
+| code-review | Review code for bugs, quality and security |
+| mullet-job | Run a big coding job unattended in a sandboxed clone and hand back a branch |
+| plan | Strategic planning and task decomposition |
+| pool-improve | Audit a Trawl pool config and apply improvements |
+| session-review | End-of-session review against the design principles |
+
+`mullet setup-claude` also installs `mullet-job` and `pool-improve` into `~/.claude/skills/` for Claude Code.
 
 ## Learned Skills
 

@@ -1,7 +1,6 @@
 """Tests for mullet.core.router.learning — pure helpers and routing logic."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from mullet.core.router.learning import (
@@ -186,5 +185,8 @@ class TestConstants:
     def test_max_history_positive(self):
         assert MAX_HISTORY > 0
 
-    def test_learning_dir_is_path(self):
-        assert isinstance(LEARNING_DIR, Path)
+    def test_learning_dir_follows_the_state_dir(self):
+        from mullet.core.paths import state_dir
+        from mullet.core.router.learning import _learning_dir
+        assert LEARNING_DIR is None  # no override outside tests that set one
+        assert _learning_dir() == state_dir() / "routing_history"

@@ -1,64 +1,68 @@
-# Mullet — Context for Claude
+# Mullet: context for Claude
 
-Mullet is an AI coding orchestrator. It routes tasks to cheap/free models (Kimi K2,
-local LLM, Gemini) and integrates with Claude Code via MCP. The goal is to keep
-Anthropic token spend near zero by delegating actual work elsewhere.
+Mullet runs large coding jobs unattended and checks every step itself. A job is
+a task tree that you approve; each step runs with the user's own logged-in
+`claude -p` in a sandboxed private clone, and passes only when Mullet's own
+gates pass. The user gets back a branch and an evidence report, and their
+checkout is untouched until they merge. Mullet also serves an MCP server
+(`mullet mcp`) with Trawl knowledge-search tools and older delegation tools.
 
-## Architecture
+The design, decisions and phase plan are in `docs/MULLET2.md`. Read it before
+changing anything under `mullet/jobs/`.
 
-Mullet is an MCP-server-first orchestrator. The two primary entry points are:
+## Layout
 
-- **`mullet mcp`** (or `mullet-mcp`) — stdio MCP server used by Claude Code and other MCP clients. Exposes `mullet_run`, `mullet_delegate`, `mullet_opencode`, `mullet_swarm`, and 42+ Trawl knowledge tools.
-- **`mullet serve`** — OpenAI-compatible REST + WebSocket API server for external integrations.
+- `mullet/jobs/`: the job runner. `planner.py` (task tree), `runner.py`
+  (detached runner, resume), `clone.py` (private clone), `sandbox.py`
+  (bubblewrap; no unsandboxed fallback), `gates.py` and `review.py` (gates G0 to
+  G7), `ledger.py` (SQLite; a node's status comes from gate results only),
+  `profile.py` (per-repo setup and check commands), `ladder.py` (which
+  worker attempts each step: free, local, Kimi, OpenRouter, Claude),
+  `report.py`, and `executors/` (`claude_code.py`, `opencode.py` behind the
+  `keyproxy.py` key proxy). CLI: `mullet job plan|show|approve|run|status|tail|stop|resume|report|list|discard|merge|ladder|retry`.
+- `mullet/hooks/`: Claude Code hooks, run as `mullet hook <name>`. None are
+  registered by default; `mullet setup-claude --hooks <names>` adds them.
+- `mullet/cli/`: the `mullet` command. `setup_claude.py` registers the MCP
+  server and skills and records every change for `--uninstall`;
+  `doctor_checks.py` holds the toolchain checks behind `mullet doctor`.
+- `mullet/server/`: the MCP server (`mcp.py`, `mcp_handlers.py`,
+  `mcp_knowledge.py`) and the REST API (`mullet serve`).
+- `mullet/core/`: providers, routing, tools and skills used by the delegation
+  tools; `mullet/knowledge/`: the Trawl engine.
+- `scripts/hooks/`: thin shims that run the packaged hooks for this repo's own
+  `.claude/settings.json`.
 
-The core runtime (`mullet/core/`) handles provider routing, tool dispatch, skills, knowledge pools, and orchestration modes. It is mostly consumed through the MCP layer; bare `mullet` still starts a small REPL (`mullet/cli/repl.py`).
+## Advice for users
 
-The legacy harness layer (`mullet/harness/`) and its interactive TUI (`mullet shell`, `mullet cli`) were removed in 2026-07. They are preserved in git history but no longer shipped.
+1. **Provider keys go in `~/.config/mullet/.env`** (`$MULLET_CONFIG_DIR/.env` if
+   that is set), not in `~/.zshrc` or `~/.bashrc`. A source checkout's `.env` is
+   still read, for development.
+2. **`ANTHROPIC_API_KEY` is optional and billed per token.** In `claude -p` it
+   silently replaces subscription login, so Mullet jobs leave it out unless the
+   job was planned with `--billing api`, and `mullet doctor` warns when it is
+   set. Mullet never reads or reuses the subscription's own credentials.
+3. **Install from GitHub, never `pip install mullet`**: the PyPI package of that
+   name is someone else's. Use `scripts/install.sh` (uv or pipx).
+4. **Don't suggest 7B+ local models on machines with 10GB of RAM or less**, and
+   don't suggest the `[gpu]` extra on a Mac (it pulls NVIDIA-only `pynvml`).
 
-## Critical: do not suggest these things to users
+## Testing
 
-1. **Only suggest `ANTHROPIC_API_KEY` when the user wants Mullet itself to call
-   Anthropic models.** The key is optional and billed per token. Without it, Mullet
-   hands Anthropic-only MCP requests back to Claude Code, and the CLI falls back to
-   the official `claude` CLI, so that work runs under the user's subscription through
-   Anthropic's own tools. Mullet never reuses the subscription's OAuth token itself.
+- While working, run only the test files you added or changed:
+  `python3 -m pytest tests/test_foo.py -q`.
+- The full suite runs in parallel in about 4 minutes:
+  `python3 -m pytest tests -q -n 16 --timeout 300`. Run it before committing a
+  change that touches several modules.
+- Tests run with no network, no provider keys and a throwaway `HOME`
+  (`tests/conftest.py`). Use mock providers, never real LLM calls; tests that
+  need a real model are marked `live` and excluded by default. Use the
+  `fake_claude` fixture for anything that runs the `claude` CLI.
 
-2. **Do not suggest `~/.zshrc` or `~/.bashrc` for API keys** — Mullet loads a `.env`
-   file from the repo root via `python-dotenv`. Keys go in `.env`, not shell exports.
+## Code standards
 
-3. **Do not suggest 7B+ models on machines with ≤10GB RAM** — they won't fit.
-   For 8GB Mac: recommend `qwen3.5-2b-kimi-and-opus-distillation` (1.6GB, reasoning tasks)
-   and `qwen2.5-coder-3b-instruct` (1.9GB, code tasks). The router picks between them
-   automatically based on task type.
-
-4. **Do not suggest `pip install -e ".[gpu]"`on Mac** — the `[gpu]` extra pulls `pynvml`
-   (NVIDIA-only). On Apple Silicon, `sentence-transformers` brings in PyTorch with MPS
-   support automatically.
-
-## Providers
-
-Token economy order: **local LLM first** (when appropriate) → **OpenRouter** (default cheap cloud) → **Anthropic** (only with a real `ANTHROPIC_API_KEY`, pay-per-token) → **Kimi/Moonshot** (under budget pressure or when explicitly directed)
-
-- **Local LLM** — LM Studio or Ollama on localhost:1234 / 11434. Free. First choice for simple tasks.
-- **Anthropic** — Haiku/Sonnet/Opus via a real `ANTHROPIC_API_KEY` (metered). Mullet does **not** use your Claude Code Max/Pro/Free subscription's OAuth token to call Anthropic directly -- that's disabled as of 2026-07 because it violates Anthropic's Consumer ToS (see `mullet/core/providers/claude_max.py`). When Mullet is called from Claude Code and no API key is configured, it hands Anthropic-only requests back so Claude Code can do the work natively instead (that's always been a fully legitimate use of the subscription).
-- **Kimi K2** — Moonshot cloud fallback when Anthropic budget pressure is high, or user-directed. Key at platform.kimi.ai (~£20).
-- **Gemini Flash** — last-resort cloud fallback when Kimi unavailable. Optional.
-
-## Local model routing
-
-Mullet's router classifies local models by name pattern:
-- Models matching `coder`, `code`, `starcoder` → selected for code tasks
-- Models matching `distillation`, `thinking`, `reasoning`, `r1` → selected for reasoning/analysis tasks
-
-Having one of each type gives full routing coverage.
-
-## First-time setup
-
-Run `python3 scripts/onboard.py` from the repo root — it detects the system and
-prints a personalised checklist. Do this before `pip install -e .`.
-
-## setup-claude is safe to run
-
-`mullet setup-claude` is idempotent and fully reversible. It writes to `~/.claude/settings.json`,
-`~/.claude/mcp.json`, and `~/.claude/CLAUDE.md`. To undo: `pip uninstall mullet` and remove
-the two `mullet` blocks from those files. No vendor lock-in, no data migration. Run it.
+- Python 3.10+, type hints on public APIs, docstrings on public classes and
+  functions only.
+- Every new module gets tests.
+- No placeholder TODOs, `pass` stubs or commented-out code in production code.
+- A job's status comes from evidence (gate results, exit codes), never from
+  words in a model's reply.

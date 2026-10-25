@@ -77,7 +77,7 @@ class SkillRegistry:
         clean = re.sub(r'```[\s\S]*?```', '', lower)
         clean = re.sub(r'https?://\S+', '', clean)
 
-        # Filter informational intent — "what is autopilot?" should NOT trigger autopilot
+        # Filter informational intent — "what is brainstorm?" should NOT trigger brainstorm
         informational_patterns = [
             r'\bwhat\s+is\b', r'\bwhat\s+does\b', r'\bhow\s+does\b',
             r'\bexplain\b', r'\bdescribe\b', r'\btell\s+me\s+about\b',

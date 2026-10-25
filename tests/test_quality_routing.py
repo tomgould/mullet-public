@@ -6,13 +6,11 @@ Red phase: all tests should fail until decision.py wires in routing_history.succ
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
 
-from mullet.core.router.decision import RoutingDecision, Router, ProviderEntry
+from mullet.core.router.decision import Router, ProviderEntry
 from mullet.core.router.complexity import Tier
 
 

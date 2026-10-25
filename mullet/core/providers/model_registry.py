@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
+from mullet.core.paths import cache_dir
 from mullet.core.providers.errors import ModelContextExceeded
 from mullet.core.providers.model_info import MODEL_DATABASE
 from mullet.core.providers.pricing import get_known_pricing, get_cache_hit_pricing
@@ -207,8 +208,14 @@ def _http_get(url: str, headers: dict[str, str] | None = None, timeout: int = 10
 # Live Moonshot pricing fetch
 # ---------------------------------------------------------------------------
 
-_MOONSHOT_PRICING_CACHE_PATH = Path.home() / ".mullet" / "moonshot_pricing_cache.json"
+# Tests point this at a temporary file; None means moonshot_pricing_cache.json
+# in the cache directory.
+_MOONSHOT_PRICING_CACHE_PATH: Path | None = None
 _MOONSHOT_PRICING_TTL_SECONDS = 24 * 3600
+
+
+def _moonshot_pricing_cache_path() -> Path:
+    return _MOONSHOT_PRICING_CACHE_PATH or cache_dir() / "moonshot_pricing_cache.json"
 
 
 def _fetch_moonshot_pricing() -> dict[str, tuple[float, float]]:
@@ -217,9 +224,10 @@ def _fetch_moonshot_pricing() -> dict[str, tuple[float, float]]:
     Falls back to an empty dict on any error (network, auth, parse).
     """
     # 1. Check disk cache
+    cache_path = _moonshot_pricing_cache_path()
     try:
-        if _MOONSHOT_PRICING_CACHE_PATH.exists():
-            raw = json.loads(_MOONSHOT_PRICING_CACHE_PATH.read_text())
+        if cache_path.exists():
+            raw = json.loads(cache_path.read_text())
             if time.time() - raw.get("timestamp", 0) < _MOONSHOT_PRICING_TTL_SECONDS:
                 pricing = raw.get("pricing", {})
                 # JSON round-trips tuples as lists — normalise back to tuples
@@ -261,9 +269,9 @@ def _fetch_moonshot_pricing() -> dict[str, tuple[float, float]]:
 
     # 4. Persist to disk cache (best-effort)
     try:
-        _MOONSHOT_PRICING_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=_MOONSHOT_PRICING_CACHE_PATH.parent, suffix=".tmp"
+            dir=cache_path.parent, suffix=".tmp"
         )
         try:
             with os.fdopen(tmp_fd, "w") as f:
@@ -272,7 +280,7 @@ def _fetch_moonshot_pricing() -> dict[str, tuple[float, float]]:
                     f,
                     indent=2,
                 )
-            os.replace(tmp_path, _MOONSHOT_PRICING_CACHE_PATH)
+            os.replace(tmp_path, cache_path)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -291,7 +299,9 @@ def _fetch_moonshot_pricing() -> dict[str, tuple[float, float]]:
 class ModelRegistry:
     """Thread-safe registry of provider models with disk caching."""
 
-    CACHE_PATH = Path.home() / ".mullet" / "model_cache.json"
+    # Tests point this at a temporary file; None means model_cache.json in the
+    # cache directory.
+    CACHE_PATH: Path | None = None
     CACHE_TTL_HOURS = 24
 
     def __init__(self) -> None:
@@ -644,12 +654,16 @@ class ModelRegistry:
     # Cache persistence
     # ------------------------------------------------------------------
 
+    def _cache_path(self) -> Path:
+        return self.CACHE_PATH or cache_dir() / "model_cache.json"
+
     def _load_cache(self) -> None:
         """Load model cache from disk if it exists and is within TTL."""
-        if not self.CACHE_PATH.exists():
+        cache_path = self._cache_path()
+        if not cache_path.exists():
             return
         try:
-            raw = json.loads(self.CACHE_PATH.read_text())
+            raw = json.loads(cache_path.read_text())
             now = time.time()
             ttl_seconds = self.CACHE_TTL_HOURS * 3600
             with self._lock:
@@ -666,7 +680,8 @@ class ModelRegistry:
 
     def _save_cache(self) -> None:
         """Atomically save current cache to disk."""
-        self.CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        cache_path = self._cache_path()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             payload = {
                 provider: {
@@ -677,12 +692,12 @@ class ModelRegistry:
             }
         # Atomic write: write to tmp then rename
         tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=self.CACHE_PATH.parent, suffix=".tmp"
+            dir=cache_path.parent, suffix=".tmp"
         )
         try:
             with os.fdopen(tmp_fd, "w") as f:
                 json.dump(payload, f, indent=2)
-            os.replace(tmp_path, self.CACHE_PATH)
+            os.replace(tmp_path, cache_path)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -852,9 +867,10 @@ class ModelRegistry:
         return models
 
     def _fetch_local(self) -> list[ProviderModel]:
-        """Fetch model list from LM Studio (http://localhost:1234)."""
+        """Fetch model list from LM Studio (``LOCAL_LLM_URL``, default http://localhost:1234)."""
+        from mullet.core.env import local_llm_host
         try:
-            data = _http_get("http://localhost:1234/api/v0/models", timeout=3)
+            data = _http_get(f"{local_llm_host()}/api/v0/models", timeout=3)
         except Exception:
             return []
 

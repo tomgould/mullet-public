@@ -60,7 +60,7 @@ def load_plugins(tool_registry=None, provider_registry=None) -> int:
 
     Loads from two sources:
     1. Entry points (pip-installed packages)
-    2. Directory plugins (~/.mullet/plugins/*.py and .mullet/plugins/*.py)
+    2. Directory plugins (plugins/*.py in the data directory and .mullet/plugins/*.py)
 
     Returns the number of plugins loaded.
     """
@@ -89,15 +89,17 @@ def load_plugins(tool_registry=None, provider_registry=None) -> int:
 
 
 def _load_directory_plugins(tool_registry=None, provider_registry=None) -> int:
-    """Load plugins from ~/.mullet/plugins/ and .mullet/plugins/ directories.
+    """Load plugins from plugins/ in the data directory and the project's .mullet/plugins/.
 
     Each .py file should have a register(tool_registry=None, provider_registry=None) function.
     """
     import importlib.util
     from pathlib import Path
 
+    from mullet.core.paths import data_dir
+
     plugin_dirs = [
-        Path.home() / ".mullet" / "plugins",
+        data_dir() / "plugins",
         Path(".mullet") / "plugins",
     ]
 
@@ -178,8 +180,10 @@ def scan_plugin_dirs(search_dirs: list[str] | None = None) -> list[str]:
     import importlib.util
     from pathlib import Path
 
+    from mullet.core.paths import data_dir
+
     dirs = search_dirs or [
-        str(Path.home() / ".mullet" / "plugins"),
+        str(data_dir() / "plugins"),
         str(Path.cwd() / ".mullet" / "plugins"),
     ]
     found = []

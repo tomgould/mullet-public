@@ -113,7 +113,7 @@ def test_manual_tool_guard_resets_on_delegation():
     import importlib.util
     from pathlib import Path
 
-    hook_path = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "manual_tool_guard.py"
+    hook_path = Path(__file__).resolve().parent.parent / "mullet" / "hooks" / "manual_tool_guard.py"
     spec = importlib.util.spec_from_file_location("manual_tool_guard_test", hook_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

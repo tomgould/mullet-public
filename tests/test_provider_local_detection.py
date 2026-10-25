@@ -58,8 +58,11 @@ def test_detect_no_log_when_already_loaded():
         mock_log.assert_not_called()
 
 
-def test_detect_lmstudio_exception_falls_back_to_port_scan():
+def test_detect_lmstudio_exception_falls_back_to_port_scan(monkeypatch):
     """Lines 83-84: LMStudioManager raises, fallback port scan succeeds."""
+    # The default URLs are what's under test; every request here is mocked.
+    monkeypatch.delenv("OLLAMA_URL", raising=False)
+    monkeypatch.delenv("LOCAL_LLM_URL", raising=False)
     with patch(
         "mullet.core.providers.lmstudio_manager.LMStudioManager",
         side_effect=RuntimeError("no lms"),

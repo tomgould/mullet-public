@@ -118,7 +118,7 @@ class TestWebsitePolicyMissingLines:
 
 class TestCredentialGuardMissingLines:
     def test_credential_filename_pattern_match(self):
-        from mullet.core.tools.credential_guard import CredentialGuard, CREDENTIAL_FILENAMES
+        from mullet.core.tools.credential_guard import CredentialGuard
         guard = CredentialGuard()
         # Find a path that contains a CREDENTIAL_FILENAMES pattern
         # (e.g. "credentials" is a common pattern)

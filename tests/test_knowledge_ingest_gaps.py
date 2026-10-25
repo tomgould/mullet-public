@@ -7,7 +7,6 @@ Targets lines reported as missing: 72-73, 119-121, 139, 147, 153, 162,
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from mullet.core.knowledge.ingest import (
     FileManifest,

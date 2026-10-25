@@ -33,22 +33,13 @@ _MEMORY_FILES = [
 ]
 
 
-# delegation_reminder.py imports its budget thresholds from these modules in its
-# own folder, so they are copied alongside it; without them the hook fails.
-_HOOK_HELPERS = ("_delegation_gate.py",)
-
-
-def _copy_hook_helpers(source_hook: Path, hook_dest: Path, dry_run: bool, log) -> None:
-    for name in _HOOK_HELPERS:
-        src = source_hook.with_name(name)
-        dest = hook_dest.with_name(name)
-        if not src.exists():
-            log(f"⚠ scripts/hooks/{name} not found; delegation_reminder.py needs it")
-        elif dry_run:
-            log(f"Would copy {name} → {dest}")
-        else:
-            shutil.copy2(src, dest)
-            log(f"✓ Copied {name} → {dest}")
+# The project's .claude/settings.json runs the delegation reminder through the
+# installed `mullet`, found on PATH, so the committed file holds no
+# machine-specific path. Older versions copied the hook script into
+# .claude/hooks/ and ran it with python3, which broke once the script needed
+# Mullet's own modules.
+_HOOK_COMMAND = "mullet hook delegation-reminder"
+_OLD_HOOK_COMMAND = "python3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/delegation_reminder.py"
 
 
 def _render_template(path: Path, **kwargs: str) -> str:
@@ -230,7 +221,6 @@ def run_init(args: argparse.Namespace) -> None:
         claude_dir = target_dir / ".claude"
         claude_md = claude_dir / "CLAUDE.md"
         settings_json = claude_dir / "settings.json"
-        hook_dest = claude_dir / "hooks" / "delegation_reminder.py"
 
         if claude_md.exists() and not force:
             _log("⚠ .claude/CLAUDE.md exists, skipping")
@@ -252,39 +242,14 @@ def run_init(args: argparse.Namespace) -> None:
         if settings_json.exists() and not force:
             _log("⚠ .claude/settings.json exists, skipping")
         else:
-            content = _render_template(_TEMPLATES_ROOT / "settings.json.tmpl")
+            content = _render_template(_TEMPLATES_ROOT / "settings.json.tmpl",
+                                       hook_command=_HOOK_COMMAND)
             if dry_run:
-                _log(f"Would write {settings_json}")
+                _log(f"Would write {settings_json} (runs `{_HOOK_COMMAND}` on each prompt)")
             else:
+                claude_dir.mkdir(parents=True, exist_ok=True)
                 settings_json.write_text(content, encoding="utf-8")
-                _log(f"✓ Created {settings_json}")
-
-        if hook_dest.exists() and not force:
-            _log("⚠ .claude/hooks/delegation_reminder.py exists, skipping")
-        else:
-            source_hook = (
-                Path(__file__).resolve().parent.parent.parent
-                / "scripts"
-                / "hooks"
-                / "delegation_reminder.py"
-            )
-            if not source_hook.exists():
-                source_hook = (
-                    Path(__file__).resolve().parent.parent
-                    / "scripts"
-                    / "hooks"
-                    / "delegation_reminder.py"
-                )
-            if source_hook.exists():
-                if dry_run:
-                    _log(f"Would copy delegation_reminder.py → {hook_dest}")
-                else:
-                    hook_dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source_hook, hook_dest)
-                    _log(f"✓ Copied delegation_reminder.py → {hook_dest}")
-                _copy_hook_helpers(source_hook, hook_dest, dry_run, _log)
-            else:
-                _log("⚠ scripts/hooks/delegation_reminder.py not found, skipping")
+                _log(f"✓ Created {settings_json} (runs `{_HOOK_COMMAND}` on each prompt)")
     else:
         _log("Claude scaffolding skipped (--no-claude)")
 
@@ -404,36 +369,30 @@ def run_update(args: argparse.Namespace) -> None:
         else:
             loop_dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_loop, loop_dest)
-            _log(f"✓ Updated .mullet/LOOP_AGREEMENT.md")
+            _log("✓ Updated .mullet/LOOP_AGREEMENT.md")
         updated += 1
     else:
         _log("⚠ docs/LOOP_AGREEMENT.md not found — skipping")
 
     # ------------------------------------------------------------------
-    # 2) .claude/hooks/delegation_reminder.py — always overwrite with latest
+    # 2) .claude/settings.json — run the hook through `mullet hook`
     # ------------------------------------------------------------------
     if not no_claude:
-        source_hook = (
-            Path(__file__).resolve().parent.parent.parent
-            / "scripts" / "hooks" / "delegation_reminder.py"
-        )
-        if not source_hook.exists():
-            source_hook = (
-                Path(__file__).resolve().parent.parent
-                / "scripts" / "hooks" / "delegation_reminder.py"
-            )
-        hook_dest = target_dir / ".claude" / "hooks" / "delegation_reminder.py"
-        if source_hook.exists():
+        settings_json = target_dir / ".claude" / "settings.json"
+        text = settings_json.read_text(encoding="utf-8") if settings_json.exists() else ""
+        if _OLD_HOOK_COMMAND in text:
             if dry_run:
-                _log(f"Would update {hook_dest}")
+                _log(f"Would point the delegation hook in {settings_json} at `{_HOOK_COMMAND}`")
             else:
-                hook_dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_hook, hook_dest)
-                _log(f"✓ Updated .claude/hooks/delegation_reminder.py")
-            _copy_hook_helpers(source_hook, hook_dest, dry_run, _log)
+                settings_json.write_text(text.replace(_OLD_HOOK_COMMAND, _HOOK_COMMAND),
+                                         encoding="utf-8")
+                _log(f"✓ Pointed the delegation hook in .claude/settings.json at `{_HOOK_COMMAND}`")
             updated += 1
+            old_copy = target_dir / ".claude" / "hooks" / "delegation_reminder.py"
+            if old_copy.exists():
+                _log(f"  {old_copy} is no longer used; delete it when you like")
         else:
-            _log("⚠ scripts/hooks/delegation_reminder.py not found — skipping")
+            _log("⚠ .claude/settings.json has no old delegation hook to update, skipping")
 
     # ------------------------------------------------------------------
     # 3) mullet.yaml — update providers if using old pattern
@@ -458,10 +417,10 @@ def run_update(args: argparse.Namespace) -> None:
                 break
         if content != original:
             if dry_run:
-                _log(f"Would update mullet.yaml providers → [haiku, sonnet, openrouter, kimi]")
+                _log("Would update mullet.yaml providers → [haiku, sonnet, openrouter, kimi]")
             else:
                 mullet_yaml.write_text(content, encoding="utf-8")
-                _log(f"✓ Updated mullet.yaml providers → [haiku, sonnet, openrouter, kimi]")
+                _log("✓ Updated mullet.yaml providers → [haiku, sonnet, openrouter, kimi]")
             updated += 1
         else:
             _log("⚠ mullet.yaml providers already up to date, skipping")

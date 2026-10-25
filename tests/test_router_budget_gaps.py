@@ -1,9 +1,8 @@
 """Tests targeting reported coverage gaps in mullet/core/router/budget.py."""
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from mullet.core.router.budget import (
     BudgetTracker,

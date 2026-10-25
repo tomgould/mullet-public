@@ -4,7 +4,7 @@ Targets lines not hit by tests/test_cost_history.py.
 """
 
 import json
-from datetime import date, timedelta
+from datetime import date
 from unittest.mock import patch
 
 import pytest

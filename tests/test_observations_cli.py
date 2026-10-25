@@ -3,7 +3,6 @@ import io
 import sys
 from unittest.mock import patch
 
-import pytest
 
 from mullet.core.observations import Observation
 from mullet.cli.observations_cmd import run

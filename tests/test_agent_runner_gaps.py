@@ -1,8 +1,7 @@
 """Gap coverage tests for mullet/core/agent/runner.py."""
 
 import json
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

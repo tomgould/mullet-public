@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
+# The checkout's hook shims, run as Claude Code would; the code is in mullet/hooks/.
 HOOKS = Path(__file__).resolve().parent.parent / "scripts" / "hooks"
-sys.path.insert(0, str(HOOKS))
 
-import _delegation_gate as gate  # noqa: E402
+from mullet.hooks import delegation_gate as gate  # noqa: E402
 
 DELEGABLE_PROMPT = json.dumps({"prompt": "please review and analyse this plan"})
 
@@ -120,8 +120,6 @@ def stub_budget(tmp_path):
             f"    five_hour_pct = {vals['five_hour_pct']}\n"
             f"    weekly_pct = {vals['weekly_pct']}\n"
             "m.check_budget = lambda: _R()\n"
-            "sys.modules.setdefault('mullet', types.ModuleType('mullet'))\n"
-            "sys.modules.setdefault('mullet.hud', types.ModuleType('mullet.hud'))\n"
             "sys.modules['mullet.hud.guard'] = m\n"
         )
         return str(tmp_path)

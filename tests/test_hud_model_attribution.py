@@ -60,6 +60,8 @@ def _write_jsonl(path: Path, lines: list) -> None:
         ("o1-mini", "openai"),
         ("mistral-nemo-instruct-2407", "local"),
         ("qwen2.5-coder-7b", "local"),
+        ("ornith-1.5-35b-a3b", "local"),
+        ("Ornith-1.5-9B", "local"),
         ("", None),
         (None, None),
     ],

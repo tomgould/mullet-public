@@ -1,4 +1,4 @@
-"""Tests for the --processes ProcessPoolExecutor branch of scripts/reindex.py.
+"""Tests for the --processes ProcessPoolExecutor branch of mullet/knowledge/reindex.py.
 
 Covers:
   - The CLI flag parses correctly.
@@ -20,17 +20,17 @@ from pathlib import Path
 import pytest
 
 
-_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+_REINDEX_PATH = Path(__file__).resolve().parent.parent / "mullet" / "knowledge" / "reindex.py"
 
 
 def _load_reindex():
-    """Load scripts/reindex.py as a fresh module (scripts/ has no __init__.py).
+    """Load mullet/knowledge/reindex.py as a fresh, separately named module.
 
     Cache the module on sys.modules under the name 'scripts.reindex' so that
     ProcessPoolExecutor / ThreadPoolExecutor references inside reindex are
     patchable at 'scripts.reindex.<name>'.
 
-    scripts/reindex.py configures global logging on import (mullet logger to
+    The reindexer configures global logging on import (mullet logger to
     CRITICAL). We snapshot and restore affected logger levels so other tests
     in the same session aren't contaminated.
     """
@@ -49,7 +49,7 @@ def _load_reindex():
     ]
     _snapshot = {n: logging.getLogger(n).level for n in _tracked_loggers}
 
-    path = _SCRIPTS_DIR / "reindex.py"
+    path = _REINDEX_PATH
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod

@@ -9,7 +9,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 from mullet.core.agent.compression import (
-    ContextCompressor, StructuredSummary, get_context_length, CHARS_PER_TOKEN
+    ContextCompressor, StructuredSummary, get_context_length
 )
 
 

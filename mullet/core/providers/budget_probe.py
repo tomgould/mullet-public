@@ -17,6 +17,8 @@ from typing import Any
 
 import httpx
 
+from mullet.core.env import load_dotenv, local_llm_url
+
 logger = logging.getLogger(__name__)
 
 CACHE_TTL_SECONDS = 300  # 5-minute probe cache
@@ -160,24 +162,7 @@ class _BudgetCache:
 _cache = _BudgetCache()
 
 
-def _load_dotenv() -> None:
-    """Load .env from the repo root into os.environ (idempotent)."""
-    try:
-        from dotenv import load_dotenv
-        from pathlib import Path
-        # Walk up from this file to find the repo root .env
-        candidate = Path(__file__).parent
-        for _ in range(6):
-            env_file = candidate / ".env"
-            if env_file.exists():
-                load_dotenv(env_file, override=False)
-                break
-            candidate = candidate.parent
-    except ImportError:
-        pass  # python-dotenv not available
-
-
-_load_dotenv()  # ensure keys are available before any probe runs
+load_dotenv()  # ensure keys are available before any probe runs
 
 
 # ---------------------------------------------------------------------------
@@ -394,28 +379,15 @@ def _detect_gemini_tier() -> str:
 
 
 async def probe_gemini(api_key: str | None = None) -> ProviderBalance:
-    """Gemini subscription — no balance API; report as subscription with detected tier."""
-    try:
-        from mullet.core.providers.gemini_cli import is_gemini_cli_available
-        billing = "subscription_cli" if is_gemini_cli_available() else "api"
-    except Exception:
-        billing = "api"
+    """Gemini API — no balance API; report the detected tier."""
+    billing = "api"
     key = api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
 
-    # Gemini CLI rate limits (source: Google docs 2026-05):
-    #   Free individual:        1,000 RPD, 60 RPM  — resets midnight Pacific
-    #   Google AI Pro/Standard: 1,500 RPD, varies  — resets midnight Pacific
-    #   Google AI Ultra:        2,000 RPD, varies  — resets midnight Pacific
-    # No API endpoint to query remaining daily requests — window usage is unknown at runtime.
-    # Unlike Claude's rolling 5h window, Gemini uses a hard daily cap with model fallback
-    # (Flash instead of Pro) rather than hard lockout when limits are reached.
+    # No API endpoint reports remaining daily requests, so window usage is unknown at runtime.
     tier = _detect_gemini_tier()
-    tier_name, tier_rpd = _GEMINI_TIER_LIMITS.get(tier, _GEMINI_TIER_LIMITS["free"])
-    if billing == "subscription_cli":
-        _window = f"{tier_name} · {tier_rpd} | resets midnight Pacific"
-    else:
-        _window = f"{tier_name} · window: unknown"
-    if not key and billing != "subscription_cli":
+    tier_name, _tier_rpd = _GEMINI_TIER_LIMITS.get(tier, _GEMINI_TIER_LIMITS["free"])
+    _window = f"{tier_name} · window: unknown"
+    if not key:
         return ProviderBalance(
             name=f"Gemini (Google {tier_name})", key="gemini",
             credits_remaining_usd=None, credits_used_usd=None, credits_total_usd=None,
@@ -435,11 +407,16 @@ async def probe_gemini(api_key: str | None = None) -> ProviderBalance:
     )
 
 
-async def probe_local(base_url: str = "http://localhost:1234") -> ProviderBalance:
-    """Local LLM (LM Studio / Ollama) — free, check if server is reachable."""
+async def probe_local(base_url: str | None = None) -> ProviderBalance:
+    """Local LLM (LM Studio / Ollama) — free, check if server is reachable.
+
+    ``base_url`` is the OpenAI-compatible root ending in ``/v1``; it defaults
+    to ``LOCAL_LLM_URL``.
+    """
+    base_url = (base_url or local_llm_url()).rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            r = await client.get(f"{base_url}/v1/models")
+            r = await client.get(f"{base_url}/models")
             online = r.status_code == 200
     except Exception:
         online = False

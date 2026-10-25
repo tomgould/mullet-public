@@ -1,17 +1,12 @@
-"""Tests for github_client pure helpers and autopilot_init pure functions."""
+"""Tests for github_client pure helpers."""
 
 import pytest
-from pathlib import Path
 
 from mullet.knowledge.sources.github_client import (
     GitHubAPIError,
     AuthenticationError,
     RateLimitError,
     _mask_token,
-)
-from mullet.cli.autopilot_init import (
-    _target_dir,
-    require_goal,
 )
 
 
@@ -109,78 +104,3 @@ class TestMaskToken:
 
     def test_returns_string(self):
         assert isinstance(_mask_token("token"), str)
-
-
-# ---------------------------------------------------------------------------
-# _target_dir
-# ---------------------------------------------------------------------------
-
-class TestTargetDir:
-    def test_returns_path_in_mullet_autopilot(self):
-        p = Path("/home/user/myproject")
-        result = _target_dir(p)
-        assert result == p / ".mullet" / "autopilot"
-
-    def test_returns_path_object(self):
-        assert isinstance(_target_dir(Path("/tmp")), Path)
-
-
-# ---------------------------------------------------------------------------
-# require_goal
-# ---------------------------------------------------------------------------
-
-class TestRequireGoal:
-    def test_missing_goal_file_returns_false(self, tmp_path):
-        ok, msg = require_goal(tmp_path)
-        assert ok is False
-
-    def test_missing_goal_file_message_mentions_file(self, tmp_path):
-        ok, msg = require_goal(tmp_path)
-        assert "goal.md" in msg
-
-    def test_empty_goal_returns_false(self, tmp_path):
-        mullet_dir = tmp_path / ".mullet" / "autopilot"
-        mullet_dir.mkdir(parents=True)
-        (mullet_dir / "goal.md").write_text("")
-        ok, msg = require_goal(tmp_path)
-        assert ok is False
-
-    def test_sparse_goal_returns_false(self, tmp_path):
-        mullet_dir = tmp_path / ".mullet" / "autopilot"
-        mullet_dir.mkdir(parents=True)
-        (mullet_dir / "goal.md").write_text("# Goal\n\nSomething.\n")
-        ok, msg = require_goal(tmp_path)
-        assert ok is False
-
-    def test_filled_goal_returns_true(self, tmp_path):
-        mullet_dir = tmp_path / ".mullet" / "autopilot"
-        mullet_dir.mkdir(parents=True)
-        content = (
-            "## Problem\n\n"
-            "Need automated deployment pipeline for our microservices.\n\n"
-            "## Acceptance Criteria\n\n"
-            "- CI pipeline passes all tests\n"
-            "- Deploys automatically on push to main\n"
-            "- Rollback mechanism works within 2 minutes\n"
-        )
-        (mullet_dir / "goal.md").write_text(content)
-        ok, msg = require_goal(tmp_path)
-        assert ok is True
-
-    def test_filled_goal_message_is_string(self, tmp_path):
-        mullet_dir = tmp_path / ".mullet" / "autopilot"
-        mullet_dir.mkdir(parents=True)
-        content = (
-            "## Problem\n\nNeed an API gateway.\n\n"
-            "## Outcome\n\nSingle entry point for all services.\n\n"
-            "## Acceptance Criteria\n\n"
-            "- Auth works\n- Rate limiting works\n- Logging works\n"
-        )
-        (mullet_dir / "goal.md").write_text(content)
-        ok, msg = require_goal(tmp_path)
-        assert isinstance(msg, str)
-
-    def test_returns_tuple(self, tmp_path):
-        result = require_goal(tmp_path)
-        assert isinstance(result, tuple)
-        assert len(result) == 2

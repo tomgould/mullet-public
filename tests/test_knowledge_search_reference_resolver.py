@@ -1,6 +1,5 @@
 """Tests for mullet.knowledge.engine.search.reference_resolver."""
 from unittest.mock import MagicMock
-import pytest
 
 from mullet.knowledge.engine.search.reference_resolver import (
     extract_references,

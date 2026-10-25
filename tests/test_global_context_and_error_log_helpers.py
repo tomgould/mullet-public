@@ -190,8 +190,9 @@ class TestGetErrorLogPath:
         assert path.endswith("errors.log")
 
     def test_contains_mullet_logs(self):
+        from mullet.core.paths import state_dir
         path = get_error_log_path()
-        assert ".mullet" in path and "logs" in path
+        assert path == str(state_dir() / "logs" / "errors.log")
 
     def test_log_dir_created(self):
         import os

@@ -7,23 +7,18 @@ reaches >= 90 %.  All HTTP calls and external dependencies are mocked.
 from __future__ import annotations
 
 import json
-import os
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mullet.core.providers.model_registry import (
-    CONTEXT_SAFETY_MARGIN,
     ModelRegistry,
     ProviderModel,
-    _fetch_moonshot_pricing,
     _context_for,
     _fetch_moonshot_pricing,
     _pricing_for,
     _tier_chain_starting_from,
-    _tier_for,
 )
 
 
@@ -644,7 +639,7 @@ def test_best_gemini_routing_matrix_not_found(caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_best_gemini_routing_matrix_found():
+def test_best_gemini_routing_matrix_found_second_case():
     reg = ModelRegistry()
     fake_preflight = MagicMock()
     fake_preflight.complexity_tier = "STANDARD"
@@ -672,7 +667,7 @@ def test_best_gemini_routing_matrix_found():
     assert chosen == "gemini-2.5-flash"
 
 
-def test_best_gemini_routing_matrix_not_found(caplog):
+def test_best_gemini_routing_matrix_not_found_second_case(caplog):
     reg = ModelRegistry()
     fake_preflight = MagicMock()
     fake_preflight.complexity_tier = "STANDARD"

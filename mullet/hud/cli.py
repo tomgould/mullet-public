@@ -3,7 +3,7 @@
 
 Reads JSON from stdin (piped by Claude Code) and renders a statusline.
 
-Structure: ``main(deps=HudDeps())`` — every external boundary (stdin, OAuth,
+Structure: ``main(deps=HudDeps())`` — every external boundary (stdin,
 process scan, render, now, print) is a callable on :class:`HudDeps` so tests
 drive the entire entry point with in-memory stubs.
 """
@@ -16,21 +16,21 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _replace_dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from mullet.hud import render_hud
 from mullet.hud.agent_state import cleanup_stale_agents
 from mullet.hud.state import build_context
-from mullet.hud.stdin_limits import parse_stdin_limits
+from mullet.hud.stdin_limits import fill_missing_windows, parse_stdin_limits
 from mullet.hud.transcript import (
     TranscriptSnapshot,
     _infer_provider_from_model,
     parse_transcript,
 )
 from mullet.hud.types import HudConfig, HudRenderContext
-from mullet.hud.usage import RateLimits, fetch_usage, parse_resets_at
+from mullet.hud.usage import RateLimits, fetch_usage, parse_resets_at, record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,7 @@ class HudDeps:
     read_stdin: Callable[[], dict] = field(default=_default_read_stdin)
     parse_stdin_limits: Callable[[dict], Optional[RateLimits]] = field(default=parse_stdin_limits)
     fetch_usage_fallback: Callable[[], Optional[RateLimits]] = field(default=fetch_usage)
+    record_usage: Callable[[RateLimits], None] = field(default=record_usage)
     scan_processes: Callable[[], list[dict]] = field(default=_default_scan_processes)
     parse_transcript: Callable[[str], TranscriptSnapshot] = field(default=parse_transcript)
     build_context: Callable[[str], HudRenderContext] = field(default=build_context)
@@ -251,7 +252,14 @@ def build_hud_output(stdin_data: dict, deps: HudDeps) -> str:
         limits = deps.parse_stdin_limits(stdin_data)
     except Exception as exc:
         logger.warning("hud_cli: stdin rate-limit parse failed: %s", exc)
-    if limits is None:
+    if limits is not None:
+        # The budget guard, router and swarm read these back with fetch_usage().
+        try:
+            deps.record_usage(fill_missing_windows(
+                _replace_dataclass(limits), stdin_data, deps.fetch_usage_fallback()))
+        except Exception as exc:
+            logger.warning("hud_cli: failed to record usage limits: %s", exc)
+    else:
         try:
             limits = deps.fetch_usage_fallback()
         except Exception as exc:

@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
 def _get_pricing():
@@ -87,18 +89,20 @@ class RoutingOutcome:
 # ---------------------------------------------------------------------------
 
 def history_path(base: Optional[Path] = None) -> Path:
-    """Return path to routing_history.jsonl inside .mullet/ under *base* (or cwd)."""
-    root = base or Path.cwd()
-    mullet_dir = root / ".mullet"
-    mullet_dir.mkdir(parents=True, exist_ok=True)
-    return mullet_dir / _HISTORY_FILENAME
+    """Return path to routing_history.jsonl under *.mullet* in *base*, or Mullet's state directory by default."""
+    if base is not None:
+        return base / ".mullet" / _HISTORY_FILENAME
+    return state_dir() / _HISTORY_FILENAME
 
 
 def _decision_log_path(base: Optional[Path] = None) -> Path:
-    root = base or Path.home()
-    mullet_dir = root / ".mullet"
-    mullet_dir.mkdir(parents=True, exist_ok=True)
-    return mullet_dir / "routing.log"
+    if base is None:
+        from mullet.core.paths import state_dir
+        log_dir = state_dir()
+    else:
+        log_dir = base / ".mullet"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "routing.log"
 
 
 def append_decision_log(
@@ -109,7 +113,7 @@ def append_decision_log(
     task_preview: str,
     base: Optional[Path] = None,
 ) -> None:
-    """Append a human-readable routing decision line to ~/.mullet/routing.log.
+    """Append a human-readable routing decision line to routing.log in the state directory.
 
     Fail-open — IO errors are logged as DEBUG and never raised.
     Format: ISO-timestamp  provider/model  TIER  reason; reason  |  task[:80]
@@ -199,6 +203,7 @@ def record(outcome: RoutingOutcome, base: Optional[Path] = None) -> None:
     path = history_path(base)
     line = outcome.to_json_line() + "\n"
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             try:

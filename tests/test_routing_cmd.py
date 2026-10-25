@@ -1,7 +1,5 @@
 """Tests for mullet.cli.routing_cmd — dispatch and formatting helpers."""
 import json
-import tempfile
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -93,7 +91,7 @@ class TestRunDispatch:
 class TestLogCommand:
     def test_log_no_file_shows_message(self, tmp_path, monkeypatch, capsys):
         """mullet routing log prints a friendly message when routing.log doesn't exist."""
-        monkeypatch.setattr("mullet.cli.routing_cmd.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         rc = run(["log"])
         out = capsys.readouterr().out
         assert rc == 0
@@ -109,7 +107,7 @@ class TestLogCommand:
             "2026-04-28 00:03:00  local/llama  LOW  local-only mode  |  grep for symbol",
         ]
         (mullet_dir / "routing.log").write_text("\n".join(log_lines) + "\n")
-        monkeypatch.setattr("mullet.cli.routing_cmd.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         rc = run(["log"])
         out = capsys.readouterr().out
         assert rc == 0
@@ -123,7 +121,7 @@ class TestLogCommand:
         mullet_dir.mkdir()
         lines = [f"2026-04-28 00:0{i}:00  kimi/k2  STD  r  |  task {i}" for i in range(5)]
         (mullet_dir / "routing.log").write_text("\n".join(lines) + "\n")
-        monkeypatch.setattr("mullet.cli.routing_cmd.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         rc = run(["log", "--tail", "2"])
         out = capsys.readouterr().out
         assert rc == 0
@@ -618,7 +616,7 @@ class TestCmdLogShortLine:
         mullet_dir = tmp_path / ".mullet"
         mullet_dir.mkdir()
         (mullet_dir / "routing.log").write_text("2026-01-01  brief note\n")
-        monkeypatch.setattr("mullet.cli.routing_cmd.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         rc = run(["log"])
         out = capsys.readouterr().out
         assert "2026-01-01  brief note" in out

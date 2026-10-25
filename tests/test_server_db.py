@@ -2,7 +2,7 @@
 
 import sqlite3
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -1,886 +1,654 @@
-"""`mullet setup-claude` — install Mullet delegation hooks + CLAUDE.md into ~/.claude/."""
-import json
-import shutil
-import subprocess
+"""`mullet setup-claude`: connect Mullet to Claude Code, and undo it.
 
-from pathlib import Path
+What it changes:
 
+- registers the MCP server: `claude mcp add --scope user mullet -- <mullet> mcp`;
+- installs Mullet's Claude Code skills as `~/.claude/skills/<name>/SKILL.md`;
+- with `--hooks a,b`, adds those hooks to `~/.claude/settings.json` as
+  `<mullet> hook <name>` (none by default; `--hooks list` describes them);
+- with `--statusline`, sets Claude Code's status line to `mullet-hud` when
+  none is set.
 
-def _get_claude_dir():
-    return Path.home() / ".claude"
-
-
-def _get_claude_md_path():
-    return _get_claude_dir() / "CLAUDE.md"
-
-
-def _get_claude_settings_path():
-    return _get_claude_dir() / "settings.json"
-
-
-def _get_claude_skills_dir():
-    return _get_claude_dir() / "skills"
-
-
-def _append_claude_md_section(dry_run: bool):
-    claude_md_path = _get_claude_md_path()
-    section_to_append = """
-## Delegation (Mullet)
-
-**Hard rule: delegate before reading or generating.** Mullet provides cheap/free LLMs via MCP — use them.
-
-### Provider priority (default order — used when user has not specified a provider)
-
-> **User overrides always win.** If the user says "no local LLM", "no Gemini", or names a specific provider, follow that for the rest of the session. The table below is the fallback order when no preference is given.
->
-> **Key rule: OpenRouter is the default workhorse. Before each delegation, check `check_budget()` — if Anthropic pressure <60%, substitute Haiku/Sonnet instead of paying OpenRouter/Kimi tokens (Max plan is already paid for).**
-
-| Priority | Provider | Cost | Use for |
-|----------|----------|------|---------|
-| 1st | Local LLM (`--provider local`) | Free | Always first — reads, greps, bulk/doc summaries |
-| 2nd | OpenRouter (`--provider openrouter`) | Pay-per-token ~$0.27/M | Default cloud — cheap, reliable workhorse |
-| 3rd | Haiku (`--provider haiku`) | Prepaid (Max plan) | Substitute OpenRouter when pressure <60% — saves pay-per-token spend |
-| 4th | Sonnet (`--provider sonnet`) | Prepaid (Max plan) | Complex reasoning; substitute when pressure <60% |
-| 5th | Kimi K2 (`--provider kimi`) | Pay-per-token ~$0.60/M | Large context; OpenRouter fallback |
-| 6th | Gemini (`--provider gemini`) | Pay-per-token | Last resort only |
-| Orchestrate only | Opus (you) | Prepaid (Max plan) | Never delegate here — this is you |
-
-**Enforcing a provider override:** pass `providers=["kimi", "haiku"]` to `mullet_run` to hard-block excluded providers at the tool level.
-
-**Speed overrides** — user phrases that change the active speed mode for the session:
-
-| User says | Speed mode | Effect |
-|-----------|------------|--------|
-| "go fast", "I'm in a rush", `--speed fast` | `fast` | Skip local LLM; OpenRouter first, Haiku/Kimi as alternatives |
-| "max speed", "don't worry about cost", `--speed max` | `max` | Sonnet/Opus first; Anthropic-first for quality |
-| "save tokens", "go slow", `--speed economy` | `economy` | Local LLM first, then OpenRouter/Kimi; Haiku when headroom |
-| "balanced", `--speed balanced` | `balanced` | OpenRouter default; substitute Haiku when Anthropic pressure <60% |
-
-When a speed override is active, pass `--speed <mode>` on `mullet` CLI calls and set the equivalent tier in `mullet_run` tool calls. Default is `economy`.
-
-### How to delegate via Mullet MCP
-```
-mcp__mullet__mullet_opencode — delegate file edits (has real filesystem access — PREFERRED)
-mcp__mullet__mullet_run      — research/analysis only (no filesystem access)
-mcp__mullet__trawl_search — semantic search across indexed codebase
-mcp__mullet__trawl_search_code — code-specific search
-mcp__mullet__trawl_find_symbol — find a class/function/method by name
-```
-
-### Triggers (no exceptions)
-- Grep/scan across >3 files → use `trawl_search_code` first
-- File rewrite >200 lines → delegate via `mullet_opencode`
-- Doc generation, README, summary → delegate via `mullet_opencode`
-- Bulk multi-file edits → delegate via `mullet_opencode`
-
-### Default fallback chain (override as directed by user)
-1. `mullet_opencode` (file edits — filesystem access; uses OpenRouter by default, Haiku when pressure <60%)
-2. `mullet_run --provider openrouter` (research/analysis — default pay-per-token cloud)
-3. `mullet_run --provider haiku` (substitute for step 2 when Anthropic pressure <60%)
-4. `mullet_run --provider sonnet` (complex reasoning when pressure <60%)
-5. `mullet_run --provider kimi` (large context or OpenRouter fallback)
-6. `mullet_run --provider gemini` (last resort only)
-7. Direct Opus — only with explicit user approval
-
-### Delegating code edits — use mullet_opencode, NOT mullet_run
-
-`mullet_opencode` has real filesystem access and reads/edits files directly:
-
-```
-mcp__mullet__mullet_opencode(
-    task="Fix the calculate_total function in src/utils.py to handle tax"
-)
-```
-
-**Never use `mullet_run apply=true` for file edits.** `mullet_run` has no filesystem
-access — it is for research and analysis tasks that return text only.
-
-If opencode is unavailable, fall back to an `Agent` subagent (has filesystem access),
-not `mullet_run`.
-
-### API LLM delegates have NO filesystem access — MANDATORY
-
-`mullet_run` delegates (local LLM, Kimi K2, Gemini, Haiku) are **remote endpoints
-with zero filesystem access**. Use them only for research/analysis tasks that return
-text. For any task that involves reading or editing files, use `mullet_opencode`.
-4. State explicitly which file and line range to modify
-
-Only Claude Code subagents (spawned via the `Agent` tool) have real filesystem tool access and can read files themselves.
-
-## Schema & Assumptions
-
-- Never assume database schema, column names, or table structures — query the DB or read migration/schema files first
-- Never assume API response shapes, config defaults, or file paths — read the source before acting
-- State every assumption explicitly before making an edit that depends on it
-- If a fix requires a schema assumption and you cannot verify it, say so and ask rather than guess
+Every change is recorded in `<config dir>/setup-manifest.json`, so
+`--uninstall` removes exactly what was added and nothing else, and running it
+again changes nothing. `--dry-run` prints the changes without making them. It
+never edits CLAUDE.md and never writes into the current repository.
+`<mullet>` is the `mullet` found on PATH, or `python -m mullet` with this
+interpreter when there isn't one.
 """
 
-    if not claude_md_path.exists():
-        if not dry_run:
-            claude_md_path.parent.mkdir(parents=True, exist_ok=True)
-            claude_md_path.write_text(section_to_append.strip() + "\n")
-        print(f"  Created {claude_md_path} with Mullet delegation section.")
-        return True
-    else:
-        content = claude_md_path.read_text()
-        if "## Delegation (Mullet)" not in content and "## Mullet" not in content:
-            if not dry_run:
-                claude_md_path.write_text(content.strip() + "\n" + section_to_append.strip() + "\n")
-            print(f"  Appended Mullet delegation section to {claude_md_path}.")
-            return True
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from mullet.core.paths import config_dir
+from mullet.hooks import HOOKS, HookSpec, describe
+
+MCP_NAME = "mullet"
+# Mullet's own skills for Claude Code, copied from the packaged built-ins.
+CLAUDE_SKILLS = ("mullet-job", "pool-improve")
+MANIFEST_VERSION = 1
+_BUILTIN_SKILLS = Path(__file__).resolve().parent.parent / "core" / "skills" / "builtin"
+_CLAUDE_TIMEOUT = 120
+
+
+class SetupError(Exception):
+    """A step can't go ahead; the message says why."""
+
+
+# --- Locations ---------------------------------------------------------------
+
+
+def _config_dir() -> Path:
+    """Mullet's config directory (see mullet.core.paths), computed at call time."""
+    return config_dir()
+
+
+def manifest_path() -> Path:
+    """Where setup-claude records what it changed."""
+    return _config_dir() / "setup-manifest.json"
+
+
+def claude_dir() -> Path:
+    """Claude Code's user directory: $CLAUDE_CONFIG_DIR, else ~/.claude."""
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override).expanduser() if override else Path.home() / ".claude"
+
+
+def settings_path() -> Path:
+    return claude_dir() / "settings.json"
+
+
+def mullet_command() -> list[str]:
+    """How Claude Code should start Mullet: `mullet` on PATH, else this interpreter's `-m mullet`."""
+    found = shutil.which("mullet")
+    return [found] if found else [sys.executable, "-m", "mullet"]
+
+
+def hook_command(cmd: list[str], spec: HookSpec) -> str:
+    return shlex.join([*cmd, "hook", spec.name])
+
+
+# --- Manifest ----------------------------------------------------------------
+
+
+def _empty_manifest() -> dict:
+    return {
+        "version": MANIFEST_VERSION,
+        "mcp": None,
+        "files": [],
+        "dirs": [],
+        "settings": {
+            "path": None, "created_file": False, "keys_added": [],
+            "events_added": [], "groups_added": [], "hooks": [], "statusline": None,
+        },
+    }
+
+
+def load_manifest() -> dict:
+    """The recorded changes, or an empty record when setup-claude hasn't run."""
+    path = manifest_path()
+    if not path.exists():
+        return _empty_manifest()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SetupError(f"can't read {path}: {exc}") from exc
+    manifest = _empty_manifest()
+    manifest.update({k: v for k, v in data.items() if k != "settings"})
+    manifest["settings"].update(data.get("settings") or {})
+    return manifest
+
+
+def _manifest_is_empty(manifest: dict) -> bool:
+    s = manifest["settings"]
+    return not (manifest["mcp"] or manifest["files"] or manifest["dirs"] or s["created_file"]
+                or s["keys_added"] or s["events_added"] or s["groups_added"] or s["hooks"]
+                or s["statusline"])
+
+
+def _save_manifest(manifest: dict) -> None:
+    path = manifest_path()
+    if _manifest_is_empty(manifest):
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_atomic(path, json.dumps(manifest, indent=2) + "\n")
+
+
+# --- Small helpers -----------------------------------------------------------
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        if path.exists():
+            os.chmod(tmp, path.stat().st_mode & 0o777)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _home_relative(path: Path) -> str:
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
+class _Out:
+    """Prints each change as done, or as planned under --dry-run."""
+
+    def __init__(self, dry_run: bool) -> None:
+        self.dry_run = dry_run
+        self.changes = 0
+        self.failures = 0
+
+    def change(self, done: str, planned: str) -> None:
+        self.changes += 1
+        print(f"  {'would ' + planned if self.dry_run else done}")
+
+    def same(self, message: str) -> None:
+        print(f"  {message}")
+
+    def fail(self, message: str) -> None:
+        self.failures += 1
+        print(f"  ! {message}", file=sys.stderr)
+
+
+# --- Claude Code CLI (MCP registration) --------------------------------------
+
+
+def _claude(*args: str) -> subprocess.CompletedProcess:
+    """Run the claude CLI from an empty directory, so only user-scope MCP config is seen."""
+    claude = shutil.which("claude")
+    if not claude:
+        raise SetupError("the claude CLI is not on PATH")
+    with tempfile.TemporaryDirectory(prefix="mullet-setup-") as cwd:
+        try:
+            return subprocess.run([claude, *args], cwd=cwd, capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL, timeout=_CLAUDE_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise SetupError(f"claude {' '.join(args)} failed: {exc}") from exc
+
+
+def _mcp_add_args(cmd: list[str]) -> list[str]:
+    return ["mcp", "add", "--scope", "user", MCP_NAME, "--", *cmd, "mcp"]
+
+
+def _register_mcp(manifest: dict, cmd: list[str], out: _Out) -> None:
+    shown = "claude " + shlex.join(_mcp_add_args(cmd))
+    try:
+        _register_mcp_steps(manifest, cmd, out, shown)
+    except SetupError as exc:
+        out.fail(f"MCP server not registered: {exc}. Install Claude Code, then run: {shown}")
+
+
+def _register_mcp_steps(manifest: dict, cmd: list[str], out: _Out, shown: str) -> None:
+    registered = _claude("mcp", "get", MCP_NAME).returncode == 0
+    recorded = manifest["mcp"]
+    if registered and not recorded:
+        out.same(f"MCP server '{MCP_NAME}' is already registered, not by setup-claude; left as it is")
+        return
+    if registered and recorded.get("command") == cmd:
+        out.same(f"MCP server '{MCP_NAME}' already registered (user scope)")
+        return
+    if out.dry_run:
+        out.change("", f"run: {shown}")
+        return
+    if registered:
+        removed = _claude("mcp", "remove", "--scope", "user", MCP_NAME)
+        if removed.returncode != 0:
+            out.fail(f"couldn't replace the MCP server registration: {removed.stderr.strip()}")
+            return
+    result = _claude(*_mcp_add_args(cmd))
+    if result.returncode != 0:
+        out.fail(f"{shown} failed: {(result.stderr or result.stdout).strip()}")
+        return
+    manifest["mcp"] = {"name": MCP_NAME, "scope": "user", "command": cmd}
+    out.change(f"registered MCP server '{MCP_NAME}' (user scope): {shlex.join(cmd)} mcp", "")
+
+
+def _unregister_mcp(manifest: dict, out: _Out) -> None:
+    recorded = manifest["mcp"]
+    if not recorded:
+        return
+    if out.dry_run:
+        out.change("", f"run: claude mcp remove --scope user {recorded['name']}")
+        return
+    try:
+        result = _claude("mcp", "remove", "--scope", "user", recorded["name"])
+    except SetupError as exc:
+        out.fail(f"MCP server '{recorded['name']}' not removed: {exc}")
+        return
+    if result.returncode != 0:
+        text = (result.stderr or result.stdout).strip()
+        # Already gone ("No ... MCP server found ..."): nothing left to remove.
+        if not re.search(r"\bno\b.*\bfound\b|not found", text, re.IGNORECASE):
+            out.fail(f"claude mcp remove failed: {text}")
+            return
+    manifest["mcp"] = None
+    out.change(f"removed MCP server '{recorded['name']}' (user scope)", "")
+
+
+# --- Skills ------------------------------------------------------------------
+
+
+def _record_dirs(manifest: dict, created: list[Path]) -> None:
+    for d in created:
+        if str(d) not in manifest["dirs"]:
+            manifest["dirs"].append(str(d))
+
+
+def _missing_parents(path: Path) -> list[Path]:
+    """Directories that would have to be created for `path`, outermost first."""
+    missing = []
+    for parent in reversed(path.parents):
+        if not parent.exists():
+            missing.append(parent)
+    return missing
+
+
+def _install_skills(manifest: dict, out: _Out, force: bool) -> None:
+    recorded = {f["path"]: f for f in manifest["files"]}
+    for name in CLAUDE_SKILLS:
+        source = _BUILTIN_SKILLS / name / "SKILL.md"
+        text = source.read_text(encoding="utf-8")
+        dest = claude_dir() / "skills" / name / "SKILL.md"
+        entry = recorded.get(str(dest))
+        shown = _home_relative(dest)
+        if dest.exists():
+            if entry is None:
+                out.same(f"skill {name}: {shown} exists and isn't Mullet's; left alone")
+                continue
+            if dest.read_text(encoding="utf-8") == text:
+                out.same(f"skill {name} already installed")
+                continue
+            if _sha256(dest) != entry["sha256"] and not force:
+                out.same(f"skill {name}: {shown} was changed after setup-claude installed it; "
+                         "left alone (--force replaces it)")
+                continue
+            out.change(f"updated skill {name}: {shown}", f"update {shown}")
         else:
-            print(f"  Mullet delegation section already present in {claude_md_path}. Skipped.")
-            additions = []
-            if "## Schema & Assumptions" not in content:
-                additions.append("\n## Schema & Assumptions\n\n- Never assume database schema, column names, or table structures — query the DB or read migration/schema files first\n- Never assume API response shapes, config defaults, or file paths — read the source before acting\n- State every assumption explicitly before making an edit that depends on it\n- If a fix requires a schema assumption and you cannot verify it, say so and ask rather than guess\n")
-                print(f"  Will append Schema & Assumptions section to {claude_md_path}.")
-            if "API LLM delegates have NO filesystem access" not in content:
-                additions.append("\n### API LLM delegates have NO filesystem access — MANDATORY\n\nAPI delegates (local LLM via LM Studio, Kimi K2, Gemini, Haiku) are **remote endpoints with zero filesystem access**. They can only work with what is pasted into the prompt. Asking them to modify a file they have never seen produces empty or hallucinated output.\n\n**Before every delegation that involves existing code:**\n1. Read the target file(s) with the Read tool first\n2. Paste the relevant sections verbatim into the delegation prompt — full file if <100 lines, the target function/class ±20 lines context if larger\n3. Include imports and type signatures so the delegate understands the surrounding API\n4. State explicitly which file and line range to modify\n\nOnly Claude Code subagents (spawned via the `Agent` tool) have real filesystem tool access and can read files themselves.\n")
-                print(f"  Will append API LLM filesystem rule to {claude_md_path}.")
-            if "AI-Bridge changes MUST be validated" not in content:
-                additions.append("\n### AI-Bridge changes MUST be validated before committing — MANDATORY\n\nWhen `apply=true` writes EDIT/FILE/DELETE blocks to disk, validate before committing:\n1. Syntax check: `python3 -m py_compile <changed_file>`\n2. Run tests: `python3 -m pytest tests/ -q --tb=short -x`\n3. Read the diff: `git diff` — confirm intent matches output\n\nNever commit AI-Bridge applied changes without this validation.\n")
-                print(f"  Will append AI-Bridge validation rule to {claude_md_path}.")
-            if additions:
-                if not dry_run:
-                    claude_md_path.write_text(content.rstrip() + "".join(additions))
-                return True
-            return False
+            out.change(f"installed skill {name}: {shown}", f"create {shown}")
+        if out.dry_run:
+            continue
+        created = _missing_parents(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _record_dirs(manifest, created)
+        dest.write_text(text, encoding="utf-8")
+        new_entry = {"path": str(dest), "sha256": _sha256(dest)}
+        manifest["files"] = [f for f in manifest["files"] if f["path"] != str(dest)] + [new_entry]
 
 
-def _get_hooks_dir() -> Path | None:
-    """Return the absolute path to Mullet's scripts/hooks directory.
+def _remove_files(manifest: dict, out: _Out) -> None:
+    kept = []
+    for entry in manifest["files"]:
+        path = Path(entry["path"])
+        shown = _home_relative(path)
+        if not path.exists():
+            continue
+        if _sha256(path) != entry["sha256"]:
+            out.same(f"{shown} was changed after setup-claude installed it; left in place")
+            kept.append(entry)
+            continue
+        out.change(f"removed {shown}", f"remove {shown}")
+        if not out.dry_run:
+            path.unlink()
+    if out.dry_run:
+        for d in manifest["dirs"]:
+            if Path(d).is_dir():
+                out.same(f"would remove the folder {_home_relative(Path(d))} if nothing else is in it")
+        return
+    manifest["files"] = kept
+    # Folders setup-claude created go only when empty; one that now holds
+    # something else isn't Mullet's alone any more, so it stays.
+    for d in sorted(manifest["dirs"], key=lambda p: len(Path(p).parts), reverse=True):
+        path = Path(d)
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+            out.change(f"removed the empty folder {_home_relative(path)}", "")
+    manifest["dirs"] = []
 
-    Works for editable installs (pip install -e .) where __file__ lives in
-    the source tree.  Returns None for non-editable pip installs where the
-    scripts/ directory is not shipped — callers should skip hook installation
-    and print a warning in that case.
-    """
-    candidate = Path(__file__).resolve().parent.parent.parent / "scripts" / "hooks"
-    if candidate.exists() and (candidate / "delegation_reminder.py").exists():
-        return candidate
+
+# --- settings.json (hooks and status line) -----------------------------------
+
+
+def _read_settings(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except json.JSONDecodeError as exc:
+        raise SetupError(f"{path} isn't valid JSON ({exc}); fix it first, nothing was changed there")
+    if not isinstance(data, dict):
+        raise SetupError(f"{path} doesn't hold a JSON object; nothing was changed there")
+    return data
+
+
+def _find_group(groups: list, matcher: str | None) -> dict | None:
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        if matcher is None and "matcher" not in group:
+            return group
+        if matcher is not None and group.get("matcher") == matcher:
+            return group
     return None
 
 
-def _merge_claude_settings_hooks(dry_run: bool):
-    claude_settings_path = _get_claude_settings_path()
+def _same_registration(entry: dict, name: str, event: str, matcher: str | None) -> bool:
+    return entry["name"] == name and entry["event"] == event and entry["matcher"] == matcher
 
-    # Static hooks that don't need the scripts directory
-    static_pretooluse = [
-        {
-            "matcher": "Grep",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "echo '{\"type\":\"warning\",\"message\":\"DELEGATION REMINDER: For broad codebase searches use mcp__mullet__trawl_search_code or trawl_find_symbol instead of Grep. Only use Grep for targeted single-file searches.\"}'"
-                }
-            ]
-        },
-        {
-            "matcher": "Edit|Write",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "echo \"{\\\"type\\\":\\\"info\\\",\\\"message\\\":\\\"REPO CHECK: $(pwd) | branch: $(git branch --show-current 2>/dev/null || echo not-git)\\\"}\""
-                }
-            ]
-        },
-    ]
 
-    # Dynamic hooks that require the scripts/hooks directory (editable install only)
-    hooks_dir = _get_hooks_dir()
-    if hooks_dir is None:
-        print(
-            "  WARNING: scripts/hooks not found — hook scripts require an editable install "
-            "(pip install -e .). Skipping UserPromptSubmit/mullet_pretooluse hooks."
-        )
-
-    hooks_to_merge: dict = {"PreToolUse": static_pretooluse}
-
-    if hooks_dir:
-        def _h(name: str) -> str:
-            return f"python3 {hooks_dir / name}"
-
-        hooks_to_merge["UserPromptSubmit"] = [
-            {
-                "matcher": "",
-                "hooks": [
-                    {"type": "command", "command": _h("compress_whitespace.py")},
-                    {"type": "command", "command": _h("delegation_reminder.py")},
-                    {"type": "command", "command": _h("skill_activator.py")},
-                    {"type": "command", "command": _h("session_context.py")},
-                    {"type": "command", "command": _h("user_prompt_detect_override.py")},
-                ],
-            }
-        ]
-        hooks_to_merge["PreToolUse"].append(
-            {
-                "matcher": "mcp__mullet__.*",
-                "hooks": [{"type": "command", "command": _h("mullet_pretooluse_rewriter.py")}],
-            }
-        )
-        hooks_to_merge["PostToolUse"] = [
-            {
-                "matcher": "Read|Write|Edit|Bash",
-                "hooks": [{"type": "command", "command": _h("mullet_observation_capture.py")}],
-            }
-        ]
-
-    if not claude_settings_path.exists():
-        if not dry_run:
-            claude_settings_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(claude_settings_path, "w") as f:
-                json.dump({"hooks": hooks_to_merge}, f, indent=2)
-        print(f"  Created {claude_settings_path} with Mullet hooks.")
-        return True
-
-    with open(claude_settings_path) as f:
-        current_settings = json.load(f)
-
-    if "hooks" not in current_settings:
-        current_settings["hooks"] = {}
-
-    changed = False
-    for event, new_groups in hooks_to_merge.items():
-        existing_groups = current_settings["hooks"].setdefault(event, [])
-        for new_group in new_groups:
-            matcher = new_group.get("matcher", "")
-            existing_group = next(
-                (g for g in existing_groups if g.get("matcher", "") == matcher), None
-            )
-            if existing_group is None:
-                existing_groups.append(new_group)
-                changed = True
-            else:
-                # Group exists — merge individual hooks that are missing.
-                existing_cmds = {h.get("command", "") for h in existing_group.get("hooks", [])}
-                for new_hook in new_group.get("hooks", []):
-                    cmd = new_hook.get("command", "")
-                    if cmd not in existing_cmds:
-                        existing_group.setdefault("hooks", []).insert(0, new_hook)
-                        existing_cmds.add(cmd)
-                        changed = True
-
-    if changed:
-        if not dry_run:
-            with open(claude_settings_path, "w") as f:
-                json.dump(current_settings, f, indent=2)
-        print(f"  Merged Mullet hooks into {claude_settings_path}.")
-        return True
-    else:
-        print(f"  Mullet hooks already present in {claude_settings_path}. Skipped.")
+def _remove_command(data: dict, event: str, matcher: str | None, command: str) -> bool:
+    group = _find_group((data.get("hooks") or {}).get(event) or [], matcher)
+    if group is None:
         return False
+    before = len(group.get("hooks", []))
+    group["hooks"] = [h for h in group.get("hooks", [])
+                      if not (isinstance(h, dict) and h.get("command") == command)]
+    return len(group["hooks"]) != before
 
 
-# Step 5 of the /commit skill. With MULLET_NO_AI_ATTRIBUTION on, the personal
-# no-attribution rule replaces the neutral wording.
-_COMMIT_STEP_NEUTRAL = (
-    "Commit using a HEREDOC so the message keeps its formatting; "
-    "follow the repository's own conventions for trailers"
-)
-_COMMIT_STEP_NO_AI_ATTRIBUTION = (
-    "Commit using HEREDOC — never append Co-Authored-By or attribution lines"
+def _prune(data: dict, record: dict) -> None:
+    """Drop empty hook groups, events and keys that setup-claude itself created."""
+    hooks = data.get("hooks")
+    if isinstance(hooks, dict):
+        for event, matcher in [tuple(g) for g in record["groups_added"]]:
+            groups = hooks.get(event)
+            group = _find_group(groups or [], matcher)
+            if group is not None and not group.get("hooks"):
+                groups.remove(group)
+        for event in record["events_added"]:
+            if event in hooks and not hooks[event]:
+                del hooks[event]
+        if "hooks" in record["keys_added"] and not hooks:
+            del data["hooks"]
+
+
+# Hook scripts an older setup-claude registered by their path in a checkout.
+_LEGACY_SCRIPTS = (
+    "compress_whitespace.py", "delegation_reminder.py", "skill_activator.py",
+    "session_context.py", "user_prompt_detect_override.py", "mullet_pretooluse_rewriter.py",
+    "mullet_observation_capture.py", "agent_hud_tracker.py", "preset_prompt.py",
+    "manual_tool_guard.py", "pre_agent_guard.py",
 )
 
 
-def _copy_claude_skill_files(dry_run: bool, force: bool):
-    claude_skills_dir = _get_claude_skills_dir()
-    claude_skills_dir.mkdir(parents=True, exist_ok=True)
-
-    skills_to_copy = {
-        "delegate.md": """# /delegate — Delegate Task to Cheaper Model
-
-When this skill is invoked, follow these steps exactly:
-
-## Step 1: Classify the task
-- **File edit (any size)** → `mullet_opencode` (has real filesystem access)
-- **Research/analysis (text output only)** → `mullet_run --provider kimi`
-- **Edit < 5 lines** → use `Edit` tool directly, no delegation needed
-- **Complex multi-file reasoning** → `Agent` subagent
-
-## Step 2: Construct the delegation
-
-**For file edits — always use `mullet_opencode`:**
-```
-mcp__mullet__mullet_opencode(
-    task="<describe the edit with file path and what to change>"
-)
-```
-The delegate has filesystem access and reads files itself — do NOT paste file content.
-
-**For research/analysis — use `mullet_run` (text output only, no file writes):**
-- Write a self-contained prompt with all necessary context
-- `mullet_run` has NO filesystem access — include any relevant excerpts in the prompt
-
-## Step 3: Execute the fallback chain (do NOT skip steps)
-1. File edits → `mullet_opencode` (OpenRouter default; substitute Haiku when pressure <60%)
-2. Research → `mullet_run --provider openrouter` (default pay-per-token)
-3. If Anthropic pressure <60% → substitute `mullet_run --provider haiku` or `--provider sonnet`
-4. If OpenRouter fails → `mullet_run --provider kimi`
-5. Gemini → last resort only: `mullet_run --provider gemini`
-6. If opencode unavailable → `Agent` subagent (has filesystem access)
-7. Falling back to direct Opus **requires explicit user approval**
-
-## Step 4: Return results
-- Report back with a diff summary only — no inline full-file content
-- Note which provider succeeded and approximate token use
-- If all delegates failed, report clearly and ask before doing the work yourself
-
-## Rules
-- NEVER use `mullet_run apply=true` — opencode handles all file edits
-- Do NOT do exploratory Bash/grep in Opus to "prepare" the delegation prompt
-- Do NOT fall back to Opus silently because delegation is slower
-- Do NOT retry the same failing provider more than once without changing the approach
-""",
-        "pool-config.md": """# /pool-config — Audit and Improve a Mullet Pool Config
-
-Use this skill when the user wants to review, improve, or create a `config.yaml` for a Mullet pool. Triggered proactively when search quality is poor or a new project scope is identified.
-
----
-
-## Step 1: Identify the pool
-
-If no pool name is given, ask. Pool configs live at:
-```
-~/.mullet/pools/<pool-name>/config.yaml
-```
-
-Read the existing config. If none exists, proceed to Step 4.
-
-## Step 2: Inventory the documents directory
-
-List files in the pool's `documents/` directory:
-```
-~/.mullet/pools/<pool-name>/documents/
-```
-
-Group by type: markdown, code, PDF, HTML, YAML, other.
-
-## Step 3: Audit the current config
-
-Check:
-- `name` and `machine_name` — must be set, machine_name lowercase-hyphenated
-- `documents.path` — must point to an existing directory
-- `documents.extensions` — must cover the file types actually present
-- `documents.exclude_patterns` — reasonable? Any build artifacts being indexed?
-- `chunking.strategy` — `semantic` for docs, `code` for code repos
-- `chunking.chunk_size` / `chunk_overlap` — 512/64 is a good default for docs
-- `embedding.model` — should match what's actually running (LM Studio or remote)
-- `search.top_k` — 10 is a good default
-- `entity_extraction.enabled` — true if the pool has structured content worth graphing
-
-Report any gaps or mismatches.
-
-## Step 4: Generate or improve the config
-
-Output a complete improved `config.yaml`. Use this schema:
-
-```yaml
-name: "Human Readable Pool Name"
-machine_name: "pool-name-slug"
-
-documents:
-  path: "documents"
-  extensions:
-    - .md
-    - .txt
-    - .pdf
-    - .html
-  exclude_patterns:
-    - "*.log"
-    - "__pycache__"
-    - ".git"
-
-chunking:
-  strategy: semantic      # semantic | code | fixed
-  chunk_size: 512
-  chunk_overlap: 64
-
-embedding:
-  model: "text-embedding-nomic-embed-text-v1.5"   # or remote model
-
-search:
-  top_k: 10
-  score_threshold: 0.3
-
-entity_extraction:
-  enabled: true
-  types:
-    - Person
-    - Organization
-    - Technology
-    - Concept
-```
-
-## Step 5: Apply and reindex
-
-After writing the config:
-1. Confirm with the user before overwriting
-2. Run: `mullet reindex <pool-name>` to apply
-3. Run a test search to verify recall improved
-""",
-        "commit.md": """# /commit — Disciplined Commit Workflow
-
-## Steps
-
-1. Run `git status` (never -uall) and `git diff --staged`
-2. Run `git log --oneline -5` to match commit style
-3. Draft commit message: imperative mood, under 72 chars, focus on "why" not "what"
-4. Stage files by name only — NEVER `git add -A` or `git add .`
-5. Commit using a HEREDOC so the message keeps its formatting; follow the repository's own conventions for trailers
-6. Run `git status` after to verify
-7. Do NOT push unless user explicitly asks
-
-## Anti-Patterns
-- Never `--no-verify` — fix the hook cause instead
-- Never `--amend` published commits
-- Never batch unrelated changes in one commit
-- If pre-commit hook fails: fix, re-stage, NEW commit (never --amend)
-""",
-        "review.md": """# /review — Code Review
-
-## Trigger
-- `/review` — review staged changes (`git diff --cached`)
-- `/review HEAD` — all changes since main
-- `/review path/to/file.py` — specific files
-
-## Behavior
-1. Read the diff (Read tool or `git diff`) — do NOT grep the whole codebase
-2. Check: bugs, security (SQLi/XSS/injection/hardcoded creds), test regressions, schema assumptions, scope creep
-3. Python-specific: type hints on public APIs, no TODO stubs, no commented-out code
-4. Report in Must Fix / Should Fix / Optional format
-5. Do NOT rewrite code — report only, user decides
-
-## Delegation
-If >5 files: delegate to `mullet_run --provider local` with Must/Should/Optional format instruction.
-
-## Notes
-- Run `pwd && git branch` first to confirm correct repo
-- For DB-touching changes: read schema file before assuming field names
-"""
-    }
-
-    from mullet.core.env import no_ai_attribution
-    if no_ai_attribution():
-        skills_to_copy["commit.md"] = skills_to_copy["commit.md"].replace(
-            _COMMIT_STEP_NEUTRAL, _COMMIT_STEP_NO_AI_ATTRIBUTION,
-        )
-
-    results = {}
-    for filename, content in skills_to_copy.items():
-        dest_path = claude_skills_dir / filename
-        if dest_path.exists() and not force:
-            results[filename] = f"  Skill file {filename} already exists. Skipped (use --force to overwrite)."
-        else:
-            if not dry_run:
-                dest_path.write_text(content)
-            results[filename] = f"  {'Overwrote' if dest_path.exists() else 'Copied'} skill file {filename} to {claude_skills_dir}."
-
-    for message in results.values():
-        print(message)
-    return any("Copied" in msg or "Overwrote" in msg for msg in results.values())
-
-
-def _install_claude_agents(dry_run: bool, force: bool):
-    claude_agents_dir = _get_claude_dir() / "agents"
-    claude_agents_dir.mkdir(parents=True, exist_ok=True)
-
-    agents_to_create = {
-        "patch-writer.md": """---
-name: patch-writer
-description: Generates unified diff patches for file changes. Use when a file needs editing but you want patch output rather than full file rewrite. Specialist for large file changes (>200 lines).
-tools: Read, Glob, Grep
----
-
-You generate unified diff patches only — never full file rewrites.
-
-1. Read the target file fully before generating any patch
-2. Output unified diff format: `--- a/file`, `+++ b/file`, `@@ hunks @@`
-3. 3 lines of context around each change, minimal hunks
-4. Never output full file content
-5. Include a one-line patch description at the top
-6. Decline if: file unreadable, >3 files affected, or structure unclear
-""",
-        "test-runner.md": """---
-name: test-runner
-description: Runs the test suite and reports failures. Returns pass/fail counts and failing test names only. Does not fix failures.
-tools: Bash
----
-
-Run `python -m pytest --tb=short -q --no-header` from project root.
-For targeted runs: `pytest --tb=short -q path/to/test_file.py`
-
-Report format:
-- Passed / Failed / Error counts
-- Each failing test: `module::test_name — one-line reason`
-
-Rules: report only, never fix. If pytest missing or no tests found, say so.
-""",
-        "verifier.md": """---
-name: verifier
-description: Verifies a patch or code change is safe to apply. Checks syntax, schema assumptions, security, and test regressions. Returns PASS or FAIL with specifics.
-tools: Read, Bash, Grep
----
-
-Before a patch is committed, verify:
-1. Syntax: `python -m py_compile` on all affected Python files
-2. Schema: confirm any DB table/column names exist in migration or schema files
-3. Security: no hardcoded secrets, no SQL interpolation, no shell injection
-4. Tests: `pytest --tb=short -q` — report any newly failing tests
-5. Logic: imports present, no obvious None dereference
-
-Output: `Status: PASS` or `Status: FAIL` with one line per issue.
-Never apply fixes — report only.
-"""
-    }
-
-    results = {}
-    for filename, content in agents_to_create.items():
-        dest_path = claude_agents_dir / filename
-        if dest_path.exists() and not force:
-            results[filename] = f"  Agent file {filename} already exists. Skipped (use --force to overwrite)."
-        else:
-            if not dry_run:
-                dest_path.write_text(content)
-            results[filename] = f"  {'Overwrote' if dest_path.exists() else 'Created'} agent file {filename} in {claude_agents_dir}."
-
-    for message in results.values():
-        print(message)
-    return any("Created" in msg or "Overwrote" in msg for msg in results.values())
-
-
-def _install_project_hooks(project_dir: Path, dry_run: bool):
-    project_settings_path = project_dir / ".claude" / "settings.json"
-    project_settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-    post_tool_use_hook = {
-        "matcher": "Edit|Write",
-        "hooks": [
-            {
-                "type": "command",
-                "command": "cd \"${CLAUDE_PROJECT_DIR}\" && python3 -m pytest --tb=short -q --no-header 2>&1 | tail -30"
-            }
-        ]
-    }
-
-    if not project_settings_path.exists():
-        settings = {"hooks": {"PostToolUse": [post_tool_use_hook]}}
-        if not dry_run:
-            with open(project_settings_path, "w") as f:
-                json.dump(settings, f, indent=2)
-        print(f"  Created {project_settings_path} with PostToolUse pytest hook.")
-        return True
-    else:
-        with open(project_settings_path) as f:
-            current_settings = json.load(f)
-
-        if "hooks" not in current_settings:
-            current_settings["hooks"] = {}
-        if "PostToolUse" not in current_settings["hooks"]:
-            current_settings["hooks"]["PostToolUse"] = []
-
-        hook_exists = False
-        for existing_hook in current_settings["hooks"]["PostToolUse"]:
-            if existing_hook.get("matcher") == "Edit|Write" and "pytest" in str(existing_hook.get("hooks", [])):
-                hook_exists = True
-                break
-
-        if not hook_exists:
-            current_settings["hooks"]["PostToolUse"].append(post_tool_use_hook)
-            if not dry_run:
-                with open(project_settings_path, "w") as f:
-                    json.dump(current_settings, f, indent=2)
-            print(f"  Added PostToolUse pytest hook to {project_settings_path}.")
-            return True
-        else:
-            print(f"  PostToolUse pytest hook already present in {project_settings_path}. Skipped.")
-            return False
-
-
-_OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
-_GLOBAL_MCP_PATH = Path.home() / ".claude" / "mcp.json"
-_OPENCODE_DEFAULT_CONFIG = {
-    "$schema": "https://opencode.ai/config.json",
-    "model": "moonshot/kimi-k2.7-code",
-    "provider": {
-        "moonshot": {
-            "name": "Moonshot",
-            "api": "https://api.moonshot.ai/v1",
-            "env": ["KIMI_API_KEY"],
-            "models": {
-                "kimi-k2.7-code": {
-                    "name": "Kimi K2.7-Code",
-                    "tool_call": True,
-                    "limit": {"context": 262144, "output": 32768},
-                    "cost": {"input": 0.95, "output": 4.0},
-                },
-                "kimi-k2.6": {
-                    "name": "Kimi K2.6",
-                    "tool_call": True,
-                    "limit": {"context": 262144, "output": 32768},
-                    "cost": {"input": 0.60, "output": 2.50},
-                },
-                "kimi-k2.5": {
-                    "name": "Kimi K2.5",
-                    "tool_call": True,
-                    "limit": {"context": 262144, "output": 32768},
-                    "cost": {"input": 0.6, "output": 3.0},
-                },
-            },
-        }
-    },
-}
-
-
-def _install_opencode(dry_run: bool, yes: bool = False) -> bool:
-    """Check for opencode, offer to install it, and write Moonshot config.
-
-    opencode is a zero-Anthropic-token coding agent with native filesystem
-    access. Mullet uses it via mullet_opencode (ACP JSON-RPC over stdio).
-    """
-    already_installed = shutil.which("opencode") is not None
-    config_exists = _OPENCODE_CONFIG_PATH.exists()
-
-    if already_installed and config_exists:
-        print("  opencode already installed and configured. Skipped.")
-        return False
-
-    if not already_installed:
-        if not yes:
-            try:
-                answer = input(
-                    "  Install opencode? (Zero-Anthropic-token coding agent — uses Kimi/local.) [y/N] "
-                ).strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                answer = "n"
-            if answer not in ("y", "yes"):
-                print("  Skipped.")
-                return False
-
-        if dry_run:
-            print("  [dry-run] Would run: npm i -g opencode-ai@latest")
-        else:
-            print("  Installing opencode via npm...")
-            result = subprocess.run(
-                ["npm", "i", "-g", "opencode-ai@latest"],
-                capture_output=False,
-            )
-            if result.returncode != 0:
-                print("  opencode install failed — you can install manually: npm i -g opencode-ai@latest")
-                return False
-            print("  opencode installed.")
-
-    if not config_exists:
-        if dry_run:
-            print(f"  [dry-run] Would write opencode Moonshot config to {_OPENCODE_CONFIG_PATH}")
-        else:
-            _OPENCODE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _OPENCODE_CONFIG_PATH.write_text(json.dumps(_OPENCODE_DEFAULT_CONFIG, indent=2) + "\n")
-            print(f"  Wrote opencode Moonshot/Kimi config to {_OPENCODE_CONFIG_PATH}")
-            print("  Set KIMI_API_KEY in your environment for opencode to use Kimi K2.")
-
-    return True
-
-
-_KARPATHY_PLUGIN_URL = "https://github.com/forrestchang/andrej-karpathy-skills"
-
-
-def _install_statusline(dry_run: bool) -> bool:
-    """Write the statusLine config into ~/.claude/settings.json.
-
-    Uses shutil.which to resolve mullet-hud at install time so the stored path
-    works on any system regardless of the installing user's HOME or PATH layout.
-    """
-    hud_path = shutil.which("mullet-hud")
-    if hud_path is None:
-        print(
-            "  WARNING: mullet-hud not found on PATH — statusLine not configured. "
-            "Re-run after installing Mullet."
-        )
-        return False
-
-    settings_path = _get_claude_settings_path()
+def legacy_hook_commands(data: dict) -> list[str]:
+    """Hook commands an older setup-claude added: scripts run from a Mullet checkout."""
+    found = []
+    for groups in (data.get("hooks") or {}).values():
+        for group in groups if isinstance(groups, list) else []:
+            for hook in (group.get("hooks") or []) if isinstance(group, dict) else []:
+                command = hook.get("command", "") if isinstance(hook, dict) else ""
+                if any(f"scripts/hooks/{script}" in command for script in _LEGACY_SCRIPTS):
+                    found.append(command)
+    return found
+
+
+def _update_settings(manifest: dict, specs: list[HookSpec], cmd: list[str],
+                     statusline: bool, out: _Out) -> None:
+    path = settings_path()
+    record = manifest["settings"]
     try:
-        settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
-    except json.JSONDecodeError:
-        settings = {}
+        data = _read_settings(path)
+    except SetupError as exc:
+        out.fail(str(exc))
+        return
+    original = json.dumps(data, sort_keys=True)
+    shown = _home_relative(path)
 
-    existing = settings.get("statusLine", {})
-    current_cmd = existing.get("command", "") if isinstance(existing, dict) else ""
+    legacy = legacy_hook_commands(data)
+    if legacy:
+        out.same(f"note: {len(legacy)} hook command(s) in {shown} run scripts from a Mullet checkout "
+                 "(added by an older setup-claude); remove them by hand and use --hooks instead")
 
-    # Already correct — absolute path pointing to the same binary.
-    if current_cmd == hud_path:
-        print(f"  statusLine already configured correctly ({hud_path}). Skipped.")
-        return False
+    wanted = {s.name: s for s in specs}
+    for entry in record["hooks"]:
+        if entry["name"] in HOOKS:
+            wanted.setdefault(entry["name"], HOOKS[entry["name"]])
+    if not wanted:
+        out.same("no hooks (add some with --hooks; --hooks list shows what each does)")
 
-    settings["statusLine"] = {
-        "type": "command",
-        "command": hud_path,
-        "refreshInterval": 30,
-    }
+    for spec in wanted.values():
+        command = hook_command(cmd, spec)
+        # A registration this version no longer makes (its event or matcher changed).
+        for stale in [e for e in record["hooks"] if e["name"] == spec.name
+                      and (e["event"], e["matcher"]) not in spec.registrations]:
+            _remove_command(data, stale["event"], stale["matcher"], stale["command"])
+            record["hooks"].remove(stale)
+            out.change(f"removed the old registration of {spec.name} for {stale['event']}",
+                       f"remove the old registration of {spec.name} for {stale['event']}")
+        for event, matcher in spec.registrations:
+            old = next((e for e in record["hooks"]
+                        if _same_registration(e, spec.name, event, matcher)), None)
+            if old and old["command"] != command:
+                # Mullet moved (a reinstall); point the hook at the new command.
+                _remove_command(data, event, matcher, old["command"])
+                record["hooks"].remove(old)
+                old = None
+            hooks = data.get("hooks")
+            if not isinstance(hooks, dict):
+                hooks = data["hooks"] = {}
+                if "hooks" not in record["keys_added"]:
+                    record["keys_added"].append("hooks")
+            groups = hooks.get(event)
+            if not isinstance(groups, list):
+                groups = hooks[event] = []
+                if event not in record["events_added"]:
+                    record["events_added"].append(event)
+            group = _find_group(groups, matcher)
+            if group is None:
+                group = {"hooks": []} if matcher is None else {"matcher": matcher, "hooks": []}
+                groups.append(group)
+                if [event, matcher] not in record["groups_added"]:
+                    record["groups_added"].append([event, matcher])
+            where = f"{event}" + (f" [{matcher}]" if matcher else "")
+            if any(isinstance(h, dict) and h.get("command") == command for h in group.get("hooks", [])):
+                out.same(f"hook {spec.name} already registered for {where}")
+                continue
+            group.setdefault("hooks", []).append({"type": "command", "command": command})
+            if old is None:
+                record["hooks"].append({"name": spec.name, "event": event, "matcher": matcher,
+                                        "command": command})
+            out.change(f"added hook {spec.name} for {where}: {command}",
+                       f"add hook {spec.name} for {where}: {command}")
 
-    if dry_run:
-        print(f"  [dry-run] Would set statusLine command to {hud_path}")
-        return True
+    if statusline:
+        _set_statusline(data, record, out)
 
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2)
-    print(f"  Configured statusLine → {hud_path}")
-    return True
-
-
-def _install_global_mcp(dry_run: bool) -> bool:
-    """Write the mullet MCP server config to ~/.claude/mcp.json.
-
-    This makes mullet tools available in every project without a per-project .mcp.json.
-    """
-    source = Path(__file__).resolve().parent.parent.parent / ".mcp.json"
-    if not source.exists():
-        print("  WARNING: .mcp.json not found in mullet source tree — skipping global MCP install.")
-        return False
-
-    import json as _json
-    new_config = _json.loads(source.read_text())
-
-    if _GLOBAL_MCP_PATH.exists():
-        existing = _json.loads(_GLOBAL_MCP_PATH.read_text())
-        if existing.get("mcpServers", {}).get("mullet"):
-            print(f"  mullet MCP already present in {_GLOBAL_MCP_PATH}. Skipped.")
-            return False
-        # Merge — preserve any other servers the user has configured.
-        existing.setdefault("mcpServers", {}).update(new_config.get("mcpServers", {}))
-        merged = existing
-    else:
-        merged = new_config
-
-    if dry_run:
-        print(f"  [dry-run] Would write mullet MCP config to {_GLOBAL_MCP_PATH}")
-        return True
-
-    _GLOBAL_MCP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _GLOBAL_MCP_PATH.write_text(_json.dumps(merged, indent=4) + "\n")
-    print(f"  Wrote mullet MCP config to {_GLOBAL_MCP_PATH}")
-    return True
+    if json.dumps(data, sort_keys=True) == original:
+        return
+    if out.dry_run:
+        return
+    if not path.exists():
+        record["created_file"] = True
+        path.parent.mkdir(parents=True, exist_ok=True)
+    record["path"] = str(path)
+    _write_atomic(path, json.dumps(data, indent=2) + "\n")
 
 
-def _offer_karpathy_plugin(dry_run: bool, yes: bool = False) -> bool:
-    """Offer to install the andrej-karpathy-skills CC plugin.
+def _set_statusline(data: dict, record: dict, out: _Out) -> None:
+    current = data.get("statusLine")
+    ours = record["statusline"]
+    if current is not None and not (ours and isinstance(current, dict)
+                                    and current.get("command") == ours):
+        out.same("status line already set, not by setup-claude; left as it is")
+        return
+    hud = shutil.which("mullet-hud")
+    if not hud:
+        out.fail("status line not set: mullet-hud is not on PATH")
+        return
+    if ours == hud and current is not None:
+        out.same("status line already set to mullet-hud")
+        return
+    data["statusLine"] = {"type": "command", "command": hud}
+    if "statusLine" not in record["keys_added"]:
+        record["keys_added"].append("statusLine")
+    record["statusline"] = hud
+    out.change(f"set the status line to {hud}", f"set the status line to {hud}")
 
-    Installs by appending the plugin URL to ~/.claude/settings.json plugins list.
-    Only prompts if not already installed and not in --yes mode.
-    """
-    settings_path = _get_claude_settings_path()
 
-    # Load existing settings
+def _revert_settings(manifest: dict, out: _Out) -> None:
+    record = manifest["settings"]
+    path = Path(record["path"]) if record["path"] else settings_path()
+    if not (record["hooks"] or record["statusline"] or record["keys_added"] or record["created_file"]):
+        return
+    if not path.exists():
+        manifest["settings"] = _empty_manifest()["settings"]
+        return
     try:
-        with open(settings_path) as f:
-            settings = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        settings = {}
-
-    plugins = settings.get("plugins", [])
-    if any(_KARPATHY_PLUGIN_URL in str(p) for p in plugins):
-        print("  andrej-karpathy-skills plugin already installed. Skipped.")
-        return False
-
-    # Prompt unless --yes
-    if not yes:
-        try:
-            answer = input(
-                "  Install andrej-karpathy-skills CC plugin? (Adds Think Before Coding, Simplicity First, "
-                "Surgical Changes guidelines to CC.) [y/N] "
-            ).strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
-        if answer not in ("y", "yes"):
-            print("  Skipped.")
-            return False
-
-    if dry_run:
-        print(f"  [dry-run] Would add {_KARPATHY_PLUGIN_URL} to plugins list in {settings_path}")
-        return True
-
-    plugins.append(_KARPATHY_PLUGIN_URL)
-    settings["plugins"] = plugins
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2)
-    print(f"  Added andrej-karpathy-skills plugin to {settings_path}")
-    print(f"  Restart Claude Code to activate. Plugin URL: {_KARPATHY_PLUGIN_URL}")
-    return True
+        data = _read_settings(path)
+    except SetupError as exc:
+        out.fail(str(exc))
+        return
+    shown = _home_relative(path)
+    original = json.dumps(data, sort_keys=True)
+    for entry in record["hooks"]:
+        if _remove_command(data, entry["event"], entry["matcher"], entry["command"]):
+            out.change(f"removed hook {entry['name']} ({entry['event']}) from {shown}",
+                       f"remove hook {entry['name']} ({entry['event']}) from {shown}")
+    if record["statusline"]:
+        current = data.get("statusLine")
+        if isinstance(current, dict) and current.get("command") == record["statusline"]:
+            del data["statusLine"]
+            out.change(f"removed the status line from {shown}", f"remove the status line from {shown}")
+    _prune(data, record)
+    if out.dry_run:
+        return
+    if record["created_file"] and not data:
+        path.unlink()
+        out.change(f"removed {shown}, which setup-claude created", "")
+    elif json.dumps(data, sort_keys=True) != original:
+        _write_atomic(path, json.dumps(data, indent=2) + "\n")
+    manifest["settings"] = _empty_manifest()["settings"]
 
 
-def run_setup_claude(dry_run: bool = False, yes: bool = False, force: bool = False):
-    """Set up Claude Code global configuration for Mullet."""
-    print("Setting up Claude Code global configuration for Mullet users...")
+# --- Entry points ------------------------------------------------------------
 
-    if dry_run:
-        print("\n*** DRY RUN: No changes will be applied. ***\n")
 
-    changes_made = []
-
-    print("\n--- CLAUDE.md ---")
-    if _append_claude_md_section(dry_run):
-        changes_made.append("CLAUDE.md updated")
-
-    print("\n--- settings.json ---")
-    if _merge_claude_settings_hooks(dry_run):
-        changes_made.append("settings.json updated")
-
-    print("\n--- Global MCP config ---")
-    if _install_global_mcp(dry_run):
-        changes_made.append("Global MCP config written")
-
-    print("\n--- HUD statusLine ---")
-    if _install_statusline(dry_run):
-        changes_made.append("statusLine configured")
-
-    print("\n--- Skill Files ---")
-    if _copy_claude_skill_files(dry_run, force):
-        changes_made.append("Skill files copied")
-
-    print("\n--- Agent Files ---")
-    if _install_claude_agents(dry_run, force):
-        changes_made.append("Agent files installed")
-
-    print("\n--- Project Hooks ---")
-    project_dir = Path.cwd()
-    if (project_dir / ".claude" / "settings.json").exists() or (project_dir / ".git").exists():
-        if _install_project_hooks(project_dir, dry_run):
-            changes_made.append("Project hooks installed")
-
-    print("\n--- opencode (zero-Anthropic coding agent) ---")
-    if _install_opencode(dry_run, yes):
-        changes_made.append("opencode installed/configured")
-
-    print("\n--- Karpathy Skills Plugin ---")
-    if _offer_karpathy_plugin(dry_run, yes):
-        changes_made.append("andrej-karpathy-skills plugin installed")
-
-    print("\n--- Pool Hardware Tune ---")
+def run_setup_claude(hooks: list[HookSpec] | None = None, statusline: bool = False,
+                     dry_run: bool = False, force: bool = False) -> int:
+    """Connect Mullet to Claude Code. Returns 0, or 1 if any step failed."""
+    out = _Out(dry_run)
+    print("mullet setup-claude" + (" (dry run: nothing is changed)" if dry_run else ""))
     try:
-        from mullet.server.mcp_knowledge import _get_pools_dir
-        from mullet.cli.pool_tune import run_pool_tune
-        pools_dir = _get_pools_dir()
-        if pools_dir.exists() and any(pools_dir.iterdir()):
-            if not dry_run:
-                run_pool_tune(pools_dir, dry_run=False)
-            else:
-                run_pool_tune(pools_dir, dry_run=True)
-            changes_made.append("Pool settings tuned")
-        else:
-            print("  No pools found — skipped (run 'mullet pool tune' after creating pools).")
-    except Exception as e:
-        print(f"  Pool tune skipped: {e}")
-
-    print("\n--- Summary ---")
-    if changes_made:
-        print("Successfully applied the following changes:")
-        for change in changes_made:
-            print(f"- {change}")
-        if dry_run:
-            print("\n(Dry run complete. No actual changes were made.)")
-        else:
-            print("\nSetup complete!")
+        manifest = load_manifest()
+    except SetupError as exc:
+        out.fail(str(exc))
+        return 1
+    cmd = mullet_command()
+    claude_missing = shutil.which("claude") is None
+    if dry_run and claude_missing:
+        print("Warning: claude is not on PATH; install it, then run this again to register the MCP server.",
+              file=sys.stderr)
+        print(f"  would run: claude {shlex.join(_mcp_add_args(cmd))}")
     else:
-        print("No changes were needed. Claude Code config is already up-to-date with Mullet recommendations.")
+        _register_mcp(manifest, cmd, out)
+    _install_skills(manifest, out, force)
+    _update_settings(manifest, list(hooks or []), cmd, statusline, out)
+    if not dry_run:
+        _save_manifest(manifest)
+    if out.changes == 0 and out.failures == 0:
+        print("Nothing to change.")
+    elif not dry_run and out.changes:
+        print(f"Recorded in {_home_relative(manifest_path())}; undo with: mullet setup-claude --uninstall")
+        print("Restart Claude Code to load the changes.")
+    return 1 if out.failures else 0
+
+
+def run_uninstall(dry_run: bool = False) -> int:
+    """Remove exactly what setup-claude recorded. Returns 0, or 1 if anything was left."""
+    out = _Out(dry_run)
+    print("mullet setup-claude --uninstall" + (" (dry run: nothing is changed)" if dry_run else ""))
+    try:
+        manifest = load_manifest()
+    except SetupError as exc:
+        out.fail(str(exc))
+        return 1
+    if _manifest_is_empty(manifest):
+        print("Nothing to remove: setup-claude has no record of changes.")
+        return 0
+    _unregister_mcp(manifest, out)
+    _revert_settings(manifest, out)
+    _remove_files(manifest, out)
+    if not dry_run:
+        _save_manifest(manifest)
+        if not _manifest_is_empty(manifest):
+            print(f"Some changes were left in place; they stay recorded in {_home_relative(manifest_path())}.")
+    return 1 if out.failures else 0
+
+
+def _parse_hooks(value: str) -> list[HookSpec]:
+    from mullet.hooks import find
+
+    if value.strip().lower() == "all":
+        return list(HOOKS.values())
+    specs, unknown = [], []
+    for name in filter(None, (part.strip() for part in value.split(","))):
+        spec = find(name)
+        (specs.append(spec) if spec else unknown.append(name))
+    if unknown:
+        raise SetupError(f"unknown hook(s): {', '.join(unknown)}. Choose from: {', '.join(HOOKS)}")
+    return specs
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="mullet setup-claude",
+        description="Register Mullet's MCP server and skills with Claude Code, and optionally "
+                    "its hooks and status line. Every change is recorded so --uninstall can "
+                    "remove exactly those changes.",
+    )
+    parser.add_argument("--hooks", metavar="NAMES",
+                        help="comma-separated hooks to add, 'all', or 'list' to describe them "
+                             "(default: none)")
+    parser.add_argument("--statusline", action="store_true",
+                        help="set Claude Code's status line to mullet-hud if none is set")
+    parser.add_argument("--dry-run", "--check", dest="dry_run", action="store_true",
+                        help="print the changes without making them")
+    parser.add_argument("--uninstall", action="store_true",
+                        help="remove everything setup-claude recorded")
+    parser.add_argument("--force", action="store_true",
+                        help="replace an installed skill file even if it was edited")
+    parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
+    return parser
+
+
+def cmd_setup_claude(argv: list[str]) -> int:
+    """`mullet setup-claude [options]`; returns the exit code."""
+    args = build_parser().parse_args(argv)
+    if args.hooks is not None and args.hooks.strip().lower() == "list":
+        print("Hooks for --hooks (none are added by default):")
+        print(describe())
+        return 0
+    if args.uninstall:
+        if args.hooks or args.statusline:
+            print("mullet setup-claude: --uninstall takes no --hooks or --statusline", file=sys.stderr)
+            return 2
+        return run_uninstall(dry_run=args.dry_run)
+    try:
+        specs = _parse_hooks(args.hooks) if args.hooks else []
+    except SetupError as exc:
+        print(f"mullet setup-claude: {exc}", file=sys.stderr)
+        return 2
+    return run_setup_claude(specs, statusline=args.statusline, dry_run=args.dry_run, force=args.force)

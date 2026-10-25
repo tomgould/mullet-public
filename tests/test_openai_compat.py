@@ -21,18 +21,42 @@ def test_init_custom():
     assert p.name not in ("local", "openrouter")
 
 
-def test_health_check_success():
+def _lmstudio_models(*states):
+    import io, json
+    body = json.dumps({"data": [{"id": f"m{i}", "state": st} for i, st in enumerate(states)]}).encode()
+    resp = MagicMock()
+    resp.__enter__ = lambda s: io.BytesIO(body)
+    resp.__exit__ = lambda s, *a: False
+    return resp
+
+
+def test_health_check_success_when_lmstudio_has_a_model_loaded():
     p = OpenAICompatibleProvider(base_url="http://localhost:1234/v1")
-    mock_choice = MagicMock()
-    mock_resp = MagicMock()
-    mock_resp.choices = [mock_choice]
-    with patch.object(p.client.chat.completions, "create", return_value=mock_resp):
+    with patch("urllib.request.urlopen", return_value=_lmstudio_models("not-loaded", "loaded")), \
+         patch.object(p.client.chat.completions, "create", side_effect=AssertionError("must not load a model")):
+        assert p.health_check() is True
+
+
+def test_health_check_false_when_nothing_is_loaded_and_never_loads_one():
+    p = OpenAICompatibleProvider(base_url="http://localhost:1234/v1")
+    with patch("urllib.request.urlopen", return_value=_lmstudio_models("not-loaded")), \
+         patch.object(p.client.chat.completions, "create", side_effect=AssertionError("must not load a model")):
+        assert p.health_check() is False
+
+
+def test_health_check_other_servers_use_the_model_list():
+    p = OpenAICompatibleProvider(base_url="http://localhost:11434/v1")
+    listing = MagicMock(); listing.data = [MagicMock()]
+    with patch("urllib.request.urlopen", side_effect=Exception("404")), \
+         patch.object(p.client.models, "list", return_value=listing), \
+         patch.object(p.client.chat.completions, "create", side_effect=AssertionError("must not load a model")):
         assert p.health_check() is True
 
 
 def test_health_check_failure():
     p = OpenAICompatibleProvider(base_url="http://localhost:9999/v1")
-    with patch("urllib.request.urlopen", side_effect=Exception("Connection refused")):
+    with patch("urllib.request.urlopen", side_effect=Exception("Connection refused")), \
+         patch.object(p.client.models, "list", side_effect=Exception("Connection refused")):
         assert p.health_check() is False
 
 
@@ -101,7 +125,6 @@ def test_call_with_retry_non_retryable_raises_immediately():
 
 def test_call_with_retry_wall_clock_budget_exceeded(caplog):
     """Retry loop gives up when the overall wall-clock budget is exceeded."""
-    from mullet.core.providers import openai_compat as oc
     p = OpenAICompatibleProvider(base_url="http://localhost:1234/v1")
     p.model = "test-model"
 

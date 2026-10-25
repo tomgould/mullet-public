@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 class REPLHistory:
     """Manages REPL command history with persistent storage."""
-    def __init__(self, history_file="~/.mullet/history.json", max_size=1000):
+    def __init__(self, history_file=None, max_size=1000):
+        if history_file is None:
+            from mullet.core.paths import state_dir
+            history_file = str(state_dir() / "history.json")
         self.history_file = os.path.expanduser(history_file)
         self.max_size = max_size
         self.history = self._load_history()

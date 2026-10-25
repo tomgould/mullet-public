@@ -20,6 +20,7 @@ import requests
 from openai import OpenAI
 from anthropic import Anthropic
 
+from mullet.core.env import local_llm_host, local_llm_url
 from mullet.knowledge.engine.plugins.interfaces import BaseLLMProvider
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,8 @@ def _retry_with_backoff(func, max_retries=2, base_delay=1.0, retryable_exception
             logger.warning(f"Transient error (attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying in {delay}s...")
             time.sleep(delay)
 
-# Default settings
+# Default settings. The LM Studio address used at run time comes from
+# LOCAL_LLM_URL (see mullet.core.env); these are its defaults.
 DEFAULT_LMSTUDIO_HOST = "http://localhost:1234"
 DEFAULT_LMSTUDIO_URL = f"{DEFAULT_LMSTUDIO_HOST}/v1"  # OpenAI-compatible
 DEFAULT_LMSTUDIO_MODEL = "local-model"
@@ -84,12 +86,12 @@ class LMStudioNativeProvider(LLMProvider):
 
     def __init__(
         self,
-        host: str = DEFAULT_LMSTUDIO_HOST,
+        host: Optional[str] = None,
         model: Optional[str] = None,
         context_length: Optional[int] = None,
         api_token: Optional[str] = None,
     ):
-        self.host = host.rstrip("/")
+        self.host = (host or local_llm_host()).rstrip("/")
         self.api_base = f"{self.host}/api/v1"
         self.model = model
         self.context_length = context_length
@@ -282,10 +284,10 @@ class LMStudioAnthropicProvider(LLMProvider):
 
     def __init__(
         self,
-        host: str = DEFAULT_LMSTUDIO_HOST,
+        host: Optional[str] = None,
         model: str = DEFAULT_LMSTUDIO_MODEL,
     ):
-        self.host = host.rstrip("/")
+        self.host = (host or local_llm_host()).rstrip("/")
         # Anthropic-compatible endpoint
         self.api_base = f"{self.host}/v1"
         self.model = model
@@ -353,9 +355,10 @@ class LMStudioProvider(LLMProvider):
 
     def __init__(
         self,
-        base_url: str = DEFAULT_LMSTUDIO_URL,
+        base_url: Optional[str] = None,
         model: str = DEFAULT_LMSTUDIO_MODEL,
     ):
+        base_url = base_url or local_llm_url()
         self.client = OpenAI(base_url=base_url, api_key="not-needed")
         self.model = model
         logger.info(f"Initialized LM Studio OpenAI-compatible provider at {base_url}")
@@ -496,7 +499,7 @@ def create_provider_from_config(llm_config: dict) -> LLMProvider:
         ValueError: If provider type is unknown or required config is missing
     """
     provider_type = llm_config.get("provider", "lmstudio")
-    host = llm_config.get("lmstudio_host", DEFAULT_LMSTUDIO_HOST)
+    host = llm_config.get("lmstudio_host") or local_llm_host()
     model = llm_config.get("lmstudio_model", DEFAULT_LMSTUDIO_MODEL)
 
     if provider_type == "lmstudio_anthropic":

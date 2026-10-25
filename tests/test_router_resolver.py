@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import os
-import sys
-from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.core.router.complexity import Tier
 from mullet.core.router.decision import ProviderEntry, Router, RoutingDecision
@@ -549,11 +546,9 @@ def test_pricing_exception(mock_get_pricing):
 
 
 @patch("mullet.core.providers.pricing.get_known_pricing")
-@patch("mullet.core.providers.claude_max._read_oauth_token")
 @patch("mullet.cli.main.detect_local_provider")
-def test_build_default_router_no_providers(mock_detect, mock_oauth, mock_pricing):
+def test_build_default_router_no_providers(mock_detect, mock_pricing):
     mock_detect.return_value = None
-    mock_oauth.return_value = None
     mock_pricing.return_value = (0.001, 0.005)
     with patch.dict(os.environ, {}, clear=True):
         router, resolver = build_default_router()
@@ -686,18 +681,6 @@ def test_build_default_router_use_pressure_routing(mock_detect, mock_pricing):
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "key", "KIMI_API_KEY": "kkey"}, clear=True):
         router, resolver = build_default_router()
     assert router.use_pressure_routing is True
-
-
-@patch("mullet.core.providers.pricing.get_known_pricing")
-@patch("mullet.core.providers.claude_max._read_oauth_token", side_effect=Exception)
-@patch("mullet.cli.main.detect_local_provider")
-def test_build_default_router_oauth_exception(mock_detect, mock_oauth, mock_pricing):
-    """OAuth token read failure should be caught."""
-    mock_detect.return_value = None
-    mock_pricing.return_value = (0.003, 0.015)
-    with patch.dict(os.environ, {}, clear=True):
-        router, resolver = build_default_router()
-    assert "premium_cloud" not in router.providers
 
 
 # ---------------------------------------------------------------------------

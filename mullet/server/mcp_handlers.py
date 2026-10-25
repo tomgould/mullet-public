@@ -43,14 +43,12 @@ def _anthropic_only_needs_native_handoff(allowed: set[str] | None) -> bool:
     """True when the caller restricted routing to Anthropic-only aliases and
     no ANTHROPIC_API_KEY is configured.
 
-    ClaudeMaxProvider (Anthropic via the caller's Claude Max/Pro/Free OAuth
-    token) is permanently disabled -- reusing that token in a third-party
-    tool violates Anthropic's Consumer Terms of Service (see
-    mullet/core/providers/claude_max.py). Resolution would just fail here.
-    But if this MCP call is coming from Claude Code itself (or any other
-    caller that can act on the hint), the honest answer isn't "provider
-    unavailable" -- it's "you're already a legitimate Anthropic client,
-    just do this yourself instead of asking Mullet to do it on your behalf."
+    Mullet only reaches Anthropic through AnthropicProvider, which needs a
+    real ANTHROPIC_API_KEY, so resolution would just fail here. But if this
+    MCP call is coming from Claude Code itself (or any other caller that can
+    act on the hint), the honest answer isn't "provider unavailable" -- it's
+    "you're already an Anthropic client, just do this yourself instead of
+    asking Mullet to do it on your behalf."
     """
     if not allowed or not allowed.issubset(_ANTHROPIC_ALIASES):
         return False
@@ -58,13 +56,10 @@ def _anthropic_only_needs_native_handoff(allowed: set[str] | None) -> bool:
 
 
 _NATIVE_HANDOFF_MESSAGE = (
-    "Anthropic-only routing requested but no ANTHROPIC_API_KEY is configured, "
-    "and Mullet no longer reuses Claude Max/Pro/Free OAuth tokens to call "
-    "Anthropic directly (that violates Anthropic's Terms of Service). If "
-    "you're calling this from Claude Code, you're already a legitimate "
-    "Anthropic client -- just do the work yourself in-context instead of "
-    "delegating it here. Set ANTHROPIC_API_KEY if you want Mullet to route "
-    "to Anthropic models on its own (pay-per-token, not subscription)."
+    "Anthropic-only routing requested but ANTHROPIC_API_KEY is not set. "
+    "Set ANTHROPIC_API_KEY (pay-per-token) if you want Mullet to route to "
+    "Anthropic models on its own. If you're calling this from Claude Code, "
+    "just do the work yourself in-context instead of delegating it here."
 )
 
 
@@ -127,7 +122,8 @@ def _active_preset():
 MCP_TOOLS = [
     {
         "name": "mullet_run",
-        "description": "For code editing tasks (reading/modifying files), use mullet_opencode instead — it has native filesystem access and costs zero Anthropic tokens. "
+        "description": "For code editing tasks (reading/modifying files), use mullet_opencode instead: it runs the edit as a gated Mullet job "
+                       "and applies the result to the working tree only after the gates pass. "
                        "Use mullet_run only for: analysis, planning, research, review, or text generation tasks where no files need to be written. "
                        "Routes to the optimal provider (local GPU or cloud) based on complexity.",
         "inputSchema": {
@@ -135,8 +131,6 @@ MCP_TOOLS = [
             "properties": {
                 "task": {"type": "string", "description": "The task to execute."},
                 "client": {"type": "string", "description": "Trove client for project context (optional)."},
-                "mode": {"type": "string", "enum": ["standard", "ultrawork", "ralph"],
-                         "description": "Execution mode. Default: standard."},
                 "tier": {"type": "string", "enum": ["LOW", "STANDARD", "ADVANCED", "CRITICAL", "PREMIUM"],
                          "description": "Force routing tier (optional). "
                                         "PREMIUM routes to Opus when budget pressure is low (<0.30), "
@@ -249,13 +243,37 @@ MCP_TOOLS = [
     },
     {
         "name": "mullet_opencode",
-        "description": "PREFERRED for all code editing tasks. opencode has native file read/write/bash access within the project directory — zero Anthropic tokens. No copy-pasting file content required. Always prefer this over mullet_run when files need to be created or modified.",
+        "description": "PREFERRED for code editing tasks. Runs the task as a single gated Mullet job on the delegation ladder "
+                       "(the cheapest worker that can pass the project's gates does the work) and applies the result to the "
+                       "working tree only after the gates pass. Changes are left unstaged and are never committed or pushed. "
+                       "Returns JSON with status (applied, passed_not_applied, failed, blocked, unverified or timeout), job id, "
+                       "report path, rung, model, cost, gate summary and files changed.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "task": {"type": "string", "description": "Coding task to perform (natural language)"},
-                "cwd": {"type": "string", "description": "Project directory. Defaults to current working directory."},
-                "model": {"type": "string", "description": "Model override e.g. 'moonshot/kimi-k2.7-code'. Uses opencode config default if omitted."},
+                "task": {"type": "string", "description": "Coding task to perform (natural language)."},
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Files or paths the task may change (the job's scope). Defaults to the whole repo.",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Project directory. Defaults to the git repo containing the files, else the server's working directory.",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 60,
+                    "description": "Minutes to wait for the job before giving up (default 20, max 60).",
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["kimi", "openrouter", "free", "local", "claude"]},
+                    "description": "Limit the ladder to these rungs. Omit to use the whole ladder.",
+                },
+                "model": {"type": "string", "description": "Deprecated and ignored: the delegation ladder picks the worker."},
             },
             "required": ["task"],
         },
@@ -282,11 +300,11 @@ MCP_TOOLS = [
                 "dry_run": {"type": "boolean", "description": "Decompose only — return task plan without dispatching"},
                 "apply": {
                     "type": "boolean",
-                    "description": "If true, apply EDIT/FILE/DELETE blocks from each sub-task directly to disk. Default: false.",
+                    "description": "Deprecated. Always returns an error. Use mullet_opencode for file edits.",
                 },
                 "target_dir": {
                     "type": "string",
-                    "description": "Directory to resolve file paths against when applying changes. Defaults to cwd.",
+                    "description": "Directory to resolve file paths against. Defaults to cwd.",
                 },
             },
             "required": ["goal"],
@@ -412,9 +430,7 @@ def _provider_for_tier(tier: str, allowed: set[str] | None = None, preflight=Non
     def _mk_anthropic(model_id: str):
         def _inner():
             if not anthropic_key:
-                # No fallback to Claude Max OAuth here -- reusing that token
-                # in a third-party tool violates Anthropic's ToS (see
-                # mullet/core/providers/claude_max.py). The caller-side
+                # Anthropic needs ANTHROPIC_API_KEY. The caller-side
                 # _anthropic_only_needs_native_handoff() check catches the
                 # MCP-request case and hands the task back to Claude Code
                 # instead; this factory just reports "not configured".
@@ -440,15 +456,6 @@ def _provider_for_tier(tier: str, allowed: set[str] | None = None, preflight=Non
             return None
         return provider
 
-    def _mk_gemini_cli():
-        try:
-            from mullet.core.providers.gemini_cli import GeminiCLIProvider, is_gemini_cli_available
-            if is_gemini_cli_available():
-                return GeminiCLIProvider()
-        except Exception as e:
-            logger.warning("Gemini CLI unavailable: %s", e)
-        return None
-
     candidates: list[tuple[str, object]] = []
     if tier == "PREMIUM":
         candidates.append(("opus-4-8", _mk_anthropic("claude-opus-4-8")))
@@ -471,7 +478,6 @@ def _provider_for_tier(tier: str, allowed: set[str] | None = None, preflight=Non
     candidates.append(("local", _mk_local))
     candidates.append(("kimi", _mk_kimi))
     candidates.append(("gemini", _mk_gemini))
-    candidates.append(("gemini", _mk_gemini_cli))
     candidates.append(("openrouter", _mk_openrouter))
 
     for name, factory in candidates:
@@ -602,9 +608,7 @@ def _build_fallback_chain(
         ("opus",     "claude-opus-4-8"),
         ("opus-4-7", "claude-opus-4-7"),
     ]
-    # No Claude Max OAuth fallback here -- reusing that token in a
-    # third-party tool violates Anthropic's ToS (see claude_max.py). Without
-    # a real ANTHROPIC_API_KEY, Anthropic simply isn't a fallback candidate.
+    # Without ANTHROPIC_API_KEY, Anthropic simply isn't a fallback candidate.
     if anthropic_key:
         for alias, model_id in model_map:
             if _ok(alias):
@@ -739,7 +743,7 @@ def handle_mullet_run(arguments: dict) -> dict:
         _rh_tokens_in = result.get("prompt_tokens", 0) or result.get("input_tokens", 0) or 0
         _rh_tokens_out = result.get("completion_tokens", 0) or result.get("output_tokens", 0) or 0
         # Fall back to total tokens when no per-direction split is available
-        # (agent runner returns "tokens" total; ultrawork/ralph return nothing)
+        # (the agent runner returns a "tokens" total)
         if not _rh_tokens_in and not _rh_tokens_out:
             _rh_tokens_in = result.get("tokens", 0) or 0
         # Error classification for failed calls was removed with the harness layer;
@@ -784,6 +788,10 @@ def _handle_mullet_run_inner(arguments: dict) -> dict:
         return {"error": "task is required"}
     client = arguments.get("client")
     mode = arguments.get("mode", "standard")
+    if mode != "standard":
+        return {
+            "error": f"mode '{mode}' was removed. For multi-step work, use `mullet job`.",
+        }
     tier = arguments.get("tier")
     max_iter = arguments.get("max_iterations", 90)
     files = arguments.get("files") or []
@@ -818,7 +826,7 @@ def _handle_mullet_run_inner(arguments: dict) -> dict:
 
     # Auto-swarm routing: fan out to a swarm when the heuristic fires,
     # unless the caller explicitly opts out with force_single=True.
-    if not force_single and mode == "standard":
+    if not force_single:
         try:
             from mullet.core.router.auto_swarm import _should_swarm
             should, reason = _should_swarm(task, files, prompt_len=len(task), tier=tier)
@@ -961,54 +969,25 @@ def _handle_mullet_run_inner(arguments: dict) -> dict:
     )
 
     try:
-        if mode == "ultrawork":
-            from mullet.core.orchestration.ultrawork import UltraworkMode
-            uw = UltraworkMode(
-                allowed_providers=frozenset(allowed_providers) if allowed_providers else None,
-            )
-            result = uw.execute(task, agent)
-            return {
-                "completed": result.completed,
-                "summary": result.summary,
-                "subtasks": len(result.subtask_results),
-                "tokens": result.total_tokens.total_tokens,
-                "actual_provider": getattr(agent.provider, "name", "unknown"),
-                "actual_model": getattr(agent.provider, "model", "unknown"),
-                "tried_providers": sorted(getattr(agent, "_tried_providers", set()) or set()),
-            }
-        elif mode == "ralph":
-            from mullet.core.orchestration.ralph import RalphMode
-            ralph = RalphMode()
-            result = ralph.execute(task, agent)
-            return {
-                "completed": result.completed,
-                "summary": result.summary,
-                "stories": f"{result.stories_completed}/{result.stories_total}",
-                "iterations": result.iterations_used,
-                "actual_provider": getattr(agent.provider, "name", "unknown"),
-                "actual_model": getattr(agent.provider, "model", "unknown"),
-                "tried_providers": sorted(getattr(agent, "_tried_providers", set()) or set()),
-            }
-        else:
-            result = agent.run(task)
-            duration = _time.time() - _start
-            out_agent: dict = {
-                "completed": result.completed,
-                "response": result.final_response,
-                "tool_calls": result.tool_calls_made,
-                "duration": round(duration, 2),
-                "tokens": result.tokens_used.total_tokens,
-                "provider": getattr(agent.provider, "name", "unknown"),
-                "actual_provider": getattr(result, "provider_used", getattr(agent.provider, "name", "unknown")),
-                "actual_model": getattr(agent.provider, "model", "unknown"),
-            }
-            # Surface fallback history if the AgentRunner internally tried more
-            # than one provider during this run — keeps the legacy shape when
-            # the first provider succeeded.
-            tried = sorted(getattr(agent, "_tried_providers", set()) or set())
-            if len(tried) > 1:
-                out_agent["tried_providers"] = tried
-            return out_agent
+        result = agent.run(task)
+        duration = _time.time() - _start
+        out_agent: dict = {
+            "completed": result.completed,
+            "response": result.final_response,
+            "tool_calls": result.tool_calls_made,
+            "duration": round(duration, 2),
+            "tokens": result.tokens_used.total_tokens,
+            "provider": getattr(agent.provider, "name", "unknown"),
+            "actual_provider": getattr(result, "provider_used", getattr(agent.provider, "name", "unknown")),
+            "actual_model": getattr(agent.provider, "model", "unknown"),
+        }
+        # Surface fallback history if the AgentRunner internally tried more
+        # than one provider during this run — keeps the legacy shape when
+        # the first provider succeeded.
+        tried = sorted(getattr(agent, "_tried_providers", set()) or set())
+        if len(tried) > 1:
+            out_agent["tried_providers"] = tried
+        return out_agent
     except Exception as e:
         return {
             "error": f"Agent execution failed: {e}",
@@ -1347,7 +1326,10 @@ def handle_mullet_swarm(arguments: dict) -> str:
     concurrency = int(arguments.get("concurrency", 20))
     output_shape = arguments.get("output_shape", "markdown report")
     dry_run = bool(arguments.get("dry_run", False))
-    apply_blocks = bool(arguments.get("apply", False))
+    # The swarm returns text only and never writes files, so apply=true could
+    # only ever report a success that didn't happen.
+    if arguments.get("apply", False):
+        return json.dumps({"error": "apply=true is not supported: the swarm never writes files. Use mullet_opencode for file edits."})
     target_dir = arguments.get("target_dir") or os.getcwd()
     providers_raw = arguments.get("providers", "")
     allowed_providers: set[str] | None = (
@@ -1365,7 +1347,7 @@ def handle_mullet_swarm(arguments: dict) -> str:
         items=items,
         concurrency=concurrency,
         output_shape=output_shape,
-        apply=apply_blocks,
+        apply=False,
         target_dir=target_dir,
     )
 
@@ -1391,7 +1373,6 @@ def handle_mullet_swarm(arguments: dict) -> str:
         remove_agent(swarm_id)
 
     succeeded = sum(1 for r in result.results if r.success)
-    all_files_changed = sorted({f for r in result.results for f in r.files_changed})
     response: dict = {
         "goal": result.goal,
         "synthesis": result.synthesis,
@@ -1409,225 +1390,111 @@ def handle_mullet_swarm(arguments: dict) -> str:
             for t in result.tasks
         ],
     }
-    if apply_blocks:
-        response["applied"] = True
-        response["files_changed"] = all_files_changed
     return json.dumps(response)
 
 
-def _prefer_local_model(fallback: str) -> str:
-    """Return a local LM Studio model string if one is reachable, else fallback.
+_OPENCODE_ARGS = {"task", "files", "paths", "cwd", "repo_root", "timeout", "providers"}
 
-    Safe to call unconditionally: opencode_run's own escalation chain
-    (_escalate_model in opencode_tool.py) falls through to OpenRouter/Kimi
-    automatically if the local attempt fails mid-task, so preferring local
-    here costs at most one cached (30s TTL) detection probe even when local
-    can't actually handle the task.
-    """
-    try:
-        from mullet.core.providers.local_detection import detect_local_provider
-        local = detect_local_provider()
-        if local is not None and local.model:
-            return f"lmstudio/{local.model}"
-    except Exception:
-        pass
-    return fallback
+_OPENCODE_IGNORED = {
+    "model": "the delegation ladder picks the worker",
+    "tier": "the delegation ladder picks the worker",
+    "speed_mode": "the delegation ladder picks the worker",
+    "provider": "the delegation ladder picks the worker; use 'providers' to limit its rungs",
+    "apply": "the result is applied only after the job's gates pass, and never committed",
+}
+
+_OPENCODE_DEFAULT_TIMEOUT_MIN = 20
+_OPENCODE_MAX_TIMEOUT_MIN = 60
 
 
-def _run_via_lightweight_agent(task: str, cwd: str) -> dict | None:
-    """Run a task via Mullet's lightweight AgentRunner using a local LM Studio model.
-
-    Returns a dict matching opencode_run's success shape on completion, or None
-    if local is unreachable or the run fails/incompletes (caller should fall back).
-    """
-    import time
-
-    from mullet.core.providers.local_detection import detect_local_provider
-    from mullet.core.agent.runner import AgentRunner
-    from mullet.cli.main import build_tool_registry
-    from mullet.core.agent.prompts import build_base_prompt
-    from mullet.tools.opencode_tool import _git_status_snapshot
-
-    provider = detect_local_provider()
-    if provider is None:
-        return None
-
-    registry = build_tool_registry()
-    system_prompt = build_base_prompt(model=provider.model, cwd=cwd)
-
-    agent = AgentRunner(
-        provider=provider,
-        tool_registry=registry,
-        toolsets=["terminal", "file", "code", "git"],
-        system_prompt=system_prompt,
-        max_iterations=30,
-    )
-
-    before = _git_status_snapshot(cwd)
-    t0 = time.monotonic()
-    try:
-        result = agent.run(task)
-    except Exception:
-        return None
-
-    if not result.completed:
-        return None
-
-    after = _git_status_snapshot(cwd)
-    files_changed = (
-        sorted(after - before)
-        if before is not None and after is not None
-        else None
-    )
-
-    duration = round(time.monotonic() - t0, 1)
-
+def _opencode_reply(status: str, reason: str, notes: list[str]) -> dict:
+    """A result in the same shape as a delegation's, for when no job ran."""
     return {
-        "completed": result.completed,
-        "response": result.final_response,
-        "duration": duration,
-        "model": f"lmstudio/{provider.model}",
-        "files_changed": files_changed,
-        "usage": {"total_tokens": result.tokens_used.total_tokens},
+        "status": status,
+        "reason": reason,
+        "job_id": None,
+        "report_path": None,
+        "rung": None,
+        "model": None,
+        "cost": 0.0,
+        "gates": [],
+        "files_changed": [],
+        "notes": notes,
     }
 
 
-def _attach_risk_flags(result: dict, cwd: str) -> dict:
-    """Best-effort diff-risk classification of files a delegate reports changing.
-
-    Delegate self-reports ("completed: true") are not trustworthy on their own —
-    a delegate can report success while silently corrupting a literal, flattening
-    quotes, or changing a test's expected value. When the delegate reports files
-    changed, run each one through the deterministic (non-LLM) diff-risk
-    classifier so callers get a `risk_flags` list to inspect instead of blindly
-    trusting the self-report. Never raises -- a classifier bug must not break
-    dispatch.
-    """
-    try:
-        if isinstance(result, dict) and result.get("completed") and result.get("files_changed"):
-            from mullet.core.verification.diff_risk import classify_git_diff
-            all_flags = []
-            for filepath in result["files_changed"]:
-                all_flags.extend(classify_git_diff(cwd, filepath))
-            result["risk_flags"] = [flag.__dict__ for flag in all_flags]
-    except Exception:
-        logger.warning("diff risk classification failed for %s", cwd, exc_info=True)
-        result["risk_flags"] = []
-    return result
+def _string_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [p.strip() for p in value.split(",") if p.strip()]
+    return [str(p) for p in value if str(p).strip()]
 
 
 def handle_mullet_opencode(arguments: dict) -> dict:
-    """Run a task via opencode ACP with budget-aware model routing.
+    """Run a coding task as a single gated Mullet job on the delegation ladder.
 
-    LOW/STANDARD tiers prefer a reachable local LM Studio model first (free;
-    lightweight AgentRunner path, falling back to opencode_run with a cloud
-    model if local can't actually handle the task). ADVANCED/CRITICAL always
-    use cloud models — local models aren't trusted for complex tasks.
+    A thin wrapper over mullet.jobs.delegate.delegate: the job runs in the
+    foreground and its diff reaches the caller's working tree (unstaged, never
+    committed) only when the node passed its gates. Arguments from the old
+    direct-opencode tool are accepted and ignored, each with a note.
     """
     _off = _delegation_off_reply()
     if _off:
-        return {"completed": False, "error": _off, "delegation": "off"}
+        return {"completed": False, "status": "blocked", "reason": _off, "error": _off, "delegation": "off"}
 
-    import uuid
-    from mullet.tools.opencode_tool import opencode_run, _resolve_configured_model
-    from mullet.core.router.complexity import is_reasoning_task
+    notes: list[str] = []
+    for key in arguments:
+        if key in _OPENCODE_ARGS:
+            continue
+        why = _OPENCODE_IGNORED.get(key, "not an argument of mullet_opencode")
+        notes.append(f"ignored '{key}': {why}")
 
-    task = arguments.get("task", "")
-    model_arg = arguments.get("model")
-    tier = arguments.get("tier")
-    cwd = arguments.get("cwd") or os.getcwd()
-
-    if model_arg:
-        model = model_arg
-    else:
-        preset = _active_preset()
-        # Preserve legacy tier-based routing for the default balanced-mix preset
-        if preset is not None and preset.name != "balanced-mix" and (preset.native_only or preset.opencode_model is None):
-            return {
-                "completed": False,
-                "error": (
-                    f"Preset '{preset.name}' handles edits natively in Claude Code — "
-                    "opencode delegation is disabled for this preset. Make the edit directly in Claude Code."
-                ),
-            }
-        if preset is not None and preset.name != "balanced-mix" and preset.opencode_model:
-            model = preset.opencode_model
-        elif task:
-            # Determine tier
-            if tier:
-                resolved_tier = tier
-            else:
-                from mullet.core.router.complexity import is_simple_message, recommend_tier
-                if is_simple_message(task):
-                    resolved_tier = "LOW"
-                else:
-                    resolved_tier = recommend_tier(task).value
-
-            # Budget-aware model selection: cheapest option that meets quality bar
-            from mullet.hud.guard import check_budget as _check_budget
-            _budget = _check_budget()
-            _pressure = _budget.pressure
-
-            if resolved_tier == "LOW":
-                # Simple tasks → local LM Studio model when reachable, else
-                # configured default (or big-pickle free fallback)
-                model = _prefer_local_model(_resolve_configured_model())
-            elif _pressure >= 0.80:
-                # Budget exhausted → Kimi K2.7-Code fallback (thinking always on)
-                model = "moonshot/kimi-k2.7-code"
-            elif resolved_tier == "CRITICAL" or (resolved_tier == "ADVANCED" and is_reasoning_task(task)):
-                # High complexity reasoning → DeepSeek V4 Pro via OpenRouter ($0.435/M in)
-                model = "openrouter/deepseek/deepseek-v4-pro"
-            elif resolved_tier == "ADVANCED":
-                # Complex coding → DeepSeek V4 Pro via OpenRouter (1M ctx, quality)
-                model = "openrouter/deepseek/deepseek-v4-pro"
-            else:
-                # STANDARD at pressure < 80% → local LM Studio model when
-                # reachable, else DeepSeek V4 Flash (cheapest reliable, 1M ctx)
-                model = _prefer_local_model("openrouter/deepseek/deepseek-v4-flash")
-        else:
-            model = _resolve_configured_model()
-
-    # Honour "auto" sentinel — route via preflight matrix
-    if isinstance(model, str) and model.lower() == "auto":
-        from mullet.core.router.preflight import analyze_prompt
-        from mullet.core.router.routing_matrix import select_kimi_model
-        _speed_mode = arguments.get("speed_mode", "balanced")
-        _pf = analyze_prompt(task, speed_mode=_speed_mode)
-        model, _reason = select_kimi_model(_pf, speed_mode=_speed_mode)
-        logger.debug("handle_mullet_opencode: auto → %s (%s)", model, _reason)
-
-    agent_id = f"opencode-{uuid.uuid4().hex[:8]}"
-
-    try:
-        from mullet.hud.agent_state import add_agent, remove_agent
-        add_agent(agent_id, task, "opencode", model)
-        _hud_ok = True
-    except Exception:
-        _hud_ok = False
-
-    try:
-        if isinstance(model, str) and model.startswith("lmstudio/"):
-            lightweight_result = _run_via_lightweight_agent(task, cwd)
-            if lightweight_result is not None:
-                return _attach_risk_flags(lightweight_result, cwd)
-            # Local failed or incomplete — fall through to cloud fallback
-            model = "openrouter/deepseek/deepseek-v4-flash"
-
-        result = opencode_run(
-            task=task,
-            cwd=cwd,
-            model=model,
-            agent_id=agent_id if _hud_ok else None,
+    preset = _active_preset()
+    if preset is not None and preset.native_only:
+        message = (
+            f"Preset '{preset.name}' handles edits natively in Claude Code, so "
+            "delegation is disabled for this preset. Make the edit directly in Claude Code."
         )
+        reply = _opencode_reply("blocked", message, notes)
+        reply["error"] = message
+        return reply
 
-        return _attach_risk_flags(result, cwd)
-    finally:
-        if _hud_ok:
-            try:
-                remove_agent(agent_id)
-            except Exception:
-                pass
+    task = str(arguments.get("task") or "").strip()
+    if not task:
+        return _opencode_reply("failed", "no task given", notes)
+
+    paths = _string_list(arguments.get("files")) + _string_list(arguments.get("paths"))
+    cwd = arguments.get("cwd") or arguments.get("repo_root") or None
+
+    timeout = arguments.get("timeout")
+    try:
+        timeout_min = _OPENCODE_DEFAULT_TIMEOUT_MIN if timeout is None else int(timeout)
+    except (TypeError, ValueError):
+        notes.append(f"ignored 'timeout': {timeout!r} is not a whole number of minutes")
+        timeout_min = _OPENCODE_DEFAULT_TIMEOUT_MIN
+    clamped = max(1, min(_OPENCODE_MAX_TIMEOUT_MIN, timeout_min))
+    if clamped != timeout_min:
+        notes.append(f"timeout {timeout_min} minutes clamped to {clamped}")
+
+    providers = [p.lower() for p in _string_list(arguments.get("providers"))] or None
+
+    try:
+        from mullet.jobs import delegate as delegate_mod
+        from mullet.jobs.ledger import Ledger
+
+        with Ledger() as ledger:
+            result = delegate_mod.delegate(
+                ledger, task=task, paths=paths or None, cwd=cwd,
+                timeout_min=clamped, providers=providers,
+            )
+    except Exception as exc:  # job creation errors (bad paths, git) become a result, not a crash
+        logger.warning("mullet_opencode: delegation failed: %s", exc, exc_info=True)
+        return _opencode_reply("failed", str(exc) or type(exc).__name__, notes)
+
+    result = dict(result)
+    result["notes"] = notes
+    return result
 
 
 # Handler dispatch

@@ -1,7 +1,6 @@
 """Gap tests for mullet.core.logging.interaction_log — targets uncovered lines."""
 
 import sqlite3
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest

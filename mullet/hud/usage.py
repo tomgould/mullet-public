@@ -1,10 +1,17 @@
-"""Fetch Claude usage/rate limits from the Anthropic OAuth API."""
+"""Claude usage limits, as Claude Code itself reports them.
+
+Claude Code sends its current rate limits to the statusline command on every
+tick. ``mullet-hud`` stores them with :func:`record_usage`, and the budget
+guard, router and swarm read them back with :func:`fetch_usage`. Mullet never
+reads Claude's credentials or calls Anthropic's usage API itself.
+"""
 import json
 import logging
+import os
+import tempfile
 import time
-import urllib.request
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -39,93 +46,112 @@ def parse_resets_at(iso: str) -> Optional[datetime]:
         return None
 
 
-_CACHE_TTL = 300  # 5 minutes — prevents 429 from Anthropic usage API
-_CACHE_FILE = Path.home() / ".claude" / ".mullet-usage-cache.json"
+# Figures older than this are too stale to act on: no Claude Code session has
+# drawn its statusline for a while.
+_MAX_AGE = 900
+# Tests point this at a temporary file; None means usage-cache.json in the
+# cache directory.
+_CACHE_FILE: Optional[Path] = None
 
 
-def _get_access_token() -> Optional[str]:
-    creds_path = Path.home() / ".claude" / ".credentials.json"
-    if not creds_path.exists():
-        return None
-    try:
-        data = json.loads(creds_path.read_text())
-        return data.get("claudeAiOauth", {}).get("accessToken")
-    except (json.JSONDecodeError, OSError):
-        return None
+def _cache_file() -> Path:
+    from mullet.core.paths import cache_dir
+    return _CACHE_FILE or cache_dir() / "usage-cache.json"
 
 
 def _read_cache() -> Optional[tuple[float, RateLimits]]:
     try:
-        if not _CACHE_FILE.exists():
+        cache_file = _cache_file()
+        if not cache_file.exists():
             return None
-        data = json.loads(_CACHE_FILE.read_text())
+        data = json.loads(cache_file.read_text())
         return (data["ts"], RateLimits(**data["limits"]))
     except Exception as e:
         logging.getLogger(__name__).debug("Cache read failed: %s", e)
         return None
 
 
-def _write_cache(limits: RateLimits) -> None:
+def record_usage(limits: RateLimits) -> None:
+    """Store the limits Claude Code just reported, for :func:`fetch_usage`.
+
+    Several Claude Code sessions can draw their statuslines at once, so the
+    file is replaced in one step rather than rewritten in place.
+    """
     try:
-        _CACHE_FILE.write_text(json.dumps({
-            "ts": time.time(),
-            "limits": {"five_hour_pct": limits.five_hour_pct, "five_hour_resets": limits.five_hour_resets,
-                       "weekly_pct": limits.weekly_pct, "weekly_resets": limits.weekly_resets,
-                       "sonnet_weekly_pct": limits.sonnet_weekly_pct, "sonnet_weekly_resets": limits.sonnet_weekly_resets,
-                       "has_sonnet_limit": limits.has_sonnet_limit},
-        }))
-        import os
-        os.chmod(str(_CACHE_FILE), 0o600)
+        cache_file = _cache_file()
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=cache_file.parent, prefix=".usage-")
+        try:
+            with os.fdopen(fd, "w") as fh:
+                json.dump({"ts": time.time(), "limits": asdict(limits)}, fh)
+            os.replace(tmp, cache_file)
+        except BaseException:
+            os.unlink(tmp)
+            raise
     except OSError as _exc:
         logger.warning("usage: cache write failed: %s", _exc)
 
 
-_last_fetch_attempt: float = 0.0
-_RETRY_COOLDOWN: float = 60.0  # Wait 60s before retrying after API error
+_STREAM_WINDOWS = {"five_hour": ("five_hour_pct", "five_hour_resets"), "seven_day": ("weekly_pct", "weekly_resets")}
+
+
+def record_stream_limits(info: object) -> bool:
+    """Store the limits from a ``claude -p`` stream's ``rate_limit_event``, as the statusline would.
+
+    ``info`` is the event's ``rate_limit_info``: ``unifiedWindows`` maps
+    ``five_hour`` and ``seven_day`` to ``utilization`` (0 to 1) and
+    ``resetsAt`` (epoch seconds). An event without the weekly window is
+    ignored: storing it would stamp an old or missing weekly figure as
+    current, and the ladder's budget level is read from that figure.
+    Returns True when something was stored.
+    """
+    windows = info.get("unifiedWindows") if isinstance(info, dict) else None
+    if not isinstance(windows, dict) or not isinstance(windows.get("seven_day"), dict):
+        return False
+    previous = _read_cache()
+    limits = previous[1] if previous else RateLimits()
+    found = False
+    for name, (pct_field, reset_field) in _STREAM_WINDOWS.items():
+        window = windows.get(name)
+        if not isinstance(window, dict):
+            continue
+        try:
+            utilization = float(window.get("utilization"))
+        except (TypeError, ValueError):
+            continue
+        if utilization != utilization:  # NaN
+            continue
+        pct = utilization * 100 if utilization <= 1.0 else utilization
+        setattr(limits, pct_field, max(0.0, min(100.0, pct)))
+        try:
+            resets = float(window.get("resetsAt"))
+            setattr(limits, reset_field, datetime.fromtimestamp(resets, tz=timezone.utc).isoformat())
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
+        found = True
+    if found:
+        record_usage(limits)
+    return found
 
 
 def fetch_usage() -> Optional[RateLimits]:
-    """Fetch rate limits from Anthropic API. File-cached for 5 minutes."""
-    global _last_fetch_attempt
+    """Return the limits Claude Code last reported, or ``None`` when there are
+    none from the last 15 minutes.
 
+    A window whose reset time has passed since then reads as 0%, so a figure
+    taken just before a reset doesn't hold work back after it.
+    """
     cached = _read_cache()
-    if cached and time.time() - cached[0] < _CACHE_TTL:
-        return cached[1]
-
-    # Don't hammer the API after a failure — wait 60s before retry
-    if _last_fetch_attempt and time.time() - _last_fetch_attempt < _RETRY_COOLDOWN:
-        return cached[1] if cached else None
-
-    token = _get_access_token()
-    if not token:
-        return cached[1] if cached else None
-
-    _last_fetch_attempt = time.time()
-
-    req = urllib.request.Request(
-        "https://api.anthropic.com/api/oauth/usage",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "anthropic-beta": "oauth-2025-04-20",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        resp = urllib.request.urlopen(req, timeout=5)
-        data = json.loads(resp.read())
-        sonnet_data = data.get("sonnet_weekly") or data.get("seven_day_sonnet") or {}
-        limits = RateLimits(
-            five_hour_pct=data.get("five_hour", {}).get("utilization", 0.0),
-            five_hour_resets=data.get("five_hour", {}).get("resets_at", ""),
-            weekly_pct=data.get("seven_day", {}).get("utilization", 0.0),
-            weekly_resets=data.get("seven_day", {}).get("resets_at", ""),
-            sonnet_weekly_pct=sonnet_data.get("utilization", 0.0),
-            sonnet_weekly_resets=sonnet_data.get("resets_at", ""),
-            has_sonnet_limit=data.get("seven_day_sonnet") is not None,
-        )
-        _write_cache(limits)
-        _last_fetch_attempt = 0.0  # Reset on success
-        return limits
-    except Exception as e:
-        logging.getLogger(__name__).debug("Usage API error: %s", e)
-        return cached[1] if cached else None
+    now = time.time()
+    if cached is None or now - cached[0] > _MAX_AGE:
+        return None
+    limits = cached[1]
+    for pct, resets in (
+        ("five_hour_pct", "five_hour_resets"),
+        ("weekly_pct", "weekly_resets"),
+        ("sonnet_weekly_pct", "sonnet_weekly_resets"),
+    ):
+        reset_at = parse_resets_at(getattr(limits, resets))
+        if reset_at is not None and reset_at.timestamp() <= now:
+            setattr(limits, pct, 0.0)
+    return limits

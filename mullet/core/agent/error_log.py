@@ -8,8 +8,8 @@ def get_error_log_path():
     """
     Returns the absolute path to the error log file.
     """
-    home_dir = os.path.expanduser("~")
-    log_dir = os.path.join(home_dir, ".mullet", "logs")
+    from mullet.core.paths import state_dir
+    log_dir = os.path.join(state_dir(), "logs")
     os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, "errors.log")
 

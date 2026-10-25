@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from mullet.core.paths import state_dir as _user_state_dir
 from mullet.hud.types import HudRenderContext
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def build_context(cwd: str = ".") -> HudRenderContext:
     ultrawork = read_state_file(state_dir / "ultrawork.json")
     session = read_state_file(state_dir / "session.json")
     tokens = read_state_file(state_dir / "tokens.json")
-    agents = read_state_file(Path.home() / ".mullet" / "state" / "agents.json")
+    agents = read_state_file(_user_state_dir() / "state" / "agents.json")
     context = read_state_file(state_dir / "context.json")
     mode = read_state_file(state_dir / "mode.json")
     model = read_state_file(state_dir / "model.json")

@@ -1,6 +1,6 @@
 """Skill invocation and outcome tracking.
 
-Stats persisted to ~/.mullet/skill_stats.json.
+Stats persisted to skill_stats.json in the state directory.
 Invocations are tracked automatically via SkillRegistry.invoke().
 Outcomes require explicit record_outcome() calls at the use site.
 """
@@ -10,21 +10,30 @@ import logging
 import time
 from pathlib import Path
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
-_STATS_PATH = Path.home() / ".mullet" / "skill_stats.json"
+# Tests point this at a temporary file; None means skill_stats.json in the
+# state directory.
+_STATS_PATH: Path | None = None
+
+
+def _stats_path() -> Path:
+    return _STATS_PATH or state_dir() / "skill_stats.json"
 
 
 def _load() -> dict:
     try:
-        return json.loads(_STATS_PATH.read_text())
+        return json.loads(_stats_path().read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
 def _save(data: dict) -> None:
-    _STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _STATS_PATH.write_text(json.dumps(data, indent=2))
+    path = _stats_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
 
 
 def _entry(data: dict, skill_name: str) -> dict:

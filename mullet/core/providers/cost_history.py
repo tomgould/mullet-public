@@ -1,6 +1,7 @@
 """Persistent session cost history for p50/p95 distribution tracking.
 
-Appends one JSON line per completed session to ~/.mullet/cost_history.jsonl.
+Appends one JSON line per completed session to cost_history.jsonl in the
+state directory (see ``mullet.core.paths``).
 Provides percentile accessors for the HUD and budget display.
 
 Format of each line:
@@ -16,9 +17,17 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
-COST_HISTORY_PATH = Path.home() / ".mullet" / "cost_history.jsonl"
+# Tests point this at a temporary file; None means cost_history.jsonl in the
+# state directory.
+COST_HISTORY_PATH: Path | None = None
+
+
+def _cost_history_path() -> Path:
+    return COST_HISTORY_PATH or state_dir() / "cost_history.jsonl"
 
 
 def record_session(session_usd: float, providers: dict[str, float] | None = None) -> None:
@@ -33,8 +42,9 @@ def record_session(session_usd: float, providers: dict[str, float] | None = None
         "providers": providers or {},
     }
     try:
-        COST_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(COST_HISTORY_PATH, "a", encoding="utf-8") as f:
+        path = _cost_history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
@@ -48,14 +58,14 @@ def load_history(window_days: int = 90) -> list[dict[str, Any]]:
     Returns a list of dicts with keys: date, session_usd, providers.
     Returns [] if the file doesn't exist or is malformed.
     """
-    if not COST_HISTORY_PATH.exists():
+    if not _cost_history_path().exists():
         return []
 
     cutoff = date.today() - timedelta(days=window_days)
     entries: list[dict[str, Any]] = []
 
     try:
-        with open(COST_HISTORY_PATH, "r", encoding="utf-8") as f:
+        with open(_cost_history_path(), "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

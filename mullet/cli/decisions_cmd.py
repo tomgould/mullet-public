@@ -28,7 +28,7 @@ RESET = ""
 _HAS_COLOR = False
 
 try:
-    from mullet.hud.colors import cyan, dim, bold, yellow, green, magenta, RESET
+    from mullet.hud.colors import cyan, dim, bold, yellow, green, magenta
     _HAS_COLOR = True
 except Exception:  # pragma: no cover — colors always available in test env
     pass

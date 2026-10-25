@@ -219,12 +219,11 @@ class TestProfiler:
 
 class TestErrorLog:
     @patch("mullet.core.agent.error_log.os.makedirs")
-    @patch("mullet.core.agent.error_log.os.path.expanduser")
-    def test_get_error_log_path(self, mock_expanduser, mock_makedirs):
-        mock_expanduser.return_value = "/home/test"
+    def test_get_error_log_path(self, mock_makedirs, monkeypatch):
+        monkeypatch.setenv("XDG_STATE_HOME", "/home/test/.local/state")
         path = get_error_log_path()
-        assert path == "/home/test/.mullet/logs/errors.log"
-        mock_makedirs.assert_called_once_with("/home/test/.mullet/logs", exist_ok=True)
+        assert path == "/home/test/.local/state/mullet/logs/errors.log"
+        mock_makedirs.assert_called_once_with("/home/test/.local/state/mullet/logs", exist_ok=True)
 
     @patch("mullet.core.agent.error_log.get_error_log_path")
     def test_setup_error_log_adds_handler(self, mock_get_path, tmp_path):

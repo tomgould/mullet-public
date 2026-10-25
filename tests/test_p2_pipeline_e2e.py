@@ -4,7 +4,7 @@ Tests exercise interactions between:
   - mullet.core.observations (PostToolUse JSONL capture)
   - mullet.core.routing_history (per-task call outcomes)
   - mullet.core.decisions (regex-extracted decisions)
-  - scripts/hooks/mullet_pretooluse_rewriter (tier autofill)
+  - mullet/hooks/pretooluse_rewriter (tier autofill)
   - mullet.cli.review_session_cmd (unified report)
 
 All tests use tmp_path and heavy mocking — no real LLM calls.
@@ -141,7 +141,7 @@ def test_t2_pretooluse_rewriter_sets_tier(tmp_path, monkeypatch):
     import importlib
     rewriter_path = (
         Path(__file__).resolve().parent.parent
-        / "scripts" / "hooks" / "mullet_pretooluse_rewriter.py"
+        / "mullet" / "hooks" / "pretooluse_rewriter.py"
     )
     assert rewriter_path.exists(), f"rewriter not found at {rewriter_path}"
 

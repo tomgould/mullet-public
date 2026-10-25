@@ -20,6 +20,8 @@ Mullet uses opencode as a zero-Anthropic-token delegation target:
 
 When opencode is not installed, `mullet_opencode` automatically falls back to `mullet_run/Kimi` with a warning that filesystem access is unavailable.
 
+This guide covers the `mullet_opencode` MCP tool. It is separate from `mullet job`, whose only worker today is your own Claude Code. An opencode worker for jobs, inside the job sandbox and checked by the same gates, is coming. `MULLET_DELEGATION=off` switches `mullet_opencode` off with the other delegation tools.
+
 ---
 
 ## Prerequisites
@@ -45,32 +47,19 @@ The free `opencode/big-pickle` model works without a key. For Kimi K2 quality, y
    export MOONSHOT_API_KEY=sk-...
    ```
 
-Mullet reads `KIMI_API_KEY` first, then `MOONSHOT_API_KEY`, then falls back to checking `.mcp.json` / `~/.mcp.json` under `env.KIMI_API_KEY`.
+Mullet reads `KIMI_API_KEY` first, then `MOONSHOT_API_KEY`. They come from the process environment or `~/.config/mullet/.env`, never from a project's `.env` or `.mcp.json`.
 
 ---
 
-## Setup via `mullet setup-claude`
+## Setup
 
-`mullet setup-claude` handles both steps automatically:
+`mullet setup-claude` doesn't install opencode. Install it and write its config yourself:
 
-```bash
-mullet setup-claude
-```
-
-At the opencode prompt, answer `y`. The installer will:
-
-1. Run `npm i -g opencode-ai@latest` if opencode is not found on `PATH`.
+1. `npm i -g opencode-ai@latest` (needs Node.js 18 or later).
 2. Write `~/.config/opencode/opencode.json` with the Moonshot/Kimi provider config (see below).
-3. Print a reminder to set `KIMI_API_KEY`.
+3. Set `KIMI_API_KEY` in `~/.config/mullet/.env` or your environment.
 
-`setup-claude` does not write a `provider.lmstudio` block. Add one yourself (see the config reference below) if you want local models declared for direct/manual `opencode run` invocations. Mullet's own automatic local-first routing (the lightweight agent path described under "How it works") doesn't need it — it talks to LM Studio directly.
-
-For a non-interactive install (CI, dotfiles bootstrap):
-
-```bash
-mullet setup-claude --yes        # auto-accept all prompts
-mullet setup-claude --check      # preview without writing anything
-```
+Add a `provider.lmstudio` block too (see the config reference below) if you want local models declared for direct/manual `opencode run` invocations. Mullet's own automatic local-first routing (the lightweight agent path described under "How it works") doesn't need it: it talks to LM Studio directly.
 
 ---
 
@@ -130,10 +119,10 @@ To let opencode's own CLI talk to a local LM Studio server — relevant if you i
       "api": "http://127.0.0.1:1234/v1",
       "options": { "timeout": 300000 },
       "models": {
-        "qwen2.5-coder-14b-instruct": {
-          "name": "Qwen2.5-Coder-14B-Instruct",
+        "ornith-1.5-35b-a3b": {
+          "name": "Ornith-1.5-35B-A3B",
           "tool_call": true,
-          "limit": { "context": 8192, "output": 4096 },
+          "limit": { "context": 32768, "output": 4096 },
           "cost": { "input": 0, "output": 0 }
         }
       }
@@ -177,48 +166,20 @@ Completion is the *process exiting*, not any particular event: stdout EOF, then 
 
 Note: `opencode_run()`'s own docstring in `mullet/tools/opencode_tool.py` still says it runs "via opencode ACP" — that's a stale leftover comment from the previous implementation. The dispatch code itself no longer uses ACP anywhere.
 
-### Local dispatch: the lightweight agent path
+### Single-step ladder job
 
-If the resolved model string starts with `lmstudio/`, `handle_mullet_opencode` doesn't call opencode at all. It runs the task through Mullet's own `AgentRunner` (`mullet/core/agent/runner.py`) instead, using a small toolset (`terminal`, `file`, `code`, `git`) and `build_base_prompt(model=..., cwd=cwd)` as the system prompt.
+`mullet_opencode` is implemented in `mullet/server/mcp_handlers.py` and two job modules:
 
-This exists because opencode's own CLI agent loop carries roughly 11.4K tokens of fixed system-prompt-plus-tool-schema overhead — too much for a local model's realistic context budget on top of an actual task. The lightweight `AgentRunner` path costs roughly 3.5K tokens for the same kind of overhead and reliably completes real agentic tasks locally, where the full opencode loop was failing outright.
+- `mullet/jobs/delegate.py` creates a single-step Mullet job, approves it, and runs it in the foreground.
+- `mullet/jobs/handback.py` brings the finished node's diff back into the caller's working tree.
 
-If the lightweight run doesn't produce a usable result (local unreachable, the run raises, or `result.completed` is falsy), `handle_mullet_opencode` falls through to the normal `opencode_run()` cloud dispatch above — but with the model reassigned to `openrouter/deepseek/deepseek-v4-flash`, not the original local model, since local has already been tried and failed.
+When Claude Code calls `mullet_opencode`, Mullet works out a repository root from `cwd`, the paths in scope, or the server's current working directory. It builds a job with a single mechanical node whose goal is the task text and whose scope is the given paths (or the whole repo if none are given).
 
-The local path's success shape is narrower than `opencode_run()`'s: no `session_id`, and `usage` is just `{"total_tokens": N}` — no input/output split, no `cost_usd` (local is free, and `AgentRunner` doesn't track the split the same way opencode does). See "Return value" below.
+The tool call itself counts as approval, so the job is approved immediately and run in the foreground through the job runner (`mullet/jobs/runner.py`). The `timeout` argument bounds the run in minutes (default 20, maximum 60). The node is kind `mechanical`, so the ladder starts it on a cheap rung and only enables review when `ladder.is_risky()` says the step is risky. The user's stored profile supplies the gates, so the usual build and test checks still run.
 
-### Model resolution
+If and only if the node status is `PASSED`, `mullet/jobs/handback.py` computes the diff between the job branch and its base and applies it to the caller's working tree with `git apply --3way`. Before applying, it checks that every target file is clean in the caller's tree and that the base commit is still the caller's HEAD's ancestor-equal content for those files. If either check fails, nothing is applied and the result status is `passed_not_applied`. After a successful apply, the hand-back unstages the paths so the changes are left in the working tree for the caller to review. Mullet never commits or pushes in the caller's repo.
 
-`opencode_run()` resolves the active model in this order:
-
-1. `model` argument if passed explicitly.
-2. `~/.config/opencode/opencode.json` → `model` field.
-3. Fallback constant `"opencode/big-pickle"` (free, no key required).
-
-If `opencode` isn't on `PATH` at all, this resolution never runs — `opencode_run()` returns a `mullet_run`/Kimi fallback immediately (see Troubleshooting).
-
-### Tier-based routing and presets
-
-`handle_mullet_opencode` only resolves a model itself when the caller doesn't pass one explicitly. Order of precedence:
-
-1. **Explicit `model` argument** — used as-is, including the `"auto"` sentinel, which is routed via `mullet.core.router.preflight.analyze_prompt` + `routing_matrix.select_kimi_model` instead of the tier ladder below.
-2. **Active preset** (`PresetManager().active()`), for any preset other than the default `balanced-mix`:
-   - `native_only`, or no `opencode_model` configured → refuse and return an error telling the caller to make the edit natively in Claude Code instead.
-   - `opencode_model` configured → use that model outright, skipping the tier ladder.
-3. **Tier ladder** (default `balanced-mix` preset, or no active preset) — resolves a tier (explicit `tier` argument if given, else `is_simple_message`/`recommend_tier` heuristics) and current budget pressure (`check_budget().pressure`), then:
-   1. Tier `LOW` → prefer a reachable local LM Studio model (`_prefer_local_model`), else the configured default.
-   2. Else, pressure ≥ 80% → `moonshot/kimi-k2.7-code` (thinking always on), **regardless of tier**.
-   3. Else, tier `CRITICAL`, or tier `ADVANCED` on a task classified as reasoning-heavy → `openrouter/deepseek/deepseek-v4-pro`.
-   4. Else, tier `ADVANCED` → `openrouter/deepseek/deepseek-v4-pro` (same model, non-reasoning path).
-   5. Else (`STANDARD`, pressure < 80%) → prefer a reachable local model, else `openrouter/deepseek/deepseek-v4-flash`.
-
-Whichever model comes out of this, if it starts with `lmstudio/` it's routed through the lightweight agent path above, not opencode.
-
-### Risk flags
-
-Delegate self-reports of `"completed": true` are not trustworthy on their own — a delegate can report success while silently corrupting a literal, flattening curly quotes to ASCII, changing a test's expected value, or fabricating a call argument. Whichever dispatch path was used, if the result reports `completed: true` with a non-empty `files_changed` list, `_attach_risk_flags()` (`mullet/server/mcp_handlers.py`) runs each changed file through `mullet/core/verification/diff_risk.py`'s deterministic, zero-LLM-cost classifier (`git show HEAD:<file>` vs the working tree) and attaches a `risk_flags` list to the result.
-
-Flagged categories: `literal_change`, `quote_flattening`, `new_control_flow`, `assertion_on_literal`, `call_args_changed`, `comment_changed`, `test_assertion_changed`. An empty list means the classifier found nothing suspicious in a mechanical, regex/difflib sense — not a correctness guarantee. `risk_flags` is only present when there were files to check; a run with no `files_changed` won't have the key at all.
+If the runner cannot start (for example, no sandbox, no `socat`, no `claude`, no `opencode`), the tool returns `blocked` with the reason instead of falling back to a direct call.
 
 ---
 
@@ -245,90 +206,68 @@ If you fork Mullet or apply it to another project, update `AGENTS.md` to reflect
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `task` | string | required | Natural language coding task for the agent |
-| `cwd` | string | `os.getcwd()` | Project directory for the run |
-| `model` | string | resolved automatically — see "Tier-based routing and presets" | Explicit override, e.g. `"moonshot/kimi-k2.7-code"` or `"lmstudio/qwen2.5-coder-14b-instruct"`. The sentinel `"auto"` routes through the preflight/routing-matrix path instead of the tier ladder. |
+| `files` | array | `[]` | File paths or globs the task may change (the job's scope). Defaults to the whole repo. |
+| `cwd` | string | cwd | Project directory or repository root. Defaults to the git repo containing the files, else the server's working directory. |
+| `timeout` | integer | 20 | Maximum run time in minutes (max 60). |
+| `providers` | array | auto | Rungs to allow on the ladder: `kimi`, `openrouter`, `free`, `local`, `claude`. Omit to use the whole ladder. |
+| `model` | string | ignored | Deprecated: accepted and ignored, with a note in the result. |
+| `apply` | boolean | ignored | Deprecated: accepted and ignored, with a note in the result. |
 
-That's the complete public schema. There is no `apply`, `commit_message`, `diff`, `has_changes`, or `timeout` parameter — an earlier iteration of this tool had them; they've since been removed. `mullet_opencode` never stages or commits on your behalf (see "Workflow example" below), and there's no caller-supplied timeout — the run is bounded internally by `OPENCODE_SILENT_TIMEOUT_S` (240s default) plus the model-escalation/retry logic in `opencode_run()`.
-
-The handler also reads an undocumented `tier` key from the raw arguments dict, used internally to force a tier for testing/preset overrides. It is not part of the public MCP schema above and callers should not rely on it.
+The public schema is `task`, `files`, `cwd`, `timeout` and `providers`. Old keys such as `model`, `tier`, `speed_mode`, `provider`, `apply` and `commit_message` are still accepted for backward compatibility but have no effect.
 
 ### Return value
 
-On success (cloud dispatch via `opencode run`):
-
 ```json
 {
-  "completed": true,
-  "response": "I've updated all type hints in ...",
-  "duration": 47.2,
+  "status": "applied",
+  "reason": null,
+  "job_id": "job_abc123",
+  "report_path": "/path/to/job/report.md",
+  "rung": "kimi",
   "model": "moonshot/kimi-k2.7-code",
-  "session_id": "ses_abc123",
-  "usage": {
-    "total_tokens": 18420,
-    "input_tokens": 15200,
-    "output_tokens": 3220,
-    "cached_tokens": 0,
-    "cost_usd": 0.019,
-    "currency": "USD"
-  },
+  "cost": 0.012,
+  "gates": [
+    "G0 scope: passed",
+    "G1 secrets: passed",
+    "G2 test_weakening: passed",
+    "G3 risky edits: passed",
+    "G4 build: passed",
+    "G5 tests: passed",
+    "G6 diff: passed",
+    "G7 review: passed"
+  ],
   "files_changed": ["mullet/tools/opencode_tool.py"],
-  "risk_flags": []
+  "notes": []
 }
 ```
 
-On success via the local lightweight-agent path (model resolved to `lmstudio/...`), the shape is narrower — no `session_id`, no cost/token split:
+Possible `status` values:
 
-```json
-{
-  "completed": true,
-  "response": "I've updated all type hints in ...",
-  "duration": 12.4,
-  "model": "lmstudio/qwen2.5-coder-14b-instruct",
-  "files_changed": ["mullet/tools/opencode_tool.py"],
-  "usage": { "total_tokens": 4820 },
-  "risk_flags": []
-}
-```
+- `applied` - the node passed and its diff was applied to the caller's working tree.
+- `passed_not_applied` - the node passed but the diff could not be applied; `reason` explains why.
+- `failed` - the node failed its gates.
+- `blocked` - the job could not start or was blocked before running.
+- `unverified` - the node finished but some gates could not verify the change.
+- `timeout` - the run exceeded the timeout.
 
-`risk_flags` (see "Risk flags" above) is only present when `files_changed` is non-empty; an empty list means the deterministic diff classifier found nothing suspicious, not that the change is guaranteed correct.
-
-On error (opencode not found, dispatch failure, context overflow, etc.):
-
-```json
-{
-  "error": "opencode failed after 2 attempts: opencode: no output for 240s — API may be overloaded; ...",
-  "error_reason": "transient",
-  "files_changed": null
-}
-```
-
-`error_reason` is one of `"context_overflow"`, `"auth"`, `"transient"`, `"unknown"` (from `_classify_error()` in `opencode_tool.py`) — useful for deciding whether a retry is worth it at all; an `"auth"` failure won't fix itself.
-
-When the active preset blocks delegation (`native_only`, or a non-default preset without an `opencode_model`):
-
-```json
-{
-  "completed": false,
-  "error": "Preset 'claude-only' handles edits natively in Claude Code — opencode delegation is disabled for this preset. Make the edit directly in Claude Code."
-}
-```
+When the status is anything other than `applied` or `passed_not_applied`, no changes are written to the caller's tree.
 
 ### Workflow example
 
 ```python
-# Delegate the task — opencode (or the local lightweight agent) edits files directly.
+# Delegate the task - mullet_opencode runs it as a gated job.
 result = mcp__mullet__mullet_opencode(
     task="Add Google-style docstrings to all public functions in mullet/tools/opencode_tool.py",
 )
 
-# Inspect what actually changed and whether the diff-risk classifier flagged anything.
-if result.get("completed"):
-    print(result.get("files_changed"))
-    if result.get("risk_flags"):
-        print("review these hunks before trusting the change:", result["risk_flags"])
+# Inspect the result.
+print(result["status"])
+print(result.get("files_changed"))
+if result.get("reason"):
+    print(result["reason"])
 
-# There is no built-in apply/commit step — mullet_opencode never stages or
-# commits for you. Review with `git diff`, then commit yourself:
+# The changes are already in the working tree if status is 'applied'.
+# Review with git diff, then commit yourself:
 #   git add <files> && git commit -m "..."
 # or discard with:
 #   git checkout -- .
@@ -350,7 +289,7 @@ For local dispatch the model column shows the `lmstudio/...` name instead. If a 
 
 ### `ProviderModelNotFoundError`
 
-opencode requires models to be declared in the `provider.<id>.models` dict in `opencode.json`. If you specify e.g. `"moonshot/kimi-k2.7-code"` or `"lmstudio/qwen2.5-coder-14b-instruct"` but the config only has a top-level `"model": "..."` with no matching `models` block, opencode will reject it. This only bites when opencode's own CLI actually receives the model — Mullet's automatic local dispatch (the lightweight agent path) bypasses opencode entirely and never hits it.
+opencode requires models to be declared in the `provider.<id>.models` dict in `opencode.json`. If you specify e.g. `"moonshot/kimi-k2.7-code"` or `"lmstudio/ornith-1.5-35b-a3b"` but the config only has a top-level `"model": "..."` with no matching `models` block, opencode will reject it. This only bites when opencode's own CLI actually receives the model — Mullet's automatic local dispatch (the lightweight agent path) bypasses opencode entirely and never hits it.
 
 Fix: ensure your `opencode.json` has the full `provider.<id>.models` block, as shown in the config reference above, for every model you dispatch to directly.
 
@@ -371,14 +310,14 @@ The second command should stream a `text` event containing "pong" and then exit 
 
 ### KIMI_API_KEY not found
 
-The key must be set before the Mullet MCP server starts. Reload the server after exporting:
+The key must be in the environment, or in `~/.config/mullet/.env` (`$MULLET_CONFIG_DIR/.env` if that is set), before the Mullet MCP server starts. Restart Claude Code or the MCP server after adding it:
 
 ```bash
-export KIMI_API_KEY=sk-...
+echo 'KIMI_API_KEY=sk-...' >> ~/.config/mullet/.env
 # restart Claude Code or the MCP server
 ```
 
-Or add it to `.mcp.json` under `env.KIMI_API_KEY` in the mullet server entry — Mullet reads it from there as a fallback.
+A key in a project's `.env` or `.mcp.json` is not read.
 
 ### Fallback: mullet_run used instead of opencode
 

@@ -20,8 +20,8 @@ async def test_skills_endpoint(aiohttp_client):
     data = await resp.json()
     assert "skills" in data
     names = [s["name"] for s in data["skills"]]
-    assert "autopilot" in names
-    assert "ralph" in names
+    assert "brainstorm" in names
+    assert "mullet-job" in names
 
 
 async def test_tools_endpoint(aiohttp_client):
@@ -62,7 +62,7 @@ async def test_info_endpoint(aiohttp_client):
     assert "skills" in data
     assert "providers" in data
     assert data["tool_count"] >= 13
-    assert data["skill_count"] >= 7
+    assert data["skill_count"] >= 6
     assert data["mode"] in ("solo", "enterprise")
 
 

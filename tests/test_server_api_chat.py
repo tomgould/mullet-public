@@ -533,98 +533,26 @@ async def test_build_server_agent_knowledge_manager_exception(aiohttp_client):
 
 
 # ---------------------------------------------------------------------------
-# Section 6: Orchestration modes (Lines 218-221, 223-226, 228-231)
+# Section 6: removed orchestration modes are rejected
 # ---------------------------------------------------------------------------
 
-def _make_orchestration_result(summary="Done", completed=True, tokens=None):
-    """Build a mock orchestration result."""
-    if tokens is None:
-        tokens = MagicMock()
-        tokens.input_tokens = 1
-        tokens.output_tokens = 1
-        tokens.total_tokens = 2
-    r = MagicMock()
-    r.summary = summary
-    r.final_response = summary
-    r.completed = completed
-    r.total_tokens = tokens
-    r.tokens_used = tokens
-    return r
-
-
-async def test_sync_mode_autopilot(aiohttp_client):
-    """Lines 218-221: mode=autopilot → AutopilotMode.execute called."""
+async def test_sync_removed_mode_is_rejected(aiohttp_client):
+    """autopilot, ralph and ultrawork were removed: 400, and no agent is built."""
     client = await _make_app(aiohttp_client)
-    mock_agent, mock_provider = _make_agent_mock()
-    mock_result = _make_orchestration_result("Autopilot done")
-
-    mock_ap = MagicMock()
-    mock_ap.execute.return_value = mock_result
-
     with _mock_metrics(), \
-         patch("mullet.server.api._build_server_agent", return_value=(mock_agent, mock_provider)), \
-         patch("mullet.core.orchestration.autopilot.AutopilotMode", return_value=mock_ap):
-        resp = await client.post(
-            "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "do something"}],
-                "mullet": {"mode": "autopilot"},
-            },
-        )
-    assert resp.status == 200
-    data = await resp.json()
-    assert data["mullet"]["mode"] == "autopilot"
-    mock_ap.execute.assert_called_once()
-
-
-async def test_sync_mode_ralph(aiohttp_client):
-    """Lines 223-226: mode=ralph → RalphMode.execute called."""
-    client = await _make_app(aiohttp_client)
-    mock_agent, mock_provider = _make_agent_mock()
-    mock_result = _make_orchestration_result("Ralph done")
-
-    mock_rm = MagicMock()
-    mock_rm.execute.return_value = mock_result
-
-    with _mock_metrics(), \
-         patch("mullet.server.api._build_server_agent", return_value=(mock_agent, mock_provider)), \
-         patch("mullet.core.orchestration.ralph.RalphMode", return_value=mock_rm):
-        resp = await client.post(
-            "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "do something"}],
-                "mullet": {"mode": "ralph"},
-            },
-        )
-    assert resp.status == 200
-    data = await resp.json()
-    assert data["mullet"]["mode"] == "ralph"
-    mock_rm.execute.assert_called_once()
-
-
-async def test_sync_mode_ultrawork(aiohttp_client):
-    """Lines 228-231: mode=ultrawork → UltraworkMode.execute called."""
-    client = await _make_app(aiohttp_client)
-    mock_agent, mock_provider = _make_agent_mock()
-    mock_result = _make_orchestration_result("Ultrawork done")
-
-    mock_um = MagicMock()
-    mock_um.execute.return_value = mock_result
-
-    with _mock_metrics(), \
-         patch("mullet.server.api._build_server_agent", return_value=(mock_agent, mock_provider)), \
-         patch("mullet.core.orchestration.ultrawork.UltraworkMode", return_value=mock_um):
-        resp = await client.post(
-            "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "do something"}],
-                "mullet": {"mode": "ultrawork"},
-            },
-        )
-    assert resp.status == 200
-    data = await resp.json()
-    assert data["mullet"]["mode"] == "ultrawork"
-    mock_um.execute.assert_called_once()
+         patch("mullet.server.api._build_server_agent") as build:
+        for mode in ("autopilot", "ralph", "ultrawork"):
+            resp = await client.post(
+                "/v1/chat/completions",
+                json={
+                    "messages": [{"role": "user", "content": "do something"}],
+                    "mullet": {"mode": mode},
+                },
+            )
+            assert resp.status == 400
+            data = await resp.json()
+            assert "was removed" in data["error"]["message"]
+    build.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -659,7 +587,6 @@ async def test_sync_session_id_initialises_sessions_dict(aiohttp_client):
 
 async def test_stream_on_token_enqueues_delta(aiohttp_client):
     """Lines 305, 330-335: tokens pushed via on_token appear as SSE chunks."""
-    import asyncio
 
     mock_provider = MagicMock()
     mock_provider.name = "kimi"
@@ -696,7 +623,6 @@ async def test_stream_on_token_enqueues_delta(aiohttp_client):
 
 async def test_stream_on_tool_enqueues_tool_name(aiohttp_client):
     """Lines 309, 330-335: tool calls pushed via on_tool appear in SSE output."""
-    import asyncio
 
     mock_provider = MagicMock()
     mock_provider.name = "local"
@@ -730,7 +656,6 @@ async def test_stream_on_tool_enqueues_tool_name(aiohttp_client):
 
 async def test_stream_sse_chunks_are_valid_json(aiohttp_client):
     """Lines 330-335: each SSE data line contains valid JSON with expected keys."""
-    import asyncio
 
     mock_provider = MagicMock()
     mock_provider.name = "kimi"
@@ -830,7 +755,6 @@ async def test_build_server_agent_providers_list_parsed(aiohttp_client):
 
 async def test_stream_on_tool_callback_fires(aiohttp_client):
     """Line 309: on_tool callback called by agent during streaming → tool name appears in SSE."""
-    import asyncio
 
     mock_provider = MagicMock()
     mock_provider.name = "kimi"

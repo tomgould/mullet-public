@@ -9,7 +9,6 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 from mullet.core.agent.profiles import AGENT_PROFILES
 
@@ -48,7 +47,7 @@ MAX_CONCURRENT = 3
 def _log_spend(goal: str, provider_name: str, tokens_used: int, success: bool) -> None:
     """Log delegation token spend to SQLite (best-effort, never crashes).
 
-    Creates ~/.mullet/delegation_spend.db with schema:
+    Creates delegation_spend.db in the state directory with schema:
         CREATE TABLE IF NOT EXISTS spend (
             id INTEGER PRIMARY KEY,
             ts TEXT,
@@ -59,7 +58,8 @@ def _log_spend(goal: str, provider_name: str, tokens_used: int, success: bool) -
         )
     """
     try:
-        db_path = Path.home() / ".mullet" / "delegation_spend.db"
+        from mullet.core.paths import state_dir
+        db_path = state_dir() / "delegation_spend.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         conn = sqlite3.connect(str(db_path), timeout=5.0)

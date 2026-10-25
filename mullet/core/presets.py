@@ -96,7 +96,7 @@ BUILTIN_PRESETS: list[Preset] = [
         label="Local only (free/private)",
         allowed_providers=["local"],
         speed_mode="economy",
-        opencode_model="lmstudio/qwen2.5-coder-14b-instruct",
+        opencode_model="lmstudio/ornith-1.5-35b-a3b",
         native_only=False,
         description="Everything on local LM Studio coders. No cloud.",
     ),
@@ -148,11 +148,8 @@ class PresetManager:
 
     def __init__(self, config_dir: Path | None = None) -> None:
         if config_dir is None:
-            env_override = os.environ.get("MULLET_CONFIG_DIR")
-            if env_override:
-                config_dir = Path(env_override)
-            else:
-                config_dir = Path.home() / ".config" / "mullet"
+            from mullet.core.paths import config_dir as _config_dir
+            config_dir = _config_dir()
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.presets_path = self.config_dir / "presets.yaml"

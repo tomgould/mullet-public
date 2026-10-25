@@ -1,8 +1,7 @@
 """Tests for pure utility functions in mullet/knowledge/engine/llm.py."""
-import time
 import requests
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from mullet.knowledge.engine.llm import (
     is_llm_error,

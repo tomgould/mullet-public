@@ -147,3 +147,19 @@ def test_shared_mem_delete(mock_shared_memory):
     get_result_after_delete = shared_mem.shared_mem_handler(action="get", key=key, namespace=namespace)
     get_data_after_delete = json.loads(get_result_after_delete)
     assert get_data_after_delete["value"] is None
+
+
+def test_import_writes_nothing_to_the_working_directory(tmp_path, monkeypatch):
+    import importlib
+    monkeypatch.chdir(tmp_path)
+    importlib.reload(shared_mem)
+    assert list(tmp_path.iterdir()) == []
+    assert shared_mem.shared_memory is None
+
+
+def test_default_store_lives_in_the_state_dir(tmp_path, monkeypatch):
+    from mullet.core import paths
+    monkeypatch.chdir(tmp_path)
+    store = BaseSharedMemory()
+    assert store.base_dir == (paths.state_dir() / "shared-memory").resolve()
+    assert not (tmp_path / ".mullet").exists()

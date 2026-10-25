@@ -11,14 +11,20 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     env:
       # No test needs a real embedding model; without this, code that tries
       # to load one pulls an ~90 MB model from Hugging Face during the run.
       HF_HUB_OFFLINE: "1"
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ['3.10', '3.11', '3.12']
+        exclude:
+          # macOS runs the oldest and newest supported Pythons only.
+          - os: macos-latest
+            python-version: '3.11'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,6 +32,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # The CPU build of PyTorch is enough for the tests and far smaller than
       # the CUDA build that sentence-transformers would otherwise pull in.
-      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev]" pytest-xdist
-      - run: python -m pytest tests/ -n auto -q --tb=short -k "not delegation_safety_d2"
+      - if: runner.os == 'Linux'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[dev]"
+      # The job sandbox tests skip themselves where bubblewrap can't run
+      # (macOS, or a Linux runner without user namespaces).
+      - run: python -m pytest tests/ -q --tb=short -n auto --timeout 300 -k "not delegation_safety_d2"

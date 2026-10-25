@@ -4,6 +4,7 @@ searcher's recency boost."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 from unittest.mock import MagicMock, patch
 
@@ -664,6 +665,8 @@ class TestReindexLock:
 
         module = _load_reindex()
         monkeypatch.setattr(module, "TRAWL_POOLS_DIR", tmp_path)
+        # The GPU lease and headroom wait are tested in test_reindex_machine.py.
+        monkeypatch.setattr(module, "_machine_turn", lambda name, wait=True: contextlib.nullcontext())
         (tmp_path / "news").mkdir()
         return module
 

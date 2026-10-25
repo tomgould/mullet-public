@@ -2,10 +2,8 @@
 
 import json
 import os
-import sys
 from unittest.mock import MagicMock
 
-import pytest
 
 from mullet.cli.live_test import (
     Target,
@@ -82,9 +80,6 @@ class TestDiscoverTargets:
         monkeypatch.setattr(
             "mullet.core.providers.local_detection.detect_local_provider", lambda: None
         )
-        monkeypatch.setattr(
-            "mullet.core.providers.claude_max._read_oauth_token", lambda: None
-        )
         targets = _discover_targets()
         assert targets == []
 
@@ -93,9 +88,6 @@ class TestDiscoverTargets:
         monkeypatch.setattr("mullet.cli.live_test._load_mcp_env_fallback", lambda: None)
         monkeypatch.setattr(
             "mullet.core.providers.local_detection.detect_local_provider", lambda: None
-        )
-        monkeypatch.setattr(
-            "mullet.core.providers.claude_max._read_oauth_token", lambda: None
         )
         monkeypatch.setattr(
             "mullet.core.providers.kimi.KimiProvider", lambda **kw: MagicMock()
@@ -108,9 +100,6 @@ class TestDiscoverTargets:
         monkeypatch.setattr("mullet.cli.live_test._load_mcp_env_fallback", lambda: None)
         monkeypatch.setattr(
             "mullet.core.providers.local_detection.detect_local_provider", lambda: None
-        )
-        monkeypatch.setattr(
-            "mullet.core.providers.claude_max._read_oauth_token", lambda: None
         )
         monkeypatch.setattr(
             "mullet.core.providers.gemini.GeminiProvider", lambda **kw: MagicMock()
@@ -133,9 +122,6 @@ class TestDiscoverTargets:
     def test_local_provider(self, monkeypatch):
         monkeypatch.setattr(os, "environ", {})
         monkeypatch.setattr("mullet.cli.live_test._load_mcp_env_fallback", lambda: None)
-        monkeypatch.setattr(
-            "mullet.core.providers.claude_max._read_oauth_token", lambda: None
-        )
         mock_local = MagicMock()
         mock_local.model = "test-model"
         monkeypatch.setattr(

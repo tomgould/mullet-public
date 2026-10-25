@@ -3,6 +3,8 @@
 Canonical reference for which model to use for which task. Verified against
 live OpenRouter pricing + ping probes on **2026-06-16**.
 
+This page covers routing for `mullet "<task>"`, the API and the delegation tools (`mullet_run`, `mullet_opencode`, `mullet_swarm`). `mullet job` does not use it: job steps go up the delegation ladder (free, local, Kimi, OpenRouter, Claude), described under "Delegation ladder" in the README.
+
 Authoritative source code:
 - Cost table: `mullet/core/providers/model_info.py`
 - Routing logic: `mullet/core/router/routing_matrix.py::select_openrouter_model`
@@ -13,7 +15,7 @@ Authoritative source code:
 
 | Provider     | Model ID                              | In $/M | Out $/M | Context | Probe latency | Notes |
 |--------------|---------------------------------------|-------:|--------:|--------:|--------------:|---|
-| lmstudio     | qwen2.5-coder-14b-instruct            |   0.00 |    0.00 |   32K¹  |        479 ms | Free, local GPU, code-tuned |
+| lmstudio     | ornith-1.5-35b-a3b                    |   0.00 |    0.00 |   32K¹  |    not probed | Free, local MoE (experts in RAM), ~20 tok/s, reasoning model |
 | moonshot     | kimi-k2.7-code (direct API)           |   0.95 |    4.00 |   262K  |        982 ms | Default for opencode; thinking always ON |
 | openrouter   | deepseek/deepseek-v4-flash            |   0.05 |    0.25 | **1M**  |         ~1 s | **Best $/quality coder** |
 | openrouter   | deepseek/deepseek-v4-pro              |   0.20 |    1.00 | **1M**  |       1200 ms | Premium V4, advanced tasks |
@@ -27,7 +29,7 @@ Authoritative source code:
 | openrouter   | google/gemini-2.5-pro                 |   1.25 |   10.00 | **1M**  |          ~3 s | Reasoning-by-default |
 | openrouter   | anthropic/claude-opus-4.1             |  15.00 |   75.00 |   200K  |       3120 ms | Frontier max-quality (expensive) |
 
-¹ Configured ctx limit in opencode; underlying model supports more.
+¹ The context Mullet loads it with (`lms load --context-length 32768`); the model supports 262K.
 
 ### ⚠ Reasoning-by-default models
 
@@ -79,7 +81,7 @@ Rankings are informed by:
 | 4    | `qwen/qwen3-coder`               | Code-tuned, 1M ctx for big repos           |
 | 5    | `kimi-k2.7-code` (moonshot direct) | Strong coder, thinking ON, cheaper than openrouter Anthropic |
 | 6    | `z-ai/glm-4.6`                   | Competent fallback                          |
-| 7    | `lmstudio/qwen2.5-coder-14b`     | Free, smaller — good for short edits        |
+| 7    | `lmstudio/ornith-1.5-35b-a3b`    | Free, local MoE, ~20 tok/s                  |
 
 ### Reasoning / debugging / planning
 
@@ -103,22 +105,21 @@ Rankings are informed by:
 
 | Rank | Model                            | Probe latency |
 |-----:|----------------------------------|--------------:|
-| 1    | `lmstudio/qwen2.5-coder-14b`     |        479 ms |
-| 2    | `x-ai/grok-4.20`                 |        768 ms |
-| 3    | `kimi-k2.7-code` (direct)        |        982 ms |
-| 4    | `deepseek/deepseek-v3.2-exp`     |       1091 ms |
-| 5    | `qwen/qwen3-coder`               |       1265 ms |
+| 1    | `x-ai/grok-4.20`                 |        768 ms |
+| 2    | `kimi-k2.7-code` (direct)        |        982 ms |
+| 3    | `deepseek/deepseek-v3.2-exp`     |       1091 ms |
+| 4    | `qwen/qwen3-coder`               |       1265 ms |
 
 ---
 
 ## Speed-mode → model mapping (summary)
 
-The `--speed` flag on `mullet` CLI biases the routing:
+The `--speed` flag on `mullet` CLI biases the routing. Without it the CLI uses `economy`; the default `balanced-mix` preset sets `balanced` for the delegation tools.
 
 | Speed mode    | Local LLM | Cheap cloud (DeepSeek/Qwen) | Premium (Sonnet/Opus/GPT-5) |
 |---------------|-----------|-----------------------------|------------------------------|
 | `economy`     | First     | Fallback                    | Never                        |
-| `balanced` (default) | Simple tasks | Most work          | Only for CRITICAL            |
+| `balanced` | Simple tasks | Most work          | Only for CRITICAL            |
 | `fast`        | Never     | Always                      | Only for CRITICAL            |
 | `max`         | Never     | Skipped                     | Always                       |
 | `premium`     | Never     | Skipped                     | Opus-first; auto-downgrade   |
@@ -140,7 +141,7 @@ python3 scripts/refresh_pricing.py --dry-run   # uses OPENROUTER_API_KEY from en
 # 2. Ping each model via opencode (verifies auth + tool-calling)
 opencode run -m openrouter/deepseek/deepseek-v4-flash "say ok"
 opencode run -m moonshot/kimi-k2.7-code "say ok"
-opencode run -m lmstudio/qwen2.5-coder-14b-instruct "say ok"
+opencode run -m lmstudio/ornith-1.5-35b-a3b "say ok"
 
 # 3. Inspect mullet's chosen route for a task (no actual call)
 mullet explain "your task description here"
@@ -156,7 +157,7 @@ files ≈ 200K-500K input tokens):
 
 | Model                            | Est. cost |
 |----------------------------------|----------:|
-| `lmstudio/qwen2.5-coder-14b`     | **$0.00** |
+| `lmstudio/ornith-1.5-35b-a3b`    | **$0.00** |
 | `deepseek/deepseek-v3.2-exp`     | $0.10 – $0.20 |
 | `qwen/qwen3-coder`               | $0.15 – $0.25 |
 | `kimi-k2.7-code` (moonshot direct) | $0.45 – $1.00 |
@@ -227,7 +228,7 @@ Commit as one `quality-score refresh YYYY-MM-DD` commit.
 
 ## Routing history — observability and management
 
-Mullet records every routed call to `.mullet/routing_history.jsonl` (append-only).
+Mullet records every routed call to `.mullet/routing_history.jsonl` in the project directory you run it from (append-only).
 The `mullet routing` CLI reads from this file:
 
 ```
@@ -253,4 +254,4 @@ In-repo sources of truth (read these when modifying routing logic):
 - `mullet/core/router/decision.py` — quality filter (`QUALITY_THRESHOLD`, `QUALITY_MIN_SAMPLES`).
 - `mullet/core/providers/budget_probe.py` — provider tier + balance detection.
 - `scripts/sync_openrouter_pricing.py` — drift checker (CI-friendly).
-- `docs/LOOP_AGREEMENT.md` §2 — the delegation ladder.
+- `docs/LOOP_AGREEMENT.md` §2: the delegation ladder for interactive Claude Code sessions.

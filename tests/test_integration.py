@@ -149,8 +149,8 @@ def test_skill_loading():
     registry = SkillRegistry(loader=loader)
     registry.load_all()
 
-    assert registry.get("autopilot") is not None
-    assert registry.get("ralph") is not None
+    assert registry.get("brainstorm") is not None
+    assert registry.get("mullet-job") is not None
     assert registry.get("code-review") is not None
 
     # Trigger matching
@@ -159,7 +159,7 @@ def test_skill_loading():
     assert match.skill.metadata.name == "code-review"
 
     # Informational intent should NOT trigger
-    match = registry.match("what is autopilot?")
+    match = registry.match("what is brainstorm?")
     assert match is None
 
 

@@ -1,7 +1,7 @@
 """Tests for context reference parsing and resolution."""
 
 import subprocess
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 
 from mullet.core.agent.context_refs import (
     ContextReference,

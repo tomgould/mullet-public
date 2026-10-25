@@ -179,8 +179,6 @@ def test_create_calls_converse(provider):
 def test_init_without_boto3():
     """Lines 28-29: ImportError raised when boto3 is unavailable."""
     with patch.dict(sys.modules, {"boto3": None}):
-        from mullet.core.providers import bedrock as _bedrock
-        import importlib
         # Force re-import to hit the ImportError path
         if "mullet.core.providers.bedrock" in sys.modules:
             del sys.modules["mullet.core.providers.bedrock"]

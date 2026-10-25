@@ -235,6 +235,25 @@ def test_classify_local_moe_suffix_preserves_coder_flag():
     assert c["coder"] is True
 
 
+@pytest.mark.parametrize("model_id,expected_tier", [
+    ("ornith-1.5-35b-a3b", "CRITICAL"),
+    ("ornith-1.5-9b", "ADVANCED"),
+])
+def test_classify_local_ornith_is_a_coder_family(model_id, expected_tier):
+    from mullet.core.router.routing_matrix import _classify_local_model
+    c = _classify_local_model(model_id)
+    assert c["coder"] is True
+    assert c["tier"] == expected_tier
+
+
+def test_select_local_code_task_picks_ornith_as_coder():
+    """A CRITICAL code task keeps the Ornith MoE over a same-size non-coder."""
+    pf = make_preflight(complexity_tier=Tier.CRITICAL)
+    model, reason = select_local_model(pf, ["ornith-1.5-35b-a3b", "qwen3.6-35b-a3b"])
+    assert model == "ornith-1.5-35b-a3b"
+    assert "coder" in reason.lower()
+
+
 # ---------------------------------------------------------------------------
 # FIX A/B regression tests — reasoning deprioritisation & known param counts
 # ---------------------------------------------------------------------------

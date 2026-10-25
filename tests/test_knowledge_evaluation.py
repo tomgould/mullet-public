@@ -9,7 +9,6 @@ import pytest
 
 from mullet.knowledge.engine.evaluation import (
     EvalCase,
-    EvalReport,
     EvalResult,
     aggregate_metrics,
     compute_rag_metrics,

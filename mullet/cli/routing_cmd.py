@@ -12,7 +12,6 @@ import argparse
 import json
 import sys
 from collections import Counter, defaultdict
-from pathlib import Path
 
 from mullet.core.routing_history import (
     _percentile,
@@ -32,7 +31,7 @@ RESET = ""
 _HAS_COLOR = False
 
 try:
-    from mullet.hud.colors import cyan, dim, bold, yellow, green, RESET
+    from mullet.hud.colors import cyan, dim, bold, yellow, green
     _HAS_COLOR = True
 except Exception:  # pragma: no cover — colors always available in test env
     pass  # pragma: no cover
@@ -485,12 +484,13 @@ def _cmd_simulate(args: list[str]) -> int:
 # ---------------------------------------------------------------------------
 
 def _cmd_log(args: list[str]) -> int:
-    """Tail ~/.mullet/routing.log — human-readable routing decision log."""
+    """Tail routing.log in the state directory — human-readable routing decision log."""
     p = argparse.ArgumentParser(prog="mullet routing log", add_help=False)
     p.add_argument("--tail", type=int, default=20, help="Last N lines to show")
     ns, _ = p.parse_known_args(args)
 
-    log_path = Path.home() / ".mullet" / "routing.log"
+    from mullet.core.paths import state_dir
+    log_path = state_dir() / "routing.log"
     if not log_path.exists():
         print("No routing.log yet — routing decisions are logged here as you run tasks.")
         return 0
@@ -715,7 +715,7 @@ def run(args: list[str]) -> int:
             "  simulate [--limit N] [--provider P] [--changed-only] [--format text|json] [--no-preset]"
             "   Replay history through current policy ('none' = no eligible provider)\n"
             "\n"
-            "All actions read from ~/.mullet/routing_history/, written by every\n"
+            "All actions read the project's .mullet/routing_history.jsonl, written by every\n"
             "routed delegation. See docs/MODEL_ROUTING.md and\n"
             "mullet/core/router/routing_matrix.py for routing rules."
         )

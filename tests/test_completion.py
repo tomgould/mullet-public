@@ -13,7 +13,7 @@ class TestBashCompletion:
 
     def test_contains_core_commands(self):
         script = bash_completion()
-        for cmd in ("autopilot", "ralph", "ultrawork", "reindex", "hud", "budget", "mcp"):
+        for cmd in ("job", "reindex", "hud", "budget", "mcp"):
             assert cmd in script
 
     def test_contains_provider_options(self):
@@ -44,7 +44,7 @@ class TestZshCompletion:
 
     def test_contains_core_commands(self):
         script = zsh_completion()
-        for cmd in ("autopilot", "ralph", "ultrawork", "reindex", "hud", "budget"):
+        for cmd in ("job", "reindex", "hud", "budget"):
             assert cmd in script
 
     def test_contains_provider_descriptions(self):

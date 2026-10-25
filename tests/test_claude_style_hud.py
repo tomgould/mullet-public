@@ -1,5 +1,3 @@
-import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from mullet.hud.claude_style import (

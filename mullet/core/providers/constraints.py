@@ -17,10 +17,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
-LEARNED_CONSTRAINTS_PATH = Path.home() / ".mullet" / "learned_constraints.json"
+# Tests point this at a temporary file; None means learned_constraints.json in
+# the state directory.
+LEARNED_CONSTRAINTS_PATH: Path | None = None
+
+
 LEARNED_TTL_DAYS = 30
+
+
+def _learned_constraints_path() -> Path:
+    return LEARNED_CONSTRAINTS_PATH or state_dir() / "learned_constraints.json"
 
 
 @dataclass
@@ -428,10 +438,11 @@ class ConstraintRegistry:
 
     def _load_learned(self) -> None:
         """Load learned constraints from disk, silently skipping entries older than TTL."""
-        if not LEARNED_CONSTRAINTS_PATH.exists():
+        path = _learned_constraints_path()
+        if not path.exists():
             return
         try:
-            raw = json.loads(LEARNED_CONSTRAINTS_PATH.read_text())
+            raw = json.loads(path.read_text())
             cutoff = time.time() - (LEARNED_TTL_DAYS * 24 * 3600)
             with self._lock:
                 for model_id, entry in raw.items():
@@ -442,14 +453,15 @@ class ConstraintRegistry:
 
     def _save_learned(self) -> None:
         """Atomically write learned constraints to disk."""
-        LEARNED_CONSTRAINTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        path = _learned_constraints_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             payload = dict(self._learned)
-        fd, tmp = tempfile.mkstemp(dir=LEARNED_CONSTRAINTS_PATH.parent, suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(payload, f, indent=2)
-            os.replace(tmp, LEARNED_CONSTRAINTS_PATH)
+            os.replace(tmp, path)
         except Exception:
             try:
                 os.unlink(tmp)

@@ -1,11 +1,9 @@
 """Tests for WebSourceConnector.sync() and _crawl() — httpx mocked."""
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from mullet.knowledge.sources.base import SyncResult
 from mullet.knowledge.sources.web_cache import CrawlCache

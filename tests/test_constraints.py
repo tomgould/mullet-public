@@ -462,7 +462,7 @@ def test_parse_error_openai_unsupported_param_no_regex():
     assert result == ("temperature", "openai model rejected parameter")
 
 
-def test_parse_error_anthropic_max_tokens_too_large():
+def test_parse_error_anthropic_max_tokens_too_large_second_form():
     """Cover line 552: anthropic max_tokens too large branch."""
     from mullet.core.providers.constraints import parse_constraint_error
     exc = Exception("invalid_request_error: max_tokens is too large")

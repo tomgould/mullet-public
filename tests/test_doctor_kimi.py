@@ -1,12 +1,17 @@
 """Tests for the Kimi check in `mullet doctor` (D8).
 
 Each test invokes the doctor as a subprocess with a controlled environment so
-that the system's real KIMI_API_KEY (if any) cannot influence the result.
+that the system's real KIMI_API_KEY (if any) cannot influence the result, and
+with a fake `claude` on PATH, since the doctor runs `claude --version`.
 """
 
 import os
 import subprocess
 import sys
+
+import pytest
+
+pytestmark = pytest.mark.usefixtures("fake_claude")
 
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +29,7 @@ def _run_doctor(env_overrides: dict, extra_args: list[str] | None = None,
     # won't overwrite existing vars; popping lets it re-inject from .env.
     env["KIMI_API_KEY"] = ""
     env["MOONSHOT_API_KEY"] = ""
+    env["PYTHONPATH"] = _REPO_ROOT
     env.update(env_overrides)
     args = [sys.executable, "-m", "mullet.cli.main", "doctor"]
     if extra_args:

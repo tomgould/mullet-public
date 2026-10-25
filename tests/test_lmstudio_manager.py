@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from mullet.core.providers.lmstudio_manager import LMStudioManager
 
 
@@ -210,7 +210,9 @@ class TestLMStudioManager:
 
             assert result is True
             
-            # Assert unload was called
-            mock_run_lms.call_args_list[0].assert_called_with(["unload", "qwen-model"])
-            # Assert load was called
-            mock_run_lms.call_args_list[1].assert_called_with(["load", "--ttl", "120", "--yes", "qwen-model"])
+            # Assert unload, then load with the caller's TTL and the fixed context length
+            assert mock_run_lms.call_args_list[0] == call(["unload", "qwen-model"])
+            assert mock_run_lms.call_args_list[1] == call(
+                ["load", "--ttl", "120", "--context-length", "32768", "--yes", "qwen-model"],
+                timeout=120,
+            )

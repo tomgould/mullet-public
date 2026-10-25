@@ -1,11 +1,10 @@
-"""Tests for ProcessRegistry, QueryRefiner, GoalDetector, BedrockStream,
+"""Tests for ProcessRegistry, QueryRefiner, BedrockStream,
 CodeChunk/BaseExtractor helpers, JSONExtractor, and GherkinExtractor."""
 
 import json
 
 from mullet.core.tools.process_registry import ProcessRegistry
 from mullet.core.knowledge.query_refinement import QueryRefiner
-from mullet.core.orchestration.autopilot_goals import GoalDetector
 from mullet.core.providers.bedrock_stream import BedrockStreamEvent, BedrockStreamHandler
 from mullet.knowledge.code.extractors.base import CodeChunk
 from mullet.knowledge.code.extractors.json_extractor import JSONExtractor, _strip_jsonc
@@ -116,62 +115,6 @@ class TestQueryRefiner:
         qr = QueryRefiner()
         result = qr.expand_query("")
         assert isinstance(result, str)
-
-
-# ---------------------------------------------------------------------------
-# GoalDetector
-# ---------------------------------------------------------------------------
-
-class TestGoalDetector:
-    def test_returns_bool(self):
-        gd = GoalDetector()
-        assert isinstance(gd.is_goal_met("task", "result"), bool)
-
-    def test_full_overlap_returns_true(self):
-        gd = GoalDetector()
-        # Task keywords all appear in result
-        assert gd.is_goal_met("build authentication system", "I built the authentication system") is True
-
-    def test_zero_overlap_returns_false(self):
-        gd = GoalDetector()
-        assert gd.is_goal_met("build authentication system", "nothing related here") is False
-
-    def test_50_percent_overlap_returns_true(self):
-        gd = GoalDetector()
-        # Task: "fix authentication bug" → keywords: {fix, authentication, bug}
-        # Result: "I fixed the authentication" → keywords: {fixed, the, authentication} — "fix"/"authentication" overlap
-        # This may vary based on stemming — test with clear 50%+ case
-        assert gd.is_goal_met("fix auth", "I fixed auth system") is True
-
-    def test_empty_task_returns_false(self):
-        gd = GoalDetector()
-        assert gd.is_goal_met("", "some result here") is False
-
-    def test_extract_keywords_returns_set(self):
-        gd = GoalDetector()
-        result = gd._extract_keywords("hello world foo")
-        assert isinstance(result, set)
-
-    def test_extract_keywords_filters_short(self):
-        gd = GoalDetector()
-        # Words <= 2 chars filtered out
-        result = gd._extract_keywords("I am a coder")
-        assert "i" not in result
-        assert "am" not in result
-        assert "a" not in result
-        assert "coder" in result
-
-    def test_extract_keywords_lowercases(self):
-        gd = GoalDetector()
-        result = gd._extract_keywords("Hello WORLD")
-        assert "hello" in result
-        assert "world" in result
-
-    def test_extract_keywords_handles_punctuation(self):
-        gd = GoalDetector()
-        result = gd._extract_keywords("fix, the bug!")
-        assert "bug" in result
-        assert "fix" in result
 
 
 # ---------------------------------------------------------------------------

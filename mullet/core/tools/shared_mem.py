@@ -12,8 +12,15 @@ from mullet.core.orchestration.shared_memory import SharedMemory
 
 logger = logging.getLogger(__name__)
 
-# Initialize SharedMemory
-shared_memory = SharedMemory()
+# Created on first use, so importing this module writes nothing to disk.
+shared_memory: SharedMemory | None = None
+
+
+def _store() -> SharedMemory:
+    global shared_memory
+    if shared_memory is None:
+        shared_memory = SharedMemory()
+    return shared_memory
 
 SHARED_MEM_SCHEMA = {
     "description": (
@@ -67,27 +74,27 @@ def shared_mem_handler(
         if action == "set":
             if key is None or value is None:
                 return json.dumps({"error": "Key and value are required for 'set' action."})
-            shared_memory.set(key, value, namespace, ttl)
+            _store().set(key, value, namespace, ttl)
             return json.dumps({"status": "success", "action": "set", "key": key, "namespace": namespace})
 
         elif action == "get":
             if key is None:
                 return json.dumps({"error": "Key is required for 'get' action."})
-            result = shared_memory.get(key, namespace)
+            result = _store().get(key, namespace)
             return json.dumps({"status": "success", "action": "get", "key": key, "namespace": namespace, "value": result})
 
         elif action == "delete":
             if key is None:
                 return json.dumps({"error": "Key is required for 'delete' action."})
-            result = shared_memory.delete(key, namespace)
+            result = _store().delete(key, namespace)
             return json.dumps({"status": "success", "action": "delete", "key": key, "namespace": namespace, "deleted": result})
 
         elif action == "list_keys":
-            keys = shared_memory.list_keys(namespace)
+            keys = _store().list_keys(namespace)
             return json.dumps({"status": "success", "action": "list_keys", "namespace": namespace, "keys": keys})
 
         elif action == "list_namespaces":
-            namespaces = shared_memory.list_namespaces()
+            namespaces = _store().list_namespaces()
             return json.dumps({"status": "success", "action": "list_namespaces", "namespaces": namespaces})
 
         return json.dumps({"error": f"Invalid action: {action}"})

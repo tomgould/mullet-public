@@ -4,15 +4,12 @@ Uses mocking for all external boundaries (subprocess, os, sys.stdin, etc.).
 """
 from __future__ import annotations
 
-import io
 import json
-import runpy
 import sys
 from datetime import datetime, timezone
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.hud.cli import (
     HudDeps,

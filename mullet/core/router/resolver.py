@@ -7,6 +7,7 @@ credentials from environment variables.
 import logging
 import os
 
+from mullet.core.env import local_llm_url
 from mullet.core.providers.base import Provider
 from mullet.core.providers.openai_compat import OpenAICompatibleProvider
 from mullet.core.router.decision import ProviderEntry, Router, RoutingDecision
@@ -115,7 +116,7 @@ class ProviderResolver:
             if is_escalation_recommended("local", allowed=allowed_providers):
                 logger.warning("Local provider has hit failure threshold — skipping, will use cloud fallback")
                 return None
-            base_url = getattr(entry, "base_url", "") or "http://localhost:1234/v1"
+            base_url = getattr(entry, "base_url", "") or local_llm_url()
             # Use context-aware local model selection if no explicit model given
             if not model or model == "default":
                 try:

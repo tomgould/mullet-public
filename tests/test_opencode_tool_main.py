@@ -11,7 +11,6 @@ import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 import mullet.tools.opencode_tool as _oc
 

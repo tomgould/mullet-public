@@ -6,7 +6,7 @@ from pathlib import Path
 from mullet.core.logging.interaction_log import (
     _extract_preview,
     _extract_last_user_message,
-    DEFAULT_DB_PATH,
+    default_db_path,
 )
 from mullet.core.budget_advisor import (
     _estimate_tokens,
@@ -100,18 +100,18 @@ class TestExtractLastUserMessage:
 
 
 # ---------------------------------------------------------------------------
-# DEFAULT_DB_PATH
+# default_db_path
 # ---------------------------------------------------------------------------
 
 class TestDefaultDbPath:
     def test_is_path(self):
-        assert isinstance(DEFAULT_DB_PATH, Path)
+        assert isinstance(default_db_path(), Path)
 
     def test_ends_with_db_extension(self):
-        assert str(DEFAULT_DB_PATH).endswith(".db")
+        assert str(default_db_path()).endswith(".db")
 
     def test_under_home_dir(self):
-        assert str(Path.home()) in str(DEFAULT_DB_PATH)
+        assert str(Path.home()) in str(default_db_path())
 
 
 # ---------------------------------------------------------------------------

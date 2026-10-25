@@ -14,9 +14,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 
-from mullet.core.router.complexity import PROVIDER_TIER_CAPABILITIES, Tier
+from mullet.core.router.complexity import PROVIDER_TIER_CAPABILITIES
 from mullet.core.router.decision import ProviderEntry, Router
 
 
@@ -347,12 +346,7 @@ class TestGeminiNotCheapCloud:
         ):
             # Patch detect_local_provider to return None so local doesn't interfere
             with patch("mullet.cli.main.detect_local_provider", return_value=None):
-                # Patch Claude Max to avoid reading real OAuth token
-                with patch(
-                    "mullet.core.providers.claude_max._read_oauth_token",
-                    return_value=None,
-                ):
-                    router, _ = build_default_router()
+                router, _ = build_default_router()
 
         cheap = router.providers.get("cheap_cloud")
         assert cheap is not None, "cheap_cloud must be registered when kimi key is set"
@@ -379,11 +373,7 @@ class TestGeminiNotCheapCloud:
             clear=False,
         ):
             with patch("mullet.cli.main.detect_local_provider", return_value=None):
-                with patch(
-                    "mullet.core.providers.claude_max._read_oauth_token",
-                    return_value=None,
-                ):
-                    router, _ = build_default_router()
+                router, _ = build_default_router()
 
         cheap = router.providers.get("cheap_cloud")
         # After Phase E: gemini does NOT fill cheap_cloud
@@ -411,11 +401,7 @@ class TestGeminiNotCheapCloud:
             clear=False,
         ):
             with patch("mullet.cli.main.detect_local_provider", return_value=None):
-                with patch(
-                    "mullet.core.providers.claude_max._read_oauth_token",
-                    return_value=None,
-                ):
-                    router, _ = build_default_router()
+                router, _ = build_default_router()
 
         cheap = router.providers.get("cheap_cloud")
         assert cheap is not None, "cheap_cloud must be registered when openrouter key is set"

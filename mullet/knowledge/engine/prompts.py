@@ -8,8 +8,10 @@ logger = logging.getLogger(__name__)
 
 def discover_prompts(search_dirs: list[str] | None = None) -> list[dict]:
     """Discover prompt template files from search directories."""
+    from mullet.core.paths import data_dir
+
     dirs = search_dirs or [
-        str(Path.home() / ".mullet" / "prompts"),
+        str(data_dir() / "prompts"),
         str(Path.cwd() / ".mullet" / "prompts"),
         str(Path.cwd() / "prompts"),
     ]

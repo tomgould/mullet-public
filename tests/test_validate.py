@@ -152,7 +152,7 @@ def test_bedrock_provider_type_valid():
 # ValidationResult — add_error, add_warning, format
 # ---------------------------------------------------------------------------
 
-from mullet.config.validate import ValidationResult, ValidationIssue
+from mullet.config.validate import ValidationResult
 
 
 class TestValidationResult:

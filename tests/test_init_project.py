@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -112,38 +111,39 @@ def test_init_copies_loop_agreement(mock_pool, tmp_path, mock_args):
 
 @patch("mullet.cli.create_pool.create_pool_silent")
 def test_init_installs_hook(mock_pool, tmp_path, mock_args):
+    """The project's settings run the hook through `mullet hook`; no script is copied."""
     run_init(mock_args)
-    hook = tmp_path / ".claude" / "hooks" / "delegation_reminder.py"
-    assert hook.exists()
     settings = tmp_path / ".claude" / "settings.json"
-    assert settings.exists()
-    assert "delegation_reminder.py" in settings.read_text()
+    data = json.loads(settings.read_text())
+    commands = [h["command"] for g in data["hooks"]["UserPromptSubmit"] for h in g["hooks"]]
+    assert commands == ["mullet hook delegation-reminder"]
+    assert not (tmp_path / ".claude" / "hooks").exists()
 
 
-@patch("mullet.cli.create_pool.create_pool_silent")
-def test_init_copies_hook_with_its_gate_module(mock_pool, tmp_path, mock_args):
-    """delegation_reminder.py imports _delegation_gate from its own folder."""
-    run_init(mock_args)
-    hooks = tmp_path / ".claude" / "hooks"
-    assert (hooks / "_delegation_gate.py").exists()
-    result = subprocess.run(
-        [sys.executable, str(hooks / "delegation_reminder.py")],
-        input=json.dumps({"prompt": "hello"}), capture_output=True, text=True,
-        cwd=tmp_path, timeout=60,
-    )
-    assert "ModuleNotFoundError" not in result.stderr
-    assert result.returncode == 0
+def test_init_hook_command_names_a_real_hook():
+    from mullet.cli.init_project import _HOOK_COMMAND
+    from mullet.hooks import find
+
+    assert _HOOK_COMMAND.startswith("mullet hook ")
+    assert find(_HOOK_COMMAND.split()[-1]) is not None
 
 
-def test_update_copies_hook_with_its_gate_module(tmp_path):
+def test_update_points_old_hook_at_mullet_hook(tmp_path, capsys):
+    """A project set up by an older `mullet init` gets its hook command updated."""
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    old = "python3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/delegation_reminder.py"
+    settings.write_text(json.dumps({"hooks": {"UserPromptSubmit": [
+        {"matcher": "", "hooks": [{"type": "command", "command": old}]}]}}))
     args = argparse.Namespace(
         target_dir=str(tmp_path), dry_run=False, no_claude=False,
         remaining=["update", str(tmp_path)],
     )
     run_update(args)
-    hooks = tmp_path / ".claude" / "hooks"
-    assert (hooks / "delegation_reminder.py").exists()
-    assert (hooks / "_delegation_gate.py").exists()
+    text = settings.read_text()
+    assert old not in text
+    assert "mullet hook delegation-reminder" in text
+    assert "Pointed the delegation hook" in capsys.readouterr().out
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")
@@ -304,34 +304,6 @@ def test_init_settings_json_exists_no_force(mock_pool, tmp_path, mock_args, caps
     assert settings.read_text() == "existing"
     captured = capsys.readouterr()
     assert ".claude/settings.json exists, skipping" in captured.out
-
-
-@patch("mullet.cli.create_pool.create_pool_silent")
-def test_init_hook_exists_no_force(mock_pool, tmp_path, mock_args, capsys):
-    """Line 215: .claude/hooks/delegation_reminder.py exists and not force → skip."""
-    hook = tmp_path / ".claude" / "hooks" / "delegation_reminder.py"
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("existing")
-    run_init(mock_args)
-    assert hook.read_text() == "existing"
-    captured = capsys.readouterr()
-    assert ".claude/hooks/delegation_reminder.py exists, skipping" in captured.out
-
-
-@patch("mullet.cli.create_pool.create_pool_silent")
-def test_init_hook_not_found(mock_pool, tmp_path, mock_args, capsys, monkeypatch):
-    """Line 238: scripts/hooks/delegation_reminder.py not found → skip with warning."""
-    original_exists = Path.exists
-
-    def fake_exists(self):
-        if "delegation_reminder.py" in str(self):
-            return False
-        return original_exists(self)
-
-    monkeypatch.setattr(Path, "exists", fake_exists)
-    run_init(mock_args)
-    captured = capsys.readouterr()
-    assert "scripts/hooks/delegation_reminder.py not found, skipping" in captured.out
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")
@@ -645,19 +617,11 @@ def test_update_claude_md_dry_run(update_args, tmp_path, capsys):
     assert "- Old rule" in claude_md.read_text()
 
 
-def test_update_hook_not_found(update_args, tmp_path, capsys, monkeypatch):
-    """Line 386: scripts/hooks/delegation_reminder.py not found → skip."""
-    original_exists = Path.exists
-
-    def fake_exists(self):
-        if "delegation_reminder.py" in str(self):
-            return False
-        return original_exists(self)
-
-    monkeypatch.setattr(Path, "exists", fake_exists)
+def test_update_without_old_hook_skips(update_args, tmp_path, capsys):
+    """No settings.json with the old hook command: nothing to update."""
     run_update(update_args)
     captured = capsys.readouterr()
-    assert "scripts/hooks/delegation_reminder.py not found" in captured.out
+    assert "no old delegation hook to update, skipping" in captured.out
 
 
 @patch("mullet.cli.create_pool.create_pool_silent")

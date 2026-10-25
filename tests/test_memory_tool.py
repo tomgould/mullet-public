@@ -216,3 +216,25 @@ class TestMemoryMissingLines:
         runpy.run_module(mod_name, run_name='__main__')
         assert os.path.exists(test_dir)
         shutil.rmtree(test_dir)
+
+
+class TestMemoryLocation:
+    def test_import_writes_nothing_to_the_working_directory(self, tmp_path, monkeypatch):
+        import importlib
+        import mullet.core.tools.memory as memory_mod
+        monkeypatch.chdir(tmp_path)
+        importlib.reload(memory_mod)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_default_store_lives_in_the_data_dir(self, tmp_path, monkeypatch):
+        from mullet.core import paths
+        monkeypatch.chdir(tmp_path)
+        store = MemoryStore()
+        assert store.storage_dir == str(paths.data_dir() / "memory")
+        assert not (tmp_path / ".mullet").exists()
+
+    def test_handler_creates_the_default_store_on_first_use(self, monkeypatch):
+        import mullet.core.tools.memory as memory_mod
+        monkeypatch.setattr(memory_mod, "_memory_store", None)
+        assert memory_mod.memory_handler(action="list_keys") == "[]"
+        assert memory_mod._memory_store is not None

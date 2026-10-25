@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 class SharedMemory:
     """Persistent key-value store for cross-agent memory."""
-    def __init__(self, base_dir: str = '.mullet/state/shared-memory'):
+    def __init__(self, base_dir: str | None = None):
+        if base_dir is None:
+            from mullet.core.paths import state_dir
+            base_dir = str(state_dir() / "shared-memory")
         self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
 

@@ -8,7 +8,6 @@ import time
 import unittest.mock
 from pathlib import Path
 
-import pytest
 import yaml
 
 from mullet.cli.pool_audit import (
@@ -26,8 +25,6 @@ from mullet.cli.pool_audit import (
     _check_extension_coverage,
     _issue_fix_commands,
     PoolHealthIssue,
-    _force_rmtree,
-    _purge_pool_sidecars,
     _get_graph_info,
     _classify_sources,
 )
@@ -668,7 +665,7 @@ class TestRunPoolPrune:
 
         # audit_pools returns this pool as candidate (no config.yaml actually means candidate,
         # but we have config.yaml, so we need to patch audit_pools to return a candidate)
-        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo, _DocEntry
+        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo
 
         audit = PoolAudit(
             name="pool",
@@ -703,7 +700,7 @@ class TestRunPoolPrune:
         pool = tmp_path / "pool"
         pool.mkdir()
 
-        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo, _DocEntry
+        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo
 
         audit = PoolAudit(
             name="pool",
@@ -731,7 +728,7 @@ class TestRunPoolPrune:
         )
         monkeypatch.setattr(
             "mullet.cli.pool_audit._purge_pool_sidecars",
-            lambda _n, _s, _h: (5, ["warning1"]),
+            lambda _n, _s, _h, _d=None: (5, ["warning1"]),
         )
         run_pool_prune(tmp_path, yes=True)
         out = capsys.readouterr().out
@@ -742,7 +739,7 @@ class TestRunPoolPrune:
         pool = tmp_path / "pool"
         pool.mkdir()
 
-        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo, _DocEntry
+        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo
 
         audit = PoolAudit(
             name="pool",
@@ -772,7 +769,7 @@ class TestRunPoolPrune:
         pool = tmp_path / "pool"
         pool.mkdir()
 
-        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo, _DocEntry
+        from mullet.cli.pool_audit import PoolAudit, _VectorInfo, _GraphInfo
 
         audit = PoolAudit(
             name="pool",

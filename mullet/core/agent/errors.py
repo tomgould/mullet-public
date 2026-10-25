@@ -12,8 +12,8 @@ ERROR_SUGGESTIONS = {
     "connection refused": {
         "message": "Cannot connect to LLM provider",
         "suggestions": [
-            "Start LM Studio (port 1234) or Ollama (port 11434)",
-            "Check that the provider is running: curl http://localhost:1234/v1/models",
+            "Start LM Studio (port 1234) or Ollama (port 11434), or set LOCAL_LLM_URL / OLLAMA_URL",
+            "Check that the provider is running: curl $LOCAL_LLM_URL/models (default http://localhost:1234/v1)",
             "Or use --base-url to specify a different endpoint",
         ],
     },

@@ -17,7 +17,7 @@ class SkillLoader:
 
     Scan order (highest priority first):
     1. Project skills: .mullet/skills/
-    2. User skills: ~/.mullet/skills/
+    2. User skills: skills/ in the data directory
     3. External dirs from config
     4. Built-in skills: package builtin/
     """
@@ -31,7 +31,10 @@ class SkillLoader:
         disabled: list[str] | None = None,
     ):
         self._builtin_dir = builtin_dir or (Path(__file__).parent / "builtin")
-        self._user_dir = user_dir or (Path.home() / ".mullet" / "skills")
+        if user_dir is None:
+            from mullet.core.paths import data_dir
+            user_dir = data_dir() / "skills"
+        self._user_dir = user_dir
         self._project_dir = project_dir or Path(".mullet") / "skills"
         self._external_dirs = external_dirs or []
         self._disabled = set(disabled or [])

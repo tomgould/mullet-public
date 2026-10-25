@@ -1,7 +1,9 @@
 """OpenAI-compatible provider covering LM Studio, Ollama, vLLM, OpenRouter, OpenAI."""
 
+import json
 import logging
 import threading
+import urllib.request
 import uuid
 from contextlib import contextmanager
 from openai import OpenAI
@@ -181,8 +183,14 @@ class OpenAICompatibleProvider(Provider):
         temperature: float = 0.7,
         stream: bool = False,
         reasoning_config: dict | None = None,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        """Send a chat completion request and return a normalised LLMResponse."""
+        """Send a chat completion request and return a normalised LLMResponse.
+
+        ``reasoning_effort`` is sent as the OpenAI-style top-level field;
+        LM Studio honours ``"none"`` to switch thinking off on local
+        reasoning models (Ornith, Qwen3.x).
+        """
         kwargs: dict = {
             "model": self.model,
             "messages": messages,
@@ -194,6 +202,8 @@ class OpenAICompatibleProvider(Provider):
         # Pass reasoning config for O3/extended thinking models (OpenRouter)
         if reasoning_config:
             kwargs["reasoning"] = reasoning_config
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
         # OpenRouter provider preferences
         if self._openrouter_config:
             transforms = {}
@@ -602,20 +612,25 @@ class OpenAICompatibleProvider(Provider):
         )
 
     def health_check(self) -> bool:
-        """Health check — verifies the endpoint can actually serve a chat completion.
+        """Whether a model is ready to serve right now, without loading one.
 
-        /v1/models lists downloaded models, not loaded ones. LM Studio returns a
-        non-empty model list even when nothing is loaded into VRAM. A minimal
-        completion probe is the only reliable way to detect 'no model loaded'.
+        A completion probe made LM Studio load a model onto the GPU just to
+        answer "is it up?", so this only reads model lists. LM Studio's own
+        /api/v0/models reports which models are loaded; any other server is
+        healthy when its model list answers.
         """
+        base = str(self.client.base_url).rstrip("/")
+        root = base[: -len("/v1")] if base.endswith("/v1") else base
         try:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-                timeout=5.0,
-            )
-            return bool(resp.choices)
+            req = urllib.request.Request(f"{root}/api/v0/models", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                data = json.loads(resp.read())
+        except Exception:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            return any(isinstance(m, dict) and m.get("state") == "loaded" for m in data["data"])
+        try:
+            return bool(getattr(self.client.models.list(timeout=3.0), "data", None))
         except Exception as e:
             logger.debug("Health check failed for %s: %s", self.name, e)
             return False

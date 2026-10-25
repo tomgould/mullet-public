@@ -1,6 +1,5 @@
 """Test per-task provider overrides in delegate_batch (Phase C1 routing-v2)."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 from mullet.core.agent.delegation import delegate_batch

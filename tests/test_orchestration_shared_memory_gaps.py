@@ -1,6 +1,5 @@
 """Tests for shared_memory.py missing coverage lines."""
 
-import json
 import time
 from pathlib import Path
 from unittest.mock import patch

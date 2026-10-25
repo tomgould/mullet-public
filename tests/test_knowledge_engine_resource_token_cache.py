@@ -1,11 +1,10 @@
 """Tests for resource_manager.py, search/tokenizer.py, and model_cache.py."""
-import gc
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from mullet.knowledge.engine.resource_manager import ResourceManager
 from mullet.knowledge.engine.search.tokenizer import (
-    advanced_tokenize, EnhancedTokenizer, STOP_WORDS, TOKENIZER_VERSION
+    advanced_tokenize, EnhancedTokenizer
 )
 from mullet.knowledge.engine.model_cache import ModelCache, get_model_cache
 

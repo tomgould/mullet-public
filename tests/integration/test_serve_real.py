@@ -67,7 +67,7 @@ def test_serve_info():
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
             assert data["tool_count"] >= 13
-            assert data["skill_count"] >= 7
+            assert data["skill_count"] >= 6
             assert "providers" in data
     finally:
         proc.terminate()

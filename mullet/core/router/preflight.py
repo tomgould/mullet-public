@@ -11,6 +11,7 @@ import re
 import time
 from pathlib import Path
 
+from mullet.core.paths import cache_dir
 from mullet.core.router.complexity import (
     Tier, is_simple_message, extract_signals, score_complexity,
     score_to_tier, is_reasoning_task,
@@ -20,8 +21,15 @@ from mullet.core.providers.tokenize import estimate_tokens
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL_DAYS = 7
-_CACHE: dict[str, PreflightResult] = {}
-_CACHE_PATH = Path.home() / ".mullet" / "cache" / "preflight.jsonl"
+# The in-memory cache, loaded from disk on first use; tests set it directly.
+_CACHE: dict[str, PreflightResult] | None = None
+# Tests point this at a temporary file; None means preflight.jsonl in the
+# cache directory.
+_CACHE_PATH: Path | None = None
+
+
+def _cache_path() -> Path:
+    return _CACHE_PATH or cache_dir() / "preflight.jsonl"
 
 
 @dataclass(frozen=True)
@@ -41,11 +49,12 @@ class PreflightResult:
 def _load_cache() -> dict[str, PreflightResult]:
     """Read the disk cache, dropping stale entries."""
     cache: dict[str, PreflightResult] = {}
-    if not _CACHE_PATH.exists():
+    path = _cache_path()
+    if not path.exists():
         return cache
     cutoff = time.time() - (_CACHE_TTL_DAYS * 24 * 3600)
     try:
-        with _CACHE_PATH.open("r", encoding="utf-8") as f:
+        with path.open("r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -72,13 +81,20 @@ def _load_cache() -> dict[str, PreflightResult]:
     return cache
 
 
-_CACHE = _load_cache()
+def _memory_cache() -> dict[str, PreflightResult]:
+    """The in-memory cache, read from disk the first time it is needed."""
+    global _CACHE
+    if _CACHE is None:
+        _CACHE = _load_cache()
+    return _CACHE
 
 
 def _save_to_cache(key: str, result: PreflightResult) -> None:
     """Append *result* to the cache atomically; rewrite whole file if stale."""
-    _CACHE[key] = result
-    _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    cache = _memory_cache()
+    cache[key] = result
+    path = _cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "key": key,
         "result": {
@@ -92,11 +108,11 @@ def _save_to_cache(key: str, result: PreflightResult) -> None:
         },
         "written_at": int(time.time()),
     }
-    tmp = _CACHE_PATH.with_suffix(".tmp")
+    tmp = path.with_suffix(".tmp")
     try:
         with tmp.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, separators=(",", ":")) + "\n")
-        os.replace(tmp, _CACHE_PATH)
+        os.replace(tmp, path)
     except Exception as exc:
         logger.debug("Failed to append to preflight cache: %s", exc)
         return
@@ -105,12 +121,12 @@ def _save_to_cache(key: str, result: PreflightResult) -> None:
     cutoff = time.time() - (_CACHE_TTL_DAYS * 24 * 3600)
     if any(
         (getattr(r, "_cached_written_at", None) or 0) < cutoff
-        for r in _CACHE.values()
+        for r in cache.values()
     ):
         try:
             fresh_lines = []
             now = int(time.time())
-            for k, r in _CACHE.items():
+            for k, r in cache.items():
                 rec = {
                     "key": k,
                     "result": {
@@ -127,7 +143,7 @@ def _save_to_cache(key: str, result: PreflightResult) -> None:
                 fresh_lines.append(json.dumps(rec, separators=(",", ":")))
             with tmp.open("w", encoding="utf-8") as f:
                 f.write("\n".join(fresh_lines) + "\n")
-            os.replace(tmp, _CACHE_PATH)
+            os.replace(tmp, path)
         except Exception as exc:
             logger.debug("Failed to rewrite preflight cache: %s", exc)
 
@@ -193,8 +209,9 @@ def analyze_prompt(
     """Analyze a task and return preflight routing metadata."""
     input_tokens = estimate_tokens(task)
     cache_key = _cache_key(task, files, agent_type)
-    if cache_key in _CACHE:
-        cached = _CACHE[cache_key]
+    memory_cache = _memory_cache()
+    if cache_key in memory_cache:
+        cached = memory_cache[cache_key]
         return PreflightResult(
             input_tokens=cached.input_tokens,
             expected_output_tokens=cached.expected_output_tokens,
@@ -237,10 +254,13 @@ def _try_local_llm(task: str) -> PreflightResult | None:
         if provider is None:
             return None
         start = time.monotonic()
+        # Thinking off: a local reasoning model would otherwise spend the whole
+        # 200-token budget thinking and return empty content.
         response = provider.create(
             messages=[{"role": "user", "content": _META_PROMPT.format(task=task[:8000])}],
             max_tokens=200,
             temperature=0.0,
+            reasoning_effort="none",
         )
         latency_ms = int((time.monotonic() - start) * 1000)
         data = _parse_meta_json(response.content)

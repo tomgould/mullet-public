@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/compress_whitespace.py"""
+"""Tests for mullet/hooks/compress_whitespace.py (and its scripts/hooks shim)."""
 
 import json
 import subprocess
@@ -8,7 +8,7 @@ from pathlib import Path
 
 HOOK = Path(__file__).parent.parent / "scripts" / "hooks" / "compress_whitespace.py"
 
-from scripts.hooks.compress_whitespace import compress
+from mullet.hooks.compress_whitespace import compress
 
 
 # --- Unit tests for compress() ---

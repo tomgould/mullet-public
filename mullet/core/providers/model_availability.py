@@ -25,7 +25,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Tests point this at a temporary file; None means ~/.mullet/unavailable_models.json.
+# Tests point this at a temporary file; None means unavailable_models.json in
+# the state directory.
 STORE_PATH: Path | None = None
 
 TTL_SECONDS = 24 * 3600
@@ -45,7 +46,8 @@ _SUGGESTED_SLUG = re.compile(r"use this slug instead:\s*([A-Za-z0-9._:/-]+)", re
 
 
 def _store_path() -> Path:
-    return STORE_PATH or Path.home() / ".mullet" / "unavailable_models.json"
+    from mullet.core.paths import state_dir
+    return STORE_PATH or state_dir() / "unavailable_models.json"
 
 
 def is_model_unavailable_error(exc: BaseException) -> bool:

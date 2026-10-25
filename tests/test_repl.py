@@ -3,6 +3,7 @@
 Uses mocked provider and simulated input/output.
 """
 
+import signal
 from unittest.mock import MagicMock, patch
 from io import StringIO
 
@@ -191,7 +192,6 @@ def test_repl_history_with_conversation(capsys):
         captured_handler['h'] = handler
         return signal.getsignal(signum)
 
-    import signal as signal_mod
 
     with patch("builtins.input", side_effect=["what is 6*7?", "history", "exit"]), \
          patch("sys.stdout", new_callable=StringIO) as mock_out, \
@@ -307,7 +307,6 @@ def test_repl_interrupt_handler_no_agent():
 def test_repl_interrupt_handler_with_active_agent():
     """Lines 58-59: _interrupt_handler called while agent runs → interrupt() called."""
     import signal as signal_mod
-    import pytest
 
     provider = _make_mock_provider()
     registry = ToolRegistry()
@@ -351,7 +350,6 @@ def test_repl_interrupt_handler_with_active_agent():
 
 def test_repl_skill_match_verbose():
     """Lines 110-113: skill match with verbose=True → skill name printed to stderr."""
-    import signal as signal_mod
 
     provider = _make_mock_provider()
     registry = ToolRegistry()

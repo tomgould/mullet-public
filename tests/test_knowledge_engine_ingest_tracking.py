@@ -1,9 +1,7 @@
 """Tests for ingest_progress.py and ingest_job.py."""
 import json
 import time
-import threading
 import pytest
-from pathlib import Path
 
 from mullet.knowledge.engine.ingest_progress import (
     IngestionProgress, IngestionCheckpoint, CHECKPOINT_FILENAME

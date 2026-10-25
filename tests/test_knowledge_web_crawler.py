@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import MagicMock, patch, call
-from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import httpx
 from mullet.knowledge.sources.web_crawler import (

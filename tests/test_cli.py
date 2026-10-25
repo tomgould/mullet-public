@@ -56,22 +56,13 @@ def test_parser_skills_flag():
     assert args.list_skills is True
 
 
-def test_parser_resume_flag():
-    parser = build_parser()
-    args = parser.parse_args(["--resume", "ralph"])
-    assert args.resume is True
-
-
 def test_subcommands_defined():
     assert "serve" in SUBCOMMANDS
     assert "mcp" in SUBCOMMANDS
     assert "doctor" in SUBCOMMANDS
-    assert "autopilot" in SUBCOMMANDS
-    assert "ralph" in SUBCOMMANDS
-    assert "ultrawork" in SUBCOMMANDS
-    assert "team" in SUBCOMMANDS
-    assert "eco" in SUBCOMMANDS
     assert "login" in SUBCOMMANDS
+    for removed in ("autopilot", "ralph", "ralphthon", "ultrawork", "team", "eco"):
+        assert removed not in SUBCOMMANDS
 
 
 def test_tool_registry_has_all_tools():

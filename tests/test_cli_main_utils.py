@@ -2,9 +2,6 @@
 
 import argparse
 import json
-import os
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -14,75 +11,6 @@ from mullet.core.agent.types import AgentResult, TokenUsage
 
 # Import the module under test
 import mullet.cli.main as main_module
-
-
-# ---------------------------------------------------------------------------
-# _load_dotenv
-# ---------------------------------------------------------------------------
-
-class FakePath:
-    """Minimal Path stand-in that resolves deep inside tmp_path so
-    .parent.parent.parent lands back on tmp_path."""
-
-    def __init__(self, *args, tmp_path: Path):
-        self._tmp_path = tmp_path
-
-    def resolve(self):
-        # 3 parents up from this file -> tmp_path
-        return self._tmp_path / "mullet" / "cli" / "main.py"
-
-
-def _patch_path_and_load(monkeypatch, tmp_path: Path, env_file_exists: bool = False, env_content: str = ""):
-    """Patch Path inside main_module and call _load_dotenv() directly."""
-    env_file = tmp_path / ".env"
-    if env_file_exists:
-        env_file.write_text(env_content)
-
-    monkeypatch.setattr(
-        main_module, "Path", lambda *a, **kw: FakePath(*a, **kw, tmp_path=tmp_path)
-    )
-    main_module._load_dotenv()
-
-
-class TestLoadDotenv:
-    def test_no_env_file(self, monkeypatch, tmp_path):
-        _patch_path_and_load(monkeypatch, tmp_path, env_file_exists=False)
-        # nothing should change in os.environ
-        assert "MULLET_FAKE_VAR" not in os.environ
-
-    def test_with_dotenv_package(self, monkeypatch, tmp_path):
-        env_content = "MULLET_FAKE_VAR=hello\n"
-        _patch_path_and_load(monkeypatch, tmp_path, env_file_exists=True, env_content=env_content)
-        # dotenv is available in test env (python-dotenv is a dependency)
-        assert os.environ.get("MULLET_FAKE_VAR") == "hello"
-        del os.environ["MULLET_FAKE_VAR"]
-
-    def test_fallback_manual_parsing(self, monkeypatch, tmp_path):
-        env_content = (
-            "# comment\n"
-            "\n"
-            "MULLET_KEY1=value1\n"
-            'MULLET_KEY2="quoted"\n'
-            "MULLET_KEY3='single'\n"
-            "MULLET_KEY4= val with spaces \n"
-            "BADLINE\n"
-            "EXISTING=should_not_overwrite\n"
-        )
-        monkeypatch.setenv("EXISTING", "already_set")
-        # Prevent dotenv import so fallback path runs
-        monkeypatch.setitem(sys.modules, "dotenv", None)
-        _patch_path_and_load(monkeypatch, tmp_path, env_file_exists=True, env_content=env_content)
-
-        assert os.environ.get("MULLET_KEY1") == "value1"
-        assert os.environ.get("MULLET_KEY2") == "quoted"
-        assert os.environ.get("MULLET_KEY3") == "single"
-        assert os.environ.get("MULLET_KEY4") == "val with spaces"
-        assert "BADLINE" not in os.environ
-        assert os.environ.get("EXISTING") == "already_set"
-
-        for key in ["MULLET_KEY1", "MULLET_KEY2", "MULLET_KEY3", "MULLET_KEY4"]:
-            os.environ.pop(key, None)
-        os.environ.pop("EXISTING", None)
 
 
 # ---------------------------------------------------------------------------

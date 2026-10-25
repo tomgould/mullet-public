@@ -105,7 +105,7 @@ def test_supports_streaming_property():
 
 def test_with_id_same_model_id_returns_self():
     """Line 256: _with_id returns info unchanged when model_id already matches."""
-    from mullet.core.providers.model_info import _with_id, ModelInfo
+    from mullet.core.providers.model_info import _with_id
     # Create a ModelInfo with model_id already set to the target value
     from dataclasses import replace
     base = get_model_info("claude-sonnet-4-6")

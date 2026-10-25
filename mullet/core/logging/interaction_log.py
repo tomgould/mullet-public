@@ -16,7 +16,13 @@ from typing import Any, Dict, List, Optional
 import logging
 
 # Constants
-DEFAULT_DB_PATH = Path.home() / ".mullet" / "interactions.db"
+def default_db_path() -> Path:
+    """Where interactions are logged unless MULLET_INTERACTIONS_DB says otherwise.
+
+    Worked out at call time, not import time, so it follows HOME.
+    """
+    from mullet.core.paths import state_dir
+    return state_dir() / "interactions.db"
 MULLET_LOG_FULL_PROMPTS = os.getenv("MULLET_LOG_FULL_PROMPTS", "0") == "1"
 MULLET_LOG_FULL_RESPONSES = os.getenv("MULLET_LOG_FULL_RESPONSES", "0") == "1"
 
@@ -29,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 def _get_db_path() -> Path:
     """Get the database path, creating directory if needed."""
-    db_path = Path(os.getenv("MULLET_INTERACTIONS_DB", str(DEFAULT_DB_PATH)))
+    db_path = Path(os.getenv("MULLET_INTERACTIONS_DB", str(default_db_path())))
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path
 

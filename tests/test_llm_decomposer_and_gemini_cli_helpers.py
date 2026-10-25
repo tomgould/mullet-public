@@ -1,4 +1,4 @@
-"""Tests for llm_decomposer pure helpers and gemini_cli pure methods."""
+"""Tests for llm_decomposer pure helpers."""
 
 import pytest
 
@@ -7,7 +7,6 @@ from mullet.core.orchestration.llm_decomposer import (
     _extract_json_array,
     _parse_task_list,
 )
-from mullet.core.providers.gemini_cli import GeminiCLIProvider
 
 
 # ---------------------------------------------------------------------------
@@ -142,53 +141,3 @@ class TestParseTaskList:
     def test_returns_list(self):
         result = _parse_task_list('[]', self.DEFAULT_SHAPE)
         assert isinstance(result, list)
-
-
-# ---------------------------------------------------------------------------
-# GeminiCLIProvider._messages_to_prompt
-# ---------------------------------------------------------------------------
-
-class TestMessagesToPrompt:
-    def setup_method(self):
-        self.provider = GeminiCLIProvider()
-
-    def test_user_message_included(self):
-        messages = [{"role": "user", "content": "Hello world"}]
-        result = self.provider._messages_to_prompt(messages)
-        assert "Hello world" in result
-
-    def test_system_message_prefixed(self):
-        messages = [{"role": "system", "content": "Be helpful"}]
-        result = self.provider._messages_to_prompt(messages)
-        assert "Instructions:" in result
-        assert "Be helpful" in result
-
-    def test_assistant_message_prefixed(self):
-        messages = [{"role": "assistant", "content": "I did that"}]
-        result = self.provider._messages_to_prompt(messages)
-        assert "Previous response:" in result
-        assert "I did that" in result
-
-    def test_multipart_content_text_extracted(self):
-        messages = [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
-        result = self.provider._messages_to_prompt(messages)
-        assert "Hi" in result
-
-    def test_multiple_messages_joined(self):
-        messages = [
-            {"role": "user", "content": "first"},
-            {"role": "user", "content": "second"},
-        ]
-        result = self.provider._messages_to_prompt(messages)
-        assert "first" in result
-        assert "second" in result
-
-    def test_empty_messages_returns_empty(self):
-        result = self.provider._messages_to_prompt([])
-        assert result == ""
-
-    def test_returns_string(self):
-        assert isinstance(self.provider._messages_to_prompt([]), str)
-
-    def test_supports_tool_calling_is_false(self):
-        assert self.provider.supports_tool_calling is False

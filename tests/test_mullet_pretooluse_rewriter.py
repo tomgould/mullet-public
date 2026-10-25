@@ -11,7 +11,9 @@ from unittest.mock import patch
 
 import pytest
 
+# The checkout's shim, run as Claude Code would; the code is in mullet/hooks/.
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "mullet_pretooluse_rewriter.py"
+HOOK_MODULE = Path(__file__).resolve().parent.parent / "mullet" / "hooks" / "pretooluse_rewriter.py"
 
 
 def _load_hook_module():
@@ -21,7 +23,7 @@ def _load_hook_module():
     tests that happen to touch the `scripts.*` namespace package.
     """
     spec = importlib.util.spec_from_file_location(
-        "_mullet_pretooluse_rewriter_under_test", str(HOOK)
+        "_mullet_pretooluse_rewriter_under_test", str(HOOK_MODULE)
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

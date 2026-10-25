@@ -2,16 +2,17 @@
 import json
 import urllib.request
 import urllib.error
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterator
 
+from mullet.core.env import ollama_url
 from mullet.core.providers.base import LLMResponse, Provider, StreamChunk
 
 
 @dataclass
 class OllamaConfig:
     """Configuration for an Ollama local LLM endpoint."""
-    base_url: str = "http://localhost:11434"
+    base_url: str = field(default_factory=ollama_url)
     model: str = "llama2"
     temperature: float = 0.7
     top_p: float = 0.9

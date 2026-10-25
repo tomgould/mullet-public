@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from mullet.core.router import learning as _lm
 from mullet.core.router.learning import (

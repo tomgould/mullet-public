@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-import pytest
 from mullet.core.tools.file_ops import file_ops_handler
 
 

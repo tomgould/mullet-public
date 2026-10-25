@@ -7,7 +7,10 @@ from typing import Dict, Any, List, Optional
 
 class MemoryStore:
     """Persistent key-value memory store with TTL support."""
-    def __init__(self, storage_dir: str = '.mullet/memory'):
+    def __init__(self, storage_dir: Optional[str] = None):
+        if storage_dir is None:
+            from mullet.core.paths import data_dir
+            storage_dir = str(data_dir() / "memory")
         self.storage_dir = os.path.abspath(storage_dir)
         os.makedirs(self.storage_dir, exist_ok=True)
         self.storage_file = os.path.join(self.storage_dir, 'memory.json')
@@ -113,13 +116,18 @@ MEMORY_SCHEMA = {
     }
 }
 
-_memory_store = MemoryStore()
+# Created on first use, so importing this module writes nothing to disk.
+_memory_store: Optional[MemoryStore] = None
 
 def memory_handler(**kwargs) -> str:
     """Handle memory tool actions via the MCP tool interface."""
     global _memory_store
     # Allow overriding the memory store instance for testing
-    memory_store_instance = kwargs.pop('memory_store_instance', _memory_store)
+    memory_store_instance = kwargs.pop('memory_store_instance', None)
+    if memory_store_instance is None:
+        if _memory_store is None:
+            _memory_store = MemoryStore()
+        memory_store_instance = _memory_store
 
     action = kwargs.get('action')
     key = kwargs.get('key')

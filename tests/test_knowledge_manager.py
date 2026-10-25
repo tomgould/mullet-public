@@ -136,7 +136,6 @@ def test_build_knowledge_environment(patch_engine):
 
 
 import os
-from unittest.mock import patch, MagicMock
 
 from mullet.core.knowledge.manager import _get_engine_module
 

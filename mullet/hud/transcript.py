@@ -84,7 +84,8 @@ class TranscriptSnapshot:
 # ---------------------------------------------------------------------------
 
 def _default_cache_dir() -> str:
-    return os.path.join(os.path.expanduser("~"), ".claude", ".mullet-hud", "transcript-cache")
+    from mullet.core.paths import cache_dir
+    return str(cache_dir() / "hud-transcript")
 
 
 def _cache_path(real_path: str, cache_dir: str) -> str:
@@ -255,7 +256,7 @@ def _infer_provider_from_model(model_id: Optional[str]) -> Optional[str]:
     Returns None for missing input so callers can skip rendering the badge.
     Prefix order matters — moonshot-* must beat kimi-* only if we ever add a
     rule that conflicts, but today both map to 'kimi'. Local LLMs (mistral,
-    qwen, phi, gemma, deepseek distills, llama) fall through to 'local'.
+    qwen, phi, gemma, deepseek distills, llama, ornith) fall through to 'local'.
     """
     if not model_id:
         return None
@@ -271,7 +272,7 @@ def _infer_provider_from_model(model_id: Optional[str]) -> Optional[str]:
     # Local LLMs served via LM Studio / Ollama — no cloud provider
     if m.startswith((
         "mistral-", "qwen", "phi-", "gemma-", "llama-",
-        "deepseek-", "codestral", "nemo",
+        "deepseek-", "codestral", "nemo", "ornith",
     )):
         return "local"
     return None
@@ -400,7 +401,7 @@ def parse_transcript(
     """Parse a Claude Code JSONL transcript and return a snapshot.
 
     Caches on (mtime_ns, size) keyed on sha256(realpath). Cache default:
-    ~/.claude/.mullet-hud/transcript-cache/<sha256>.json.  Malformed lines
+    hud-transcript/<sha256>.json in Mullet's cache directory.  Malformed lines
     are skipped silently.  Returns an empty snapshot on any unrecoverable
     error (missing file, permission denied) — the HUD must never crash.
     """

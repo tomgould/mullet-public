@@ -1,16 +1,14 @@
 """Comprehensive tests for knowledge graph extractor and search modules."""
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from mullet.knowledge.graph.extractor import (
     GraphExtractor,
     _build_batches_by_budget,
     _is_garbage_response,
 )
-from mullet.knowledge.graph.models import Entity, Relationship
+from mullet.knowledge.graph.models import Entity
 from mullet.knowledge.graph.search import (
     _fetch_chunks_by_ids,
     _rrf_merge_lists,

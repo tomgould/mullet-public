@@ -116,14 +116,16 @@ _TIER_MAP = {"LOW": Tier.LOW, "STANDARD": Tier.STANDARD, "ADVANCED": Tier.ADVANC
 
 
 def _load_yaml_profiles() -> dict[str, AgentProfile]:
-    """Load agent profiles from YAML templates in mullet/agents/ and ~/.mullet/agents/."""
+    """Load agent profiles from YAML templates in mullet/agents/ and agents/ in the data directory."""
     import yaml
     from pathlib import Path
+
+    from mullet.core.paths import data_dir
 
     profiles: dict[str, AgentProfile] = {}
     dirs = [
         Path(__file__).parent.parent.parent / "agents",  # builtin: mullet/agents/
-        Path.home() / ".mullet" / "agents",               # user-defined
+        data_dir() / "agents",                            # user-defined
     ]
     for d in dirs:
         if not d.is_dir():

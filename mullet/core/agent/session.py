@@ -3,8 +3,9 @@
 From Hermes: session_search lets the agent recall context from
 past conversations without the user repeating themselves.
 
-Sessions are stored as JSON files in ~/.mullet/sessions/.
-An FTS5 SQLite index in ~/.mullet/sessions.db provides fast full-text search.
+Sessions are stored as JSON files in ``sessions/`` under the state directory
+(see ``mullet.core.paths``). An FTS5 SQLite index in ``sessions.db`` next to
+it provides fast full-text search.
 """
 
 import json
@@ -17,17 +18,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
-SESSION_DIR = Path.home() / ".mullet" / "sessions"
-SESSION_DB = Path.home() / ".mullet" / "sessions.db"
+# Tests point these at temporary paths; None means the state directory.
+SESSION_DIR: Path | None = None
+SESSION_DB: Path | None = None
 MAX_SESSIONS = 50  # Keep last N sessions
+
+
+def _session_dir() -> Path:
+    return SESSION_DIR or state_dir() / "sessions"
+
+
+def _session_db() -> Path:
+    return SESSION_DB or state_dir() / "sessions.db"
 
 
 def _get_db() -> sqlite3.Connection:
     """Open (and initialize if needed) the session FTS5 database."""
-    SESSION_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(SESSION_DB))
+    _session_db().parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(_session_db()))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
@@ -107,8 +119,8 @@ class Session:
         if not self.metadata.get("title") and self.messages:
             self.metadata["title"] = generate_title(self.messages)
 
-        SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        path = SESSION_DIR / f"{self.id}.json"
+        _session_dir().mkdir(parents=True, exist_ok=True)
+        path = _session_dir() / f"{self.id}.json"
         data = {
             "id": self.id,
             "metadata": self.metadata,
@@ -129,7 +141,7 @@ class Session:
     @classmethod
     def load(cls, session_id: str) -> "Session | None":
         """Load a session from disk."""
-        path = SESSION_DIR / f"{session_id}.json"
+        path = _session_dir() / f"{session_id}.json"
         if not path.exists():
             return None
         try:
@@ -206,14 +218,14 @@ def _search_fts5(query: str, max_results: int) -> list[dict]:
 
 def _search_naive(query: str, max_results: int) -> list[dict]:
     """Fallback word-overlap search on JSON files."""
-    if not SESSION_DIR.exists():
+    if not _session_dir().exists():
         return []
 
     query_lower = query.lower()
     query_words = set(query_lower.split())
     results = []
 
-    for path in sorted(SESSION_DIR.glob("session_*.json"), reverse=True):
+    for path in sorted(_session_dir().glob("session_*.json"), reverse=True):
         try:
             data = json.loads(path.read_text())
             messages = data.get("messages", [])
@@ -263,10 +275,10 @@ def list_recent_sessions(limit: int = 10) -> list[dict]:
         pass
 
     # Fallback to JSON files
-    if not SESSION_DIR.exists():
+    if not _session_dir().exists():
         return []
     sessions = []
-    for path in sorted(SESSION_DIR.glob("session_*.json"), reverse=True)[:limit]:
+    for path in sorted(_session_dir().glob("session_*.json"), reverse=True)[:limit]:
         try:
             data = json.loads(path.read_text())
             meta = data.get("metadata", {})
@@ -285,14 +297,14 @@ def list_recent_sessions(limit: int = 10) -> list[dict]:
 
 def rebuild_fts_index():
     """Rebuild the FTS5 index from all JSON session files."""
-    if not SESSION_DIR.exists():
+    if not _session_dir().exists():
         return 0
     conn = _get_db()
     try:
         conn.execute("DELETE FROM session_fts")
         conn.execute("DELETE FROM sessions")
         count = 0
-        for path in SESSION_DIR.glob("session_*.json"):
+        for path in _session_dir().glob("session_*.json"):
             try:
                 data = json.loads(path.read_text())
                 _index_session(conn, data["id"], data.get("metadata", {}), data.get("messages", []))
@@ -335,7 +347,7 @@ def get_session_aggregates(
     Fail-open: malformed session files are skipped with a DEBUG log; a
     missing directory returns all-zero aggregates.
     """
-    base_dir = sessions_dir if sessions_dir is not None else SESSION_DIR
+    base_dir = sessions_dir if sessions_dir is not None else _session_dir()
     agg = SessionAggregates()
 
     if not base_dir.exists():
@@ -401,9 +413,9 @@ def get_session_aggregates(
 
 def _cleanup_old_sessions():
     """Remove oldest sessions beyond MAX_SESSIONS."""
-    if not SESSION_DIR.exists():
+    if not _session_dir().exists():
         return
-    sessions = sorted(SESSION_DIR.glob("session_*.json"), key=os.path.getmtime)
+    sessions = sorted(_session_dir().glob("session_*.json"), key=os.path.getmtime)
     while len(sessions) > MAX_SESSIONS:
         oldest = sessions.pop(0)
         oldest.unlink(missing_ok=True)

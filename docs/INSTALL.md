@@ -1,353 +1,184 @@
-# Mullet — Install Guide
+# Mullet install guide
 
-> **Goal:** Get Mullet installed, wired into Claude Code, and running your first delegated task in ~10 minutes.
+> **Goal:** install Mullet, connect it to Claude Code, and plan your first job in about ten minutes.
 >
-> **What Mullet is:** An AI coding orchestrator that routes tasks to cheap or free models (Kimi K2, local LLM, Gemini) and integrates with Claude Code via MCP. It keeps your Anthropic token spend low by delegating the actual code work elsewhere.
->
-> **📚 Full documentation** (architecture, API, troubleshooting, skills, agents): see `docs/` directory or the project README.
+> **What Mullet is:** a runner for large coding jobs. You approve a task tree; Mullet runs each step with your own logged-in Claude Code in a sandboxed private clone, checks every step with tests and checks it runs itself, and hands back a branch with an evidence report. It also gives Claude Code an MCP server with knowledge-search tools. See [MULLET2.md](MULLET2.md) for the design.
 
 ---
 
 ## 1. Prerequisites
 
-Before you start, make sure you have:
-
-- **Python 3.10+**
-  ```bash
-  python3 --version
-  ```
-- **Git**
-  ```bash
-  git --version
-  ```
-- **Claude Code CLI**
+- **Linux or macOS.** On Windows, use WSL. Jobs run in a bubblewrap sandbox, so they need Linux for now; the macOS sandbox is planned.
+- **Python 3.10 or newer**, and **git**.
+- **uv** ([install](https://docs.astral.sh/uv/)) or **pipx** ([install](https://pipx.pypa.io/)). The installer uses whichever it finds.
+- **Claude Code**, installed and logged in. Mullet's jobs run your own `claude` CLI under your subscription:
   ```bash
   npm i -g @anthropic-ai/claude-code
+  claude          # then /login
   ```
-  Or install via the [Anthropic desktop app](https://www.anthropic.com/claude-code).
+- **On Linux, for jobs:** `bubblewrap` (Mullet's sandbox) and `socat` (Claude Code's own sandbox):
+  ```bash
+  sudo apt install bubblewrap socat     # Debian and Ubuntu
+  ```
 
-- **At least one LLM provider.** You only need one to get started:
-
-  | Provider | Cost | Setup | Best for |
-  |:---------|:-----|:------|:---------|
-  | **Local LLM (LM Studio)** | Free | Download [LM Studio](https://lmstudio.ai), load any 4–14B model, toggle the server on | Default for quick tasks, zero cost |
-  | **Kimi K2 (Moonshot)** | $0.60 / $2.50 per 1M tokens | API key from [platform.moonshot.cn](https://platform.moonshot.cn) | **Recommended primary** — fast, cheap, great at code |
-  | **OpenRouter** | $0.00–$0.80 / $0.30–$2.50 per 1M tokens | API key from [openrouter.ai](https://openrouter.ai) | Aggregates 8 curated models (DeepSeek, Llama 4, Qwen, Grok) |
-  | **Google Gemini** | $0.15 / $0.35 per 1M tokens | API key from [aistudio.google.com](https://aistudio.google.com) | Cheap fallback, huge context |
-  | **Anthropic** | $3.00 / $15.00 per 1M tokens (Sonnet) | API key from [console.anthropic.com](https://console.anthropic.com) | **Orchestrator only** — Mullet uses this sparingly |
-
-  *Minimum viable config: just Kimi, or just a local LLM. You don't need all of them.*
+Provider API keys are optional. Jobs need none. They matter only for Mullet's delegation tools and model-backed knowledge features (section 6).
 
 ---
 
 ## 2. Install Mullet
 
-Mullet is installed from source. We use an editable install so that Claude Code hooks can reference scripts inside the source tree by absolute path.
-
 ```bash
-git clone https://github.com/tomgould/mullet-public.git
-cd mullet-public
-pip install -e .
-mullet --version
+curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
 ```
 
-> **Why `-e` (editable) is required:**
-> `mullet setup-claude` installs hook scripts that live in `scripts/hooks/` inside this repo. A regular `pip install .` copies the Python package into your site-packages but skips the `scripts/` directory. Without `-e`, the hooks won't resolve and `mullet doctor` will warn you.
-
-Optional extras if you need them later:
+The installer runs `uv tool install` (or `pipx install`) from the public GitHub repository. The install is not editable, so Mullet never runs from a tree it may be editing. Run it again to update. You can also run the same command yourself:
 
 ```bash
-pip install -e ".[gemini]"    # Google Gemini support
-pip install -e ".[bedrock]"   # AWS Bedrock
-pip install -e ".[postgres]"  # PostgreSQL backend
-pip install -e ".[all]"       # Everything
+uv tool install git+https://github.com/tomgould/mullet-public.git
+# or: pipx install git+https://github.com/tomgould/mullet-public.git
 ```
+
+With an optional extra (`gemini`, `bedrock`, `postgres` or `all`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | MULLET_EXTRAS=gemini bash
+uv tool install "mullet[gemini] @ git+https://github.com/tomgould/mullet-public.git"
+```
+
+> **Never `pip install mullet`.** The `mullet` package on PyPI is an unrelated project.
+
+**Working on Mullet itself:** clone the repository and run `pip install -e ".[dev]"` in a virtualenv. Keep that separate from the copy you use for jobs, so a job never runs the code it is changing.
 
 ---
 
-## 3. Configure API Keys
-
-Mullet loads keys from a `.env` file in the repo root via `python-dotenv`.
-
-```bash
-cp .env.example .env
-# then open .env in your editor and fill in your keys
-```
-
-The keys you need:
-
-```
-KIMI_API_KEY=sk-...           # Primary provider — platform.kimi.ai
-OPENROUTER_API_KEY=sk-...     # Optional — 8 curated models, OpenAI-compatible
-GOOGLE_API_KEY=AIza...        # Optional — cheap fallback
-```
-
-> **`ANTHROPIC_API_KEY` is optional.** Without it, Mullet never calls the Anthropic
-> API: over MCP it hands Anthropic-only work back to Claude Code, and on the command
-> line it uses the official `claude` CLI if that's installed, so the work runs under
-> your Claude subscription through Anthropic's own tools. Set the key only if you
-> want Mullet to call Anthropic models through the API, billed per token.
-
-> **Minimum viable setup:** `KIMI_API_KEY` alone is enough to get started.
-> Alternatively, a local LLM running in LM Studio requires no key at all.
-
-> **Turning delegation off:** set `MULLET_DELEGATION=off` in `.env` and Mullet sends
-> no work to any model provider. `mullet_run`, `mullet_delegate`, `mullet_swarm`,
-> `mullet_opencode`, CLI task runs, the REPL and `mullet serve`'s chat endpoints then
-> reply that delegation is turned off. Trawl search, knowledge pools, status, budget
-> and the other read-only tools work as normal. Unset or `on` (the default) delegates.
-
----
-
-## 4. Verify Setup
-
-Run the health check:
+## 3. Check your machine
 
 ```bash
 mullet doctor
 ```
 
-**What the output means:**
+It is read-only and makes no network calls (add `--full` to probe the provider APIs and check GitHub for a newer Mullet). It checks:
 
-- **Green ✓** — component is ready.
-- **Yellow !** — component has a warning (e.g. local LLM running but no model loaded).
-- **Cyan ·** — informational only (e.g. a provider key is not set — that's fine if you don't plan to use it).
+- Python, the `claude` CLI (and its version) and git;
+- on Linux, bubblewrap, Mullet's sandbox self-test and `socat`;
+- whether `ANTHROPIC_API_KEY` is set. In `claude -p` that key silently replaces your subscription login and bills the API, so the doctor warns about it. Mullet's jobs leave it out unless the job was planned with `--billing api`;
+- what `mullet setup-claude` has set up, and any hooks an older version left pointing into a source checkout;
+- the optional providers, knowledge engine, skills, tools and config.
 
-The check covers:
-- Python version
-- Which providers are live (local, Kimi, Gemini, Anthropic)
-- Hook installation status in `~/.claude/settings.json`
-- `~/.claude/CLAUDE.md` delegation rules
-- Knowledge engine, tools, skills, git, and database
-
-If you see `X/Y checks passed` and at least one provider is green, you're good to go.
+Green ✓ is ready, yellow ! needs a look, cyan · is information only.
 
 ---
 
-## 5. Wire into Claude Code (MCP)
-
-Mullet runs as an MCP server inside Claude Code. Once it's registered, you can ask Claude to use Mullet tools such as `mullet_run`, `mullet_opencode` and `trawl_search`.
-
-### Register the MCP server
+## 4. Connect Mullet to Claude Code
 
 ```bash
-claude mcp add --scope user mullet -- mullet mcp
-```
-
-This makes the tools available in every project. Restart Claude Code, then check that `claude mcp list` shows `mullet`.
-
-### Hooks, rules and skills (optional)
-
-```bash
+mullet setup-claude --dry-run    # shows what it would change
 mullet setup-claude
 ```
 
-`setup-claude` changes your global Claude Code setup, so read the table below first, or run it with `--dry-run`. In a clone of this repository it skips the MCP server step and prints a warning, because the `.mcp.json` it copies from isn't included. Register the server with the command above instead.
+By default it:
 
-This is idempotent — safe to re-run. It installs:
+| What | How |
+|:-----|:----|
+| Registers the MCP server | `claude mcp add --scope user mullet -- <mullet> mcp`, available in every project |
+| Installs skills | `~/.claude/skills/mullet-job/SKILL.md` and `~/.claude/skills/pool-improve/SKILL.md` |
 
-| What | Where | Effect |
-|:-----|:------|:-------|
-| **Hooks** | `~/.claude/settings.json` | Fires in **any** project directory you open with Claude Code |
-| **Delegation rules** | `~/.claude/CLAUDE.md` | Provider priority, AI-Bridge validation rules, filesystem guardrails |
-| **Skills** | `~/.claude/skills/` | `/delegate`, `/commit`, `/review`, `pool-config` |
-| **Agents** | `~/.claude/agents/` | `patch-writer`, `test-runner`, `verifier` |
-| **opencode** | `~/.config/opencode/opencode.json` | Zero-Anthropic coding agent using Kimi K2 |
-| **Status HUD** | `~/.claude/settings.json` → `statusLine` | Live budget pressure + active agent row in Claude Code's status bar |
+It does not touch `CLAUDE.md`, adds no hooks and never writes into the current repository. `<mullet>` is the `mullet` on your PATH. Restart Claude Code afterwards.
 
-**What the hooks do:**
-- `delegation_reminder.py` — treats delegation as a last resort. Suggests it when a prompt
-  looks like delegable work,
-  but only once the Anthropic 5-hour or weekly allowance is genuinely short. Below those
-  thresholds it stays silent, because in-context work is already paid for and delegating
-  spends real third-party tokens. When it does fire it tells Claude to ask you first.
-- `mullet_pretooluse_rewriter.py` — auto-fills the cheapest viable `provider`/`tier` on every `mullet_run` call.
-- `mullet_observation_capture.py` — logs tool calls so you can replay them with `mullet observations`.
+**Hooks are opt-in.** `mullet setup-claude --hooks list` shows what each one does; add the ones you want with `--hooks skill-activator,observation-capture` (or `--hooks all`). They run as `mullet hook <name>` from the installed Mullet, so they keep working after an update.
 
-After running `mullet setup-claude`, **restart Claude Code** so the MCP server and hooks load.
+**Status line:** `--statusline` sets Claude Code's status line to `mullet-hud`, if you don't have one already.
 
-### Project only
+**Undo:** `mullet setup-claude --uninstall` removes exactly what setup-claude added and nothing else. Every change is recorded in `~/.config/mullet/setup-manifest.json` (`$MULLET_CONFIG_DIR` if that is set). Running setup-claude again changes nothing unless something is missing.
 
-To use Mullet in one project rather than all of them, run this in the project's directory:
-
-```bash
-claude mcp add --scope project mullet -- mullet mcp
-```
-
-Then restart Claude Code.
+**One project only:** instead of `setup-claude`, run `claude mcp add --scope project mullet -- mullet mcp` in that project.
 
 ---
 
-## 6. Optional: Local LLM with LM Studio
+## 5. Your first job
 
-If you want a free provider for quick tasks:
-
-1. **Download** [LM Studio](https://lmstudio.ai) and install it.
-2. **Load a model.** Recommended for code tasks: **Qwen2.5-Coder-7B** (fast, good at Python/JS).
-   - Any 4–14B instruction-tuned model works.
-   - On 8GB RAM Macs, the 7B model is too large — use **Qwen2.5-Coder-3B** instead.
-   - **Apple Silicon (M1/M2/M3):** download **MLX format** models, not GGUF. Search `mlx-community`
-     in the Discover tab — MLX runs natively on Apple Silicon and uses less memory.
-3. **Start the local server** — toggle the server switch in the LM Studio UI (default port `1234`).
-4. **Verify:**
-   ```bash
-   mullet doctor
-   ```
-   You should see a green check next to **Local LLM**.
-
-If you prefer **Ollama** instead of LM Studio:
+In any git repository, with the changes you want the job to start from committed:
 
 ```bash
-ollama pull qwen2.5-coder:7b
-ollama serve
+mullet job plan "add type hints to the utils package"
+mullet job show <id>       # the plan and the checks that will run
+mullet job approve <id>
+mullet job run <id>        # runs in the background; mullet job status <id> to follow it
+mullet job report <id>     # what each step did, with its gate results
+mullet job merge <id>      # copies the job's branch into your repo; you merge it
 ```
 
-Mullet auto-detects Ollama on port `11434`.
-
-Mullet probes ports `1234` (LM Studio), `11434` (Ollama) and `8000` (any other
-OpenAI-compatible server). For a server on another port, pass `--base-url` on the
-command line, or add it as a provider with its `base_url` in `mullet.yaml` (see the
-README's Configuration section).
-
-> **Mac warning:** Do not run `pip install -e ".[gpu]"` on Apple Silicon — the `[gpu]` extra pulls `pynvml` (NVIDIA GPU monitoring) which does nothing on Mac and may error on install.
-
-> **Context size warning:** `mullet doctor` will flag if your loaded model has a very small context window (`< 4K`). For code tasks, aim for at least 8K context.
+The first `plan` saves a project profile with the setup and test commands it detected and prints its path. Without a test command every step ends up "unverified", never "passed". Inside Claude Code, the `/mullet-job` skill walks through the same steps.
 
 ---
 
-## 7. Encoding and Graph Extraction
+## 6. Optional: provider keys and a local model
 
-**Encoding** is handled by `sentence-transformers` (already in core dependencies — no extras needed).
-The embedding model (`all-MiniLM-L6-v2`, ~90MB) downloads automatically from HuggingFace on first use.
-On Apple Silicon it uses MPS (Metal) automatically. No manual download or LM Studio involvement required.
+Mullet's delegation tools (`mullet_run`, `mullet_opencode`, `mullet_swarm`) and CLI tasks send work to other models. Put their keys in `~/.config/mullet/.env` (`$MULLET_CONFIG_DIR/.env` if that is set), not in your shell profile. A source checkout's `.env` is still read, for development. Variables already in the environment win, and a project's own `.env` is never read.
 
-**Graph extraction** uses your configured LLM provider — whichever is active (local LM Studio or Kimi).
-No additional install is needed. The local LLM you load in LM Studio handles graph extraction prompts directly.
+```
+KIMI_API_KEY=sk-...           # Kimi K2 (platform.kimi.ai)
+OPENROUTER_API_KEY=sk-or-...  # OpenRouter
+GOOGLE_API_KEY=AIza...        # Google Gemini
+```
 
-**Mac / Apple Silicon note:** Do not run `pip install -e ".[gpu]"` — the `[gpu]` extra pulls `pynvml`
-(NVIDIA GPU monitoring) which does nothing on Mac and may error on install. The `sentence-transformers`
-package brings in a compatible PyTorch (CPU/MPS) automatically.
+`.env.example` lists the rest. `ANTHROPIC_API_KEY` is optional and billed per token; see the warning in section 3.
+
+**Turning delegation off:** set `MULLET_DELEGATION=off` and Mullet sends no work to any model provider. The delegation tools, CLI task runs, the REPL and `mullet serve`'s chat endpoints then say that delegation is off. Trawl search, knowledge pools and the read-only tools work as normal.
+
+**A local model:** start [LM Studio](https://lmstudio.ai) (port `1234`) or [Ollama](https://ollama.com) (port `11434`) and load a model; Mullet finds it, and `mullet doctor` shows it. On a machine with 10GB of RAM or less, use a 2B to 3B model. On a Mac, don't install the `[gpu]` extra: it pulls NVIDIA-only `pynvml`.
 
 ---
 
-## 8. First Test
+## 7. Local LLM watchdog
 
-### CLI test
-
-```bash
-mullet "what Python version am I running?"
-```
-
-You should get an answer routed to your cheapest available provider (local LLM if running, otherwise Kimi or Gemini).
-
-### See where a task would route
+`mullet local` keeps the local LLM server usable and restarts it when it gets stuck.
+It probes LM Studio on `localhost:1234` (or whatever `LOCAL_LLM_URL` points at) without
+sending a real completion.
 
 ```bash
-mullet explain "refactor auth module for OAuth2"
+mullet local status              # URL, reachability, latency, loaded models, GPU memory
+mullet local restart [--hard]    # restart the LM Studio service or lms server
+mullet local check [--fix]       # decide whether a restart is needed; --fix applies it
 ```
 
-This prints the complexity score, chosen tier/provider, and estimated cost — without actually calling the LLM. Useful for checking your wallet impact before big tasks.
+`mullet local watchdog --install` writes a systemd user timer that runs
+`mullet local check --fix` every two minutes. If your system has no systemd user
+units, it prints the equivalent crontab line instead.
 
-### MCP test (inside Claude Code)
+Restart rules:
+- unreachable, or a probe slower than 10 s, on two checks in a row;
+- a model whose state is "loading" for longer than 5 minutes across checks;
+- when a model is loaded, a single-token generation request times out on two checks in a row.
 
-Restart Claude Code, then ask:
-
-> "Use `mullet_run` to summarise what this project does."
-
-Claude should invoke the MCP tool and return a summary generated by Kimi or your local LLM — zero Anthropic tokens for the actual generation.
-
-### List models and pricing
-
-```bash
-mullet models
-```
-
-Shows every model Mullet knows about, grouped by provider, with per-1M-token pricing.
+A 5-minute cooldown after each restart prevents a broken install from looping. Every
+restart is logged as JSON at `<state dir>/local-watchdog.log` and sent through the
+usual notification channels.
 
 ---
 
-## 9. Knowledge Pools (Optional but Powerful)
+## 8. Optional: knowledge pools
 
-Mullet includes a **Trawl** knowledge engine that indexes codebases and documents for semantic search. Once indexed, you can query them from Claude Code without pasting entire files into context.
-
-### Where pools live
-
-Pool data (vector indexes, graph DBs, embeddings) lives outside the source tree.
-The installer creates `~/.mullet/pools/` as the default. Resolution order at
-runtime:
-
-1. `TRAWL_POOLS_DIR` env var, if set (used verbatim)
-2. `~/.mullet/pools/`
-
-If you already have a pools directory elsewhere — on a separate disk, or shared
-across machines — use either of:
+Mullet's Trawl engine indexes codebases and documents for semantic search, which Claude Code can query through the `trawl_*` MCP tools.
 
 ```bash
-# Option A — env var (greppable, explicit)
-export TRAWL_POOLS_DIR=/data/mullet-pools
-
-# Option B — symlink (invisible, survives every shell + cron job)
-ln -sfn /data/mullet-pools ~/.mullet/pools
-```
-
-The Mullet repo itself never reads pool data from inside the source tree —
-`mullet/knowledge/pools/` is gitignored and unused.
-
-### Managing pools
-
-```bash
-# See what pools exist
 mullet pool list
-
-# Create a pool for the current repo (one-off)
-mullet init
-
-# Index or re-index a pool
 mullet reindex --pool <name>
 ```
 
-See [docs/REINDEX.md](REINDEX.md) for full flag reference, source sync behavior, and the overnight multi-pool workflow.
-
-**Concrete example:**
-
-```bash
-# In the mullet repo itself
-mullet pool list
-mullet reindex --pool mullet-dev
-```
-
-Then inside Claude Code:
-
-> "Use `trawl_search` to find where authentication is handled."
-
-Or for code-specific queries:
-
-> "Use `trawl_search_code` to find the `resolve_provider` function."
-
-*Tip: If you're working in a large repo, create a pool for it and reindex after major refactors. Search quality depends on up-to-date indexes.*
+Set `TRAWL_POOLS_DIR` to keep pools somewhere else, such as a larger disk. See [REINDEX.md](REINDEX.md) for the full reference.
 
 ---
 
-## 10. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Fix |
 |:--------|:----|
-| `mullet: command not found` | Run `pip install -e .` from the repo root. If it's still missing, add `~/.local/bin` to your `PATH` (common on Linux). |
-| `mullet doctor` shows no providers | Add `KIMI_API_KEY` or `GOOGLE_API_KEY` to your `.env` file, or start LM Studio and load a model. An `ANTHROPIC_API_KEY` also works, but the Anthropic API bills it per token. |
-| MCP tools not appearing in Claude Code | Run `claude mcp add --scope user mullet -- mullet mcp`, then **fully restart** Claude Code. Check that `claude mcp list` shows `mullet`. |
-| `mullet mcp: server ready` not seen | In Claude Code, go to Settings → MCP → `mullet` → **View logs**. Look for Python tracebacks or missing dependencies. |
-| Kimi API key rejected | Ensure the key starts with `sk-` and has active credits at [platform.moonshot.cn](https://platform.moonshot.cn). If you have a coding-specific key (`sk-kimi-...`), Mullet auto-routes to the coding endpoint. |
-| `mullet doctor` warns about missing hooks | You probably did a non-editable install. Run `pip install -e .` from the repo root, then re-run `mullet setup-claude`. |
-| Local LLM detected but model shows "very small context" | Load a larger model in LM Studio (7B+) or increase the context slider in the model settings. |
-| `mullet_run` returns empty or garbled output | The delegated model may not support tool calling. Try forcing a different provider: `mullet_run(task="...", providers="kimi")`. |
+| `mullet: command not found` | Run `uv tool update-shell` (or `pipx ensurepath`) and open a new terminal. |
+| `uv` refuses because a `mullet` command already exists | Another install is in the way. Remove it, or run the installer with `MULLET_FORCE=1`. |
+| MCP tools don't appear in Claude Code | Run `mullet setup-claude`, then fully restart Claude Code. `claude mcp list` should show `mullet`. |
+| `mullet doctor` warns about hooks that point into a checkout | An older setup-claude added them by path. Remove those entries from `~/.claude/settings.json`, then add hooks with `mullet setup-claude --hooks ...`. |
+| `mullet job run` refuses | It says why: no sandbox, no `socat`, or no `claude`. `mullet doctor` shows the same checks. Don't work around the sandbox. |
+| Jobs bill the API instead of your subscription | The job was planned with `--billing api`. Plan it again without that flag. |
 
----
-
-## Next Steps
-
-- **Quick reference:** See [`docs/QUICKSTART.md`](QUICKSTART.md) for common commands and orchestration modes (`mullet ralph`, `mullet ultrawork`, `mullet autopilot`).
-- **opencode deep-dive:** See [`docs/opencode_integration.md`](opencode_integration.md) for filesystem-agent setup and troubleshooting.
-- **Architecture:** See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) for routing tiers, fallback chains, and system design.
-- **Preset management:** `mullet preset use <name>` switches routing policy. Built-ins: `balanced-mix` (default), `local-only`, `claude-only`, `cheap-cloud`. See README.md § "Provider Presets" for details.
-
-If something still doesn't work, run `mullet doctor --full` for extra diagnostics and paste the output into a GitHub issue.
+If something still doesn't work, run `mullet doctor --full` and include its output when you ask for help.

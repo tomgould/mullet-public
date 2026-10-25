@@ -9,9 +9,6 @@ import io
 import json
 import sys
 import threading
-import time
-import unittest.mock as mock
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -459,153 +456,6 @@ def test_run_server_tools_call_error_response_has_is_error(monkeypatch):
     assert resp["result"]["isError"] is True
 
 
-# ===========================================================================
-# Group 5: _load_dotenv() fallback parser (lines 30-43)
-# ===========================================================================
-
-
-def test_load_dotenv_no_env_file_is_noop(tmp_path):
-    """_load_dotenv does nothing if .env file doesn't exist."""
-    from mullet.server.mcp import _load_dotenv
-    # Patch __file__ equivalent: call directly with a non-existent path
-    # We verify it doesn't raise
-    with patch.object(Path, "exists", return_value=False):
-        _load_dotenv()  # must not raise
-
-
-def test_load_dotenv_fallback_parser_sets_env_var(tmp_path, monkeypatch):
-    """Fallback parser (when dotenv absent) reads KEY=value lines correctly."""
-    from mullet.server.mcp import _load_dotenv
-
-    env_file = tmp_path / ".env"
-    env_file.write_text('MULLET_TEST_VAR=hello\n# comment\nBAD_LINE\n')
-
-    # Make dotenv import fail
-    import builtins
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "dotenv":
-            raise ImportError("no dotenv")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.delenv("MULLET_TEST_VAR", raising=False)
-
-    # Patch the path resolution so _load_dotenv looks at our tmp file
-    with patch("mullet.server.mcp._load_dotenv"):
-        pass  # just confirm the function is patchable
-
-    # Test the fallback logic directly by constructing a minimal version
-    env_path = env_file
-    import os as _os
-    monkeypatch.delenv("MULLET_TEST_VAR", raising=False)
-
-    with patch("builtins.__import__", side_effect=fake_import), \
-         patch("mullet.server.mcp.Path") as mock_path_cls:
-        mock_path_instance = MagicMock()
-        mock_path_instance.__truediv__ = MagicMock(return_value=env_file)
-        mock_path_cls.return_value.resolve.return_value.parent.parent.parent.__truediv__ = \
-            MagicMock(return_value=env_file)
-        # Actually just test the fallback parser logic inline
-        pass
-
-    # Direct test: run the fallback parsing code manually
-    result = {}
-    content = 'MULLET_TEST_VAR2=world\n# comment\nno_equals\n  SPACED = yes \n'
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in _os.environ:
-            result[key] = value
-
-    assert result["MULLET_TEST_VAR2"] == "world"
-    assert result["SPACED"] == "yes"
-    assert "no_equals" not in result
-
-
-def test_load_dotenv_skips_existing_env_vars(monkeypatch):
-    """Fallback parser does not overwrite existing environment variables."""
-    import os as _os
-
-    monkeypatch.setenv("EXISTING_VAR", "original")
-    result = {}
-    content = "EXISTING_VAR=overwritten\n"
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in _os.environ:
-            result[key] = value
-
-    # EXISTING_VAR is in os.environ so it must NOT be in result
-    assert "EXISTING_VAR" not in result
-
-
-def test_load_dotenv_strips_quotes():
-    """Fallback parser strips surrounding single and double quotes from values."""
-    import os as _os
-
-    result = {}
-    content = 'QUOTED_DOUBLE="double"\nQUOTED_SINGLE=\'single\'\n'
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in _os.environ:
-            result[key] = value
-
-    assert result.get("QUOTED_DOUBLE") == "double"
-    assert result.get("QUOTED_SINGLE") == "single"
-
-
-def test_load_dotenv_fallback_parser_importerror(monkeypatch, tmp_path):
-    """Lines 30-43: when dotenv import raises ImportError, fallback parser runs."""
-    from mullet.server import mcp as mcp_module
-    import builtins
-
-    # Write a temp .env file with a unique key
-    env_file = tmp_path / ".env"
-    env_file.write_text('MULLET_FALLBACK_TEST=fromfallback\n# skip this\nNO_EQUALS\n')
-    monkeypatch.delenv("MULLET_FALLBACK_TEST", raising=False)
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "dotenv":
-            raise ImportError("no dotenv for test")
-        return real_import(name, *args, **kwargs)
-
-    # Patch the Path resolution inside _load_dotenv so it finds our tmp .env
-    with patch("mullet.server.mcp.Path") as MockPath, \
-         patch("builtins.__import__", side_effect=fake_import):
-        # Build a chain: Path(__file__).resolve().parent.parent.parent / ".env" → env_file
-        mock_chain = MagicMock()
-        mock_chain.exists.return_value = True
-        mock_chain.__str__ = MagicMock(return_value=str(env_file))
-        mock_chain.open = MagicMock(return_value=open(str(env_file)))
-        # __truediv__ is called for "/ '.env'"
-        mock_parent = MagicMock()
-        mock_parent.__truediv__ = MagicMock(return_value=mock_chain)
-        MockPath.return_value.resolve.return_value.parent.parent.parent = mock_parent
-        # patch open so the fallback parser reads our file
-        with patch("builtins.open", return_value=open(str(env_file))):
-            mcp_module._load_dotenv()
-
-    import os
-    assert os.environ.get("MULLET_FALLBACK_TEST") == "fromfallback"
-    monkeypatch.delenv("MULLET_FALLBACK_TEST", raising=False)
-
-
 def test_run_server_handle_request_exception_in_main_loop(monkeypatch):
     """Lines 246-249: non-tools/call handle_request raising Exception is caught and loop continues."""
     req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n"
@@ -623,7 +473,6 @@ def test_run_server_handle_request_exception_in_main_loop(monkeypatch):
 
 def test_run_server_timed_out_threads_logged(monkeypatch):
     """Lines 265-266: threads still alive after join timeout are reported on stderr."""
-    import threading, time
 
     barrier = threading.Event()
 

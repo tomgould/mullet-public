@@ -17,7 +17,7 @@ REPO_URL = "https://github.com/tomgould/mullet-public"
 VERSION_URL = (
     "https://raw.githubusercontent.com/tomgould/mullet-public/main/mullet/__init__.py"
 )
-UPDATE_HINT = "git pull in your Mullet clone, then pip install -e . (or re-run scripts/install.sh)"
+UPDATE_HINT = "uv tool upgrade mullet (or pipx upgrade mullet, or re-run scripts/install.sh)"
 
 _VERSION_RE = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 

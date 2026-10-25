@@ -90,14 +90,18 @@ class CircuitBreaker:
 
 
 def check_lm_studio_model(
-    base_url: str = "http://localhost:1234/v1",
+    base_url: str | None = None,
     timeout: float = 10.0,
 ) -> bool:
     """
     Verify LM Studio has a model loaded and can generate completions.
 
     Sends a tiny test prompt. Returns True only if we get a 200 with valid output.
+    ``base_url`` defaults to ``LOCAL_LLM_URL``.
     """
+    if base_url is None:
+        from mullet.core.env import local_llm_url
+        base_url = local_llm_url()
     try:
         import httpx
         with httpx.Client(timeout=timeout) as client:
@@ -122,7 +126,7 @@ def check_lm_studio_model(
 
 
 def wait_for_lm_studio(
-    base_url: str = "http://localhost:1234/v1",
+    base_url: str | None = None,
     timeout: float = 60.0,
     poll_interval: float = 5.0,
 ) -> bool:

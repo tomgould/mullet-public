@@ -10,18 +10,18 @@ logger = logging.getLogger(__name__)
 
 
 class SkillManager:
-    """Owns the on-disk skills tree (``~/.mullet/skills/``) and ID lifecycle."""
+    """Owns the on-disk skills tree (``skills/`` in the data directory) and ID lifecycle."""
 
     def __init__(self):
         self.skills_dir = self.get_skill_dir()
 
     def get_skill_dir(self) -> Path:
         """
-        Returns the path to the user skills directory (~/.mullet/skills/).
-        Creates the directory if it doesn't exist.
+        Returns the path to the user skills directory (skills/ in the data
+        directory). Creates the directory if it doesn't exist.
         """
-        mullet_home = Path.home() / ".mullet"
-        skills_dir = mullet_home / "skills"
+        from mullet.core.paths import data_dir
+        skills_dir = data_dir() / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
         return skills_dir
 

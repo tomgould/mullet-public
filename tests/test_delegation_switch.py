@@ -17,8 +17,6 @@ from mullet.core import env as mullet_env
 from mullet.core.env import DELEGATION_OFF_MESSAGE, delegation_enabled
 from mullet.server import mcp_handlers
 
-HOOKS = Path(__file__).resolve().parent.parent / "scripts" / "hooks"
-
 DISPATCHING_TOOLS = ("mullet_run", "mullet_delegate", "mullet_swarm", "mullet_opencode")
 
 
@@ -37,7 +35,7 @@ def _no_provider_calls():
         patch.object(mcp_handlers, "_resolve_provider", boom),
         patch.object(mcp_handlers, "_provider_for_tier", boom),
         patch("mullet.core.orchestration.swarm.run_swarm", boom),
-        patch("mullet.tools.opencode_tool.opencode_run", boom),
+        patch("mullet.jobs.delegate.delegate", boom),
     ]
 
 
@@ -48,7 +46,7 @@ def _no_provider_calls():
 class TestSetting:
     def test_default_is_on(self, monkeypatch, tmp_path):
         monkeypatch.delenv("MULLET_DELEGATION", raising=False)
-        monkeypatch.setattr(mullet_env, "_REPO_DOTENV", tmp_path / "missing.env")
+        monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [])
         assert delegation_enabled() is True
 
     @pytest.mark.parametrize("value", ["off", "OFF", " off ", "0", "false", "no", "disabled"])
@@ -70,14 +68,14 @@ class TestSetting:
         dotenv = tmp_path / ".env"
         dotenv.write_text("# comment\nOTHER=1\nMULLET_DELEGATION='off'\n")
         monkeypatch.delenv("MULLET_DELEGATION", raising=False)
-        monkeypatch.setattr(mullet_env, "_REPO_DOTENV", dotenv)
+        monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [dotenv])
         assert delegation_enabled() is False
 
     def test_environment_wins_over_dotenv(self, monkeypatch, tmp_path):
         dotenv = tmp_path / ".env"
         dotenv.write_text("MULLET_DELEGATION=off\n")
         monkeypatch.setenv("MULLET_DELEGATION", "on")
-        monkeypatch.setattr(mullet_env, "_REPO_DOTENV", dotenv)
+        monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [dotenv])
         assert delegation_enabled() is True
 
     def test_message_names_the_setting(self):
@@ -160,7 +158,7 @@ class TestMcpToolsWhenOn:
 
     def test_delegate_reaches_provider_resolution(self, monkeypatch):
         monkeypatch.delenv("MULLET_DELEGATION", raising=False)
-        monkeypatch.setattr(mullet_env, "_REPO_DOTENV", Path("/nonexistent/.env"))
+        monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [])
         with patch.object(mcp_handlers, "_active_preset", return_value=None), \
              patch.object(mcp_handlers, "_resolve_provider", return_value=None) as resolve:
             result = json.loads(mcp_handlers.handle_mullet_delegate({"goal": "x"}))
@@ -178,14 +176,15 @@ class TestMcpToolsWhenOn:
         rs.assert_called_once()
         assert DELEGATION_OFF_MESSAGE not in out
 
-    def test_opencode_reaches_opencode_run(self, monkeypatch, tmp_path):
+    def test_opencode_reaches_delegate(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MULLET_DELEGATION", "on")
-        with patch("mullet.tools.opencode_tool.opencode_run",
-                   return_value={"completed": True, "output": "done"}) as run:
-            result = mcp_handlers.handle_mullet_opencode(
-                {"task": "edit", "model": "openrouter/deepseek/deepseek-v4-flash", "cwd": str(tmp_path)}
-            )
+        with patch.object(mcp_handlers, "_active_preset", return_value=None), \
+             patch("mullet.jobs.ledger.Ledger", MagicMock()), \
+             patch("mullet.jobs.delegate.delegate",
+                   return_value={"status": "applied", "job_id": "j1"}) as run:
+            result = mcp_handlers.handle_mullet_opencode({"task": "edit", "cwd": str(tmp_path)})
         run.assert_called_once()
+        assert result["status"] == "applied"
         assert result.get("error") != DELEGATION_OFF_MESSAGE
 
 
@@ -217,17 +216,8 @@ class TestCliWhenOff:
         out = json.loads(capsys.readouterr().out)
         assert out["error"] == DELEGATION_OFF_MESSAGE
 
-    def test_run_mode_refuses(self, monkeypatch, capsys):
-        from mullet.cli import main as cli
-
-        _off(monkeypatch)
-        with patch.object(cli, "build_agent", side_effect=AssertionError("built an agent")):
-            assert cli.run_mode("ralph", "do something", _cli_args()) == 2
-        assert DELEGATION_OFF_MESSAGE in capsys.readouterr().err
-
     @pytest.mark.parametrize("argv", [
         ["mullet", "write", "a", "haiku"],
-        ["mullet", "autopilot", "build", "it"],
         ["mullet", "watch", "rerun", "tests"],
         ["mullet", "live-test", "5"],
         ["mullet"],
@@ -299,11 +289,10 @@ async def test_chat_completions_refused_when_off(aiohttp_client, monkeypatch):
 
 class TestHookGate:
     @pytest.fixture()
-    def gate(self, monkeypatch):
-        monkeypatch.syspath_prepend(str(HOOKS))
-        import _delegation_gate
+    def gate(self):
+        from mullet.hooks import delegation_gate
 
-        return _delegation_gate
+        return delegation_gate
 
     def test_pressure_does_not_warrant_delegation_when_off(self, gate, monkeypatch):
         _off(monkeypatch)

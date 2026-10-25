@@ -1,8 +1,6 @@
 """Tests covering missing branches in mcp_handlers.py (lines 77, 265-417, 610-682, 691-940, 964-969)."""
 import json
 import logging
-import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,8 +84,7 @@ class TestProviderForTier:
     def test_gemini_no_key_returns_none(self, monkeypatch):
         """_mk_gemini: no GEMINI_API_KEY → factory returns None."""
         self._env_no_keys(monkeypatch)
-        with patch("mullet.core.providers.gemini_cli.is_gemini_cli_available", return_value=False):
-            result = _provider_for_tier("STANDARD", allowed={"gemini"})
+        result = _provider_for_tier("STANDARD", allowed={"gemini"})
         assert result is None
 
     def test_gemini_provider_raises_inner_caught(self, monkeypatch, caplog):
@@ -97,7 +94,6 @@ class TestProviderForTier:
         # Re-set GOOGLE_API_KEY because _env_no_keys cleared it
         monkeypatch.setenv("GOOGLE_API_KEY", "fake-key")
         with patch("mullet.core.providers.gemini.GeminiProvider", side_effect=RuntimeError("boom")), \
-             patch("mullet.core.providers.gemini_cli.is_gemini_cli_available", return_value=False), \
              caplog.at_level(logging.WARNING):
             result = _provider_for_tier("STANDARD", allowed={"gemini"})
         assert result is None
@@ -113,25 +109,6 @@ class TestProviderForTier:
              patch("mullet.core.router.resource_guard.get_resource_guard", return_value=mock_guard):
             result = _provider_for_tier("STANDARD", allowed={"local"})
         assert result is None
-
-    def test_gemini_cli_available_returned(self, monkeypatch):
-        """_mk_gemini_cli: is_gemini_cli_available()=True → returns GeminiCLIProvider."""
-        self._env_no_keys(monkeypatch)
-        mock_cli_provider = MagicMock()
-        mock_cli_provider.name = "gemini"
-        with patch("mullet.core.providers.gemini_cli.is_gemini_cli_available", return_value=True), \
-             patch("mullet.core.providers.gemini_cli.GeminiCLIProvider", return_value=mock_cli_provider):
-            result = _provider_for_tier("LOW", allowed={"gemini"})
-        assert result is mock_cli_provider
-
-    def test_gemini_cli_exception_swallowed(self, monkeypatch, caplog):
-        """_mk_gemini_cli: raises Exception → swallowed, returns None."""
-        self._env_no_keys(monkeypatch)
-        with patch("mullet.core.providers.gemini_cli.is_gemini_cli_available", side_effect=RuntimeError("unavailable")), \
-             caplog.at_level(logging.WARNING):
-            result = _provider_for_tier("LOW", allowed={"gemini"})
-        assert result is None
-        assert "Gemini CLI unavailable" in caplog.text
 
     def test_factory_exception_continues_to_next(self, monkeypatch):
         """Candidate factory raises Exception in outer loop → logged, continues to next candidate."""
@@ -224,50 +201,14 @@ class TestHandleMulletRunInner:
         assert "completed" in result
         assert "estimate_tokens failed" in caplog.text
 
-    def test_mode_ultrawork_returns_completed_dict(self):
-        mock_prov, mock_runner = self._mock_base()
-        mock_uw_result = MagicMock()
-        mock_uw_result.completed = True
-        mock_uw_result.summary = "done"
-        mock_uw_result.subtask_results = [1, 2, 3]
-        mock_uw_result.total_tokens.total_tokens = 1000
-        mock_uw = MagicMock()
-        mock_uw.execute.return_value = mock_uw_result
-        with patch.object(handlers, "_resolve_provider", return_value=mock_prov), \
-             patch("mullet.cli.main.build_tool_registry", return_value={}), \
-             patch("mullet.server.mcp_handlers._write_agent_state_fn"), \
-             patch("mullet.server.mcp_handlers._clear_agent_state"), \
-             patch("mullet.core.agent.runner.AgentRunner", return_value=mock_runner), \
-             patch("mullet.core.agent.prompts.build_base_prompt", return_value="sys"), \
-             patch("mullet.server.mcp_handlers._build_fallback_chain", return_value=[]), \
-             patch("mullet.core.providers.tokenize.estimate_tokens", return_value=100), \
-             patch("mullet.core.orchestration.ultrawork.UltraworkMode", return_value=mock_uw):
-            result = _handle_mullet_run_inner({"task": "do complex work", "mode": "ultrawork"})
-        assert result["completed"] is True
-        assert result["subtasks"] == 3
-
-    def test_mode_ralph_returns_stories_key(self):
-        mock_prov, mock_runner = self._mock_base()
-        mock_ralph_result = MagicMock()
-        mock_ralph_result.completed = True
-        mock_ralph_result.summary = "done"
-        mock_ralph_result.stories_completed = 3
-        mock_ralph_result.stories_total = 5
-        mock_ralph_result.iterations_used = 10
-        mock_ralph = MagicMock()
-        mock_ralph.execute.return_value = mock_ralph_result
-        with patch.object(handlers, "_resolve_provider", return_value=mock_prov), \
-             patch("mullet.cli.main.build_tool_registry", return_value={}), \
-             patch("mullet.server.mcp_handlers._write_agent_state_fn"), \
-             patch("mullet.server.mcp_handlers._clear_agent_state"), \
-             patch("mullet.core.agent.runner.AgentRunner", return_value=mock_runner), \
-             patch("mullet.core.agent.prompts.build_base_prompt", return_value="sys"), \
-             patch("mullet.server.mcp_handlers._build_fallback_chain", return_value=[]), \
-             patch("mullet.core.providers.tokenize.estimate_tokens", return_value=100), \
-             patch("mullet.core.orchestration.ralph.RalphMode", return_value=mock_ralph):
-            result = _handle_mullet_run_inner({"task": "do user stories", "mode": "ralph"})
-        assert "stories" in result
-        assert result["stories"] == "3/5"
+    def test_removed_mode_returns_error(self):
+        """ultrawork and ralph were removed; asking for them is an error, not a silent standard run."""
+        with patch.object(handlers, "_resolve_provider") as resolve:
+            for mode in ("ultrawork", "ralph"):
+                result = _handle_mullet_run_inner({"task": "do complex work", "mode": mode})
+                assert "was removed" in result["error"]
+                assert "mullet job" in result["error"]
+        resolve.assert_not_called()
 
     def test_agent_run_exception_returns_error(self):
         mock_prov, mock_runner = self._mock_base()
@@ -389,15 +330,15 @@ class TestHandleMulletDelegate:
 
 
 # ---------------------------------------------------------------------------
-# Regression tests for Bug 1 (claude_max allowlist mismatch)
+# Regression tests for Bug 1 (provider-name vs allowlist-alias mismatch)
 # ---------------------------------------------------------------------------
 
-class TestClaudeMaxAllowlistMismatch:
-    def test_assert_allows_claude_max_when_alias_tag_matches_allowlist(self):
+class TestAliasAllowlistMismatch:
+    def test_assert_allows_provider_when_alias_tag_matches_allowlist(self):
         """_assert must accept a provider whose .name differs from allowlist
         when _mcp_resolved_alias was set by _provider_for_tier."""
         mock_prov = MagicMock()
-        mock_prov.name = "claude_max"
+        mock_prov.name = "anthropic"
         mock_prov._mcp_resolved_alias = "sonnet"
         with patch.object(handlers, "_provider_for_tier", return_value=mock_prov):
             result = _resolve_provider(force_tier="STANDARD", allowed={"sonnet"})
@@ -406,18 +347,15 @@ class TestClaudeMaxAllowlistMismatch:
     def test_assert_still_raises_when_neither_name_nor_alias_matches(self):
         """_assert must still fire BUG when provider is truly outside allowlist."""
         mock_prov = MagicMock()
-        mock_prov.name = "claude_max"
+        mock_prov.name = "anthropic"
         # no _mcp_resolved_alias set
         with patch.object(handlers, "_provider_for_tier", return_value=mock_prov):
             with pytest.raises(RuntimeError, match="not in allowlist"):
                 _resolve_provider(force_tier="STANDARD", allowed={"sonnet"})
 
-    def test_provider_for_tier_never_constructs_claude_max(self, monkeypatch):
-        """_provider_for_tier must NOT fall back to ClaudeMaxProvider when no
-        ANTHROPIC_API_KEY is set -- reusing the Claude Max OAuth token in a
-        third-party tool violates Anthropic's ToS. Anthropic-only routing
-        with no key must resolve to None (matching how Kimi/Gemini already
-        behave when unconfigured), not silently construct ClaudeMaxProvider."""
+    def test_provider_for_tier_none_without_anthropic_key(self, monkeypatch):
+        """Anthropic-only routing with no ANTHROPIC_API_KEY must resolve to
+        None (matching how Kimi/Gemini behave when unconfigured)."""
         from mullet.server.mcp_handlers import _provider_for_tier
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("KIMI_API_KEY", raising=False)
@@ -429,10 +367,9 @@ class TestClaudeMaxAllowlistMismatch:
 
 
 class TestAnthropicOnlyNativeHandoff:
-    """Regression tests for the ClaudeMaxProvider ToS fix: Anthropic-only
-    routing with no ANTHROPIC_API_KEY must hand the task back to the caller
-    (Claude Code) instead of erroring opaquely or silently reusing the
-    subscription OAuth token."""
+    """Anthropic-only routing with no ANTHROPIC_API_KEY must hand the task
+    back to the caller (Claude Code) with a clear message instead of
+    erroring opaquely."""
 
     def test_helper_true_for_anthropic_only_no_key(self, monkeypatch):
         from mullet.server.mcp_handlers import _anthropic_only_needs_native_handoff
@@ -457,12 +394,14 @@ class TestAnthropicOnlyNativeHandoff:
         result = _handle_mullet_run_inner({"task": "hi", "providers": "sonnet"})
         assert "error" in result
         assert "in-context" in result["error"]
+        assert "ANTHROPIC_API_KEY" in result["error"]
 
     def test_handle_mullet_delegate_returns_native_handoff(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         result = json.loads(handle_mullet_delegate({"goal": "hi", "providers": "haiku"}))
         assert "error" in result
         assert "in-context" in result["error"]
+        assert "ANTHROPIC_API_KEY" in result["error"]
 
 
 # ---------------------------------------------------------------------------

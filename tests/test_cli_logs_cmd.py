@@ -51,11 +51,10 @@ def test_format_latency_1s_and_above_is_seconds():
 # --- _get_db_path ----------------------------------------------------------
 
 
-def test_get_db_path_returns_home_mullet():
+def test_get_db_path_is_in_the_state_dir():
     from mullet.cli.logs_cmd import _get_db_path
-    path = _get_db_path()
-    assert path.name == "interactions.db"
-    assert ".mullet" in str(path)
+    from mullet.core.paths import state_dir
+    assert _get_db_path() == state_dir() / "interactions.db"
 
 
 # --- run_logs_tail ---------------------------------------------------------

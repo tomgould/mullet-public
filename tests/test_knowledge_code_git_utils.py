@@ -1,9 +1,6 @@
 """Tests for mullet/knowledge/code/git_utils.py."""
-import os
-import subprocess
-import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from mullet.knowledge.code.git_utils import (
     RepoInfo,
@@ -17,7 +14,6 @@ from mullet.knowledge.code.git_utils import (
     list_repo_files,
     _is_child_repo,
     walk_code_files,
-    GLOBAL_EXCLUDES,
 )
 
 

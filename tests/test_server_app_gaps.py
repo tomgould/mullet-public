@@ -4,9 +4,8 @@ Lines targeted: 58-66, 71, 77-90, 97-113, 119-148, 156-163.
 Uses pytest-aiohttp (aiohttp_client fixture) and asyncio_mode=auto from pyproject.toml.
 """
 
-import asyncio
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from aiohttp import web

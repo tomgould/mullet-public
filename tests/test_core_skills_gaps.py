@@ -4,10 +4,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-import yaml
 
-from mullet.core.skills.learned import LearnedSkill, LearnedSkillManager
+from mullet.core.skills.learned import LearnedSkillManager
 from mullet.core.skills.learner import LearnedSkill as LearnerSkill, save_skill, find_similar_skill
 from mullet.core.skills import stats as stats_module
 from mullet.core.skills.manager import SkillManager

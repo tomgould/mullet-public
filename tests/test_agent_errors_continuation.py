@@ -1,8 +1,7 @@
-"""Pure unit tests for agent errors, continuation, and output modules.
+"""Pure unit tests for agent errors and output modules.
 
 Covers:
 - mullet/core/agent/errors.py      -> format_error
-- mullet/core/agent/continuation.py -> should_continue, format_todo_reminder
 - mullet/core/agent/output.py       -> ExecutionTracker, ExecutionSummary
 
 All tests are isolated and have no external dependencies.
@@ -10,15 +9,7 @@ All tests are isolated and have no external dependencies.
 
 from unittest.mock import patch
 
-import pytest
-
 from mullet.core.agent.errors import format_error, ERROR_SUGGESTIONS
-from mullet.core.agent.continuation import (
-    should_continue,
-    format_todo_reminder,
-    CONTINUATION_REMINDERS,
-    _COMPLETION_PHRASES,
-)
 from mullet.core.agent.output import ExecutionTracker, ExecutionSummary
 from mullet.core.agent.types import AgentResult, TokenUsage
 
@@ -97,156 +88,6 @@ class TestFormatErrorCategories:
             "context length",
             "tool",
         }
-
-
-# ============================================================================
-# continuation.py  —  should_continue
-# ============================================================================
-
-class TestShouldContinue:
-    def test_empty_response_short_circuits_false(self):
-        cont, msg = should_continue("", tool_calls_made=5)
-        assert cont is False
-        assert msg is None
-
-    def test_completion_phrases_short_circuit_false(self):
-        for phrase in _COMPLETION_PHRASES:
-            content = f"Great news! {phrase} and we are good to go."
-            cont, msg = should_continue(content, tool_calls_made=3)
-            assert cont is False, f"phrase={phrase!r} should short-circuit"
-            assert msg is None
-
-    def test_no_tools_short_response_returns_false(self):
-        """Short response (<500 chars) with zero tool calls should not nudge."""
-        todos = [{"id": "1", "content": "fix bug", "status": "pending"}]
-        cont, msg = should_continue("Sure thing.", tool_calls_made=0, todo_items=todos)
-        assert cont is False
-        assert msg is None
-
-    def test_no_tools_but_long_response_with_stop_phrase_and_pending_nudges(self):
-        """Long response (>=500 lower chars) with zero tool calls CAN nudge."""
-        todos = [{"id": "1", "content": "fix bug", "status": "pending"}]
-        long_text = "let me know if you need anything else " + "x" * 500
-        cont, msg = should_continue(long_text, tool_calls_made=0, todo_items=todos)
-        assert cont is True
-        assert msg is not None
-        assert "Pending tasks: 1" in msg
-
-    def test_pending_todos_with_stop_phrase_nudges(self):
-        todos = [
-            {"id": "1", "content": "A", "status": "completed"},
-            {"id": "2", "content": "B", "status": "pending"},
-        ]
-        cont, msg = should_continue(
-            "I've completed the first step. Let me know if you need more.",
-            tool_calls_made=2,
-            todo_items=todos,
-        )
-        assert cont is True
-        assert "Pending tasks: 1" in msg
-        assert CONTINUATION_REMINDERS[0].split(".")[0] in msg
-
-    def test_no_stop_phrase_returns_false_even_with_pending(self):
-        todos = [{"id": "1", "content": "x", "status": "pending"}]
-        cont, msg = should_continue(
-            "I will now proceed to refactor the codebase.",
-            tool_calls_made=2,
-            todo_items=todos,
-        )
-        assert cont is False
-        assert msg is None
-
-    def test_iteration_cycling_rotates_reminder(self):
-        todos = [{"id": "1", "content": "x", "status": "pending"}]
-        content = "I'm done. Let me know if you need more help."
-        nudges = []
-        for i in range(len(CONTINUATION_REMINDERS) * 2):
-            cont, msg = should_continue(content, 1, todos, iteration=i)
-            assert cont is True
-            nudges.append(msg.split("\n\nPending tasks:")[0])
-        # Verify cycling: every Nth nudge should match
-        n = len(CONTINUATION_REMINDERS)
-        for i in range(n):
-            assert nudges[i] == nudges[i + n]
-        # All reminders within one cycle are distinct
-        assert len(set(nudges[:n])) == n
-
-    def test_stop_phrase_but_zero_pending_returns_false(self):
-        todos = [{"id": "1", "content": "x", "status": "completed"}]
-        cont, msg = should_continue(
-            "That's all done. Feel free to ask if you need more.",
-            tool_calls_made=3,
-            todo_items=todos,
-        )
-        assert cont is False
-        assert msg is None
-
-    def test_none_todo_items_treated_as_no_pending(self):
-        cont, msg = should_continue(
-            "Hope this helps! Let me know if you need anything else.",
-            tool_calls_made=5,
-            todo_items=None,
-        )
-        assert cont is False
-        assert msg is None
-
-    def test_in_progress_counts_as_pending(self):
-        todos = [{"id": "1", "content": "working", "status": "in_progress"}]
-        cont, msg = should_continue(
-            "I'm done. Let me know if you need more.",
-            tool_calls_made=1,
-            todo_items=todos,
-        )
-        assert cont is True
-        assert "Pending tasks: 1" in msg
-
-
-# ============================================================================
-# continuation.py  —  format_todo_reminder
-# ============================================================================
-
-class TestFormatTodoReminder:
-    def test_empty_list_returns_none(self):
-        assert format_todo_reminder([]) is None
-
-    def test_none_returns_none(self):
-        assert format_todo_reminder(None) is None
-
-    def test_no_active_items_returns_none(self):
-        todos = [
-            {"id": "1", "content": "Done A", "status": "completed"},
-            {"id": "2", "content": "Done B", "status": "completed"},
-        ]
-        assert format_todo_reminder(todos) is None
-
-    def test_pending_items_formatted(self):
-        todos = [
-            {"id": "1", "content": "Fix auth", "status": "pending"},
-            {"id": "2", "content": "Add tests", "status": "completed"},
-        ]
-        result = format_todo_reminder(todos)
-        assert result is not None
-        assert "[Reminder: 1 tasks remaining]" in result
-        assert "[ ] 1. Fix auth" in result
-        assert "Add tests" not in result
-
-    def test_in_progress_uses_arrow_marker(self):
-        todos = [
-            {"id": "1", "content": "Refactor", "status": "in_progress"},
-            {"id": "2", "content": "Review", "status": "pending"},
-        ]
-        result = format_todo_reminder(todos)
-        assert "[>]" in result
-        assert "[ ]" in result
-        assert "[Reminder: 2 tasks remaining]" in result
-        assert "1. Refactor" in result
-        assert "2. Review" in result
-
-    def test_missing_id_and_content_defaults(self):
-        todos = [{"status": "pending"}]
-        result = format_todo_reminder(todos)
-        assert "?" in result
-        assert "[ ] ?. " in result
 
 
 # ============================================================================

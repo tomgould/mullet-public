@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.core import plugins as plugins_mod
 from mullet.core.plugins import (

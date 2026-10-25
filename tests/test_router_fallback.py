@@ -3,7 +3,6 @@
 import logging
 from unittest.mock import MagicMock
 
-import pytest
 
 from mullet.core.router.fallback import FallbackManager
 

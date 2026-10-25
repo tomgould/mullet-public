@@ -12,7 +12,12 @@ mullet reindex --pool <name>
 
 # Full rebuild — wipes the index and starts from scratch
 mullet reindex --pool <name> --rebuild
+
+# A bare pool name works too
+mullet reindex <name> --graph
 ```
+
+Pools live in the pools directory, `mullet paths pools` (`TRAWL_POOLS_DIR` overrides it). `mullet reindex --list` shows them. It works from an installed copy as well as a checkout.
 
 ## Flag reference
 
@@ -196,7 +201,7 @@ than writing to the same index at the same time.
 ## `--graph` (knowledge graph extraction)
 
 Graph extraction is **hardcoded to local LLM via LM Studio only**.
-The docstring in `scripts/reindex.py` explains why: *"Graph extraction never
+The docstring in `mullet/knowledge/reindex.py` explains why: *"Graph extraction never
 uses API providers — it would rack up unexpected bills."*
 
 - If no model is loaded in LM Studio, the pool prints
@@ -215,7 +220,7 @@ graph extraction is one-task-at-a-time and the extra processes just sit idle.
 The repo ships `scripts/overnight_reindex_all.sh` for unattended reindexing of
 every pool. It loops smallest-first (so small pools finish early and are
 searchable while large pools churn), runs `mullet reindex --pool <p>
---sync-sources` per pool, logs to `~/.mullet/logs/overnight-reindex-<timestamp>.log`,
+--sync-sources` per pool, logs to `overnight-reindex-<timestamp>.log` in the `logs` folder of the state directory (`mullet paths state`),
 and continues past individual failures. Exit code is 1 if any pool failed.
 
 Flags:

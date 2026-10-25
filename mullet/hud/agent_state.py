@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 
+from mullet.core.paths import state_dir
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
@@ -19,7 +21,7 @@ _LOCK = threading.Lock()
 
 def _state_path() -> Path:
     # User-level absolute path so MCP server (any CWD) and HUD (any session CWD) agree.
-    return Path.home() / ".mullet" / "state" / "agents.json"
+    return state_dir() / "state" / "agents.json"
 
 
 def _read_current() -> list[dict]:

@@ -45,9 +45,12 @@ def test_load_builtin_skills():
     loader = SkillLoader(builtin_dir=builtin_dir)
     skills = loader.scan()
     names = {s.metadata.name for s in skills}
-    assert "autopilot" in names
-    assert "ralph" in names
-    assert "ultrawork" in names
+    assert "brainstorm" in names
+    assert "mullet-job" in names
+    assert "mullet-local" in names
+    assert "code-review" in names
+    for removed in ("autopilot", "ralph", "team", "ultrawork", "eco"):
+        assert removed not in names
 
 
 def test_load_skill_from_directory(tmp_path):
@@ -206,16 +209,15 @@ def test_load_all_from_builtins():
     registry = SkillRegistry(loader=loader)
     registry.load_all()
 
-    # Should have at least autopilot, ralph, ultrawork
-    assert registry.get("autopilot") is not None
-    assert registry.get("ralph") is not None
+    assert registry.get("brainstorm") is not None
+    assert registry.get("mullet-job") is not None
 
     # Match should work
-    match = registry.match("run autopilot")
+    match = registry.match("start a mullet job for this refactor")
     assert match is not None
-    assert match.skill.metadata.name == "autopilot"
+    assert match.skill.metadata.name == "mullet-job"
 
     # Invoke should work
-    inv = registry.invoke("autopilot")
-    assert inv.mode == "autopilot"
-    assert "PLAN" in inv.content or "plan" in inv.content.lower()
+    inv = registry.invoke("mullet-job")
+    assert inv.mode is None
+    assert "mullet job" in inv.content

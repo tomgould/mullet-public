@@ -1,24 +1,16 @@
 """Tests for mullet.cli.live_test — unit coverage for missing lines."""
 from __future__ import annotations
 
-import json
-import os
-import threading
-import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mullet.cli.live_test import (
-    _load_mcp_env_fallback,
     _discover_targets,
     _fire_one,
     _fire_kimi_swarm_holds,
     run_live_test,
     run_cli,
     Target,
-    _MCP_ENV_KEYS,
 )
 
 
@@ -37,6 +29,10 @@ class TestDiscoverTargetsGeminiFailure:
 
         import sys
 
+        # Import first: patch.dict("sys.modules") below would otherwise drop it on
+        # exit and leave later tests patching a stale module object.
+        import mullet.core.providers.local_detection  # noqa: F401
+
         # Remove the gemini module from sys.modules so the 'from ... import' fails
         old_mod = sys.modules.pop("mullet.core.providers.gemini", None)
         try:
@@ -50,28 +46,6 @@ class TestDiscoverTargetsGeminiFailure:
 
         # No gemini targets since the provider could not be built
         assert all(t.provider_label != "gemini" for t in targets)
-
-
-# ---------------------------------------------------------------------------
-# Lines 144-145: ClaudeMax probe failed — exception is caught
-# ---------------------------------------------------------------------------
-
-class TestDiscoverTargetsClaudeMaxFailure:
-    """Lines 144-145: Exception from ClaudeMaxProvider probe is caught."""
-
-    def test_claude_max_probe_exception_is_caught(self, monkeypatch):
-        # No ANTHROPIC_API_KEY → falls into the ClaudeMax branch
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        for k in ("KIMI_API_KEY", "MOONSHOT_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
-            monkeypatch.delenv(k, raising=False)
-
-        # Make _read_oauth_token raise an exception so lines 144-145 (except block) run.
-        # Use patch.object on the already-imported module to avoid string-path lookup issues.
-        import mullet.core.providers.claude_max as cm_mod
-        with patch.object(cm_mod, "_read_oauth_token", side_effect=RuntimeError("oauth token read failed")), \
-             patch("mullet.core.providers.local_detection.detect_local_provider", return_value=None):
-            targets = _discover_targets()
-        assert all(t.provider_label != "claude_max" for t in targets)
 
 
 # ---------------------------------------------------------------------------

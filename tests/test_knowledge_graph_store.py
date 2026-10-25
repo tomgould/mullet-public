@@ -251,7 +251,6 @@ def test_load_from_legacy_json_without_processed_chunk_ids(tmp_path):
 
 def test_load_from_legacy_json_bad_data(tmp_path):
     """_load_from_json returns False on JSON decode error (lines 405-407)."""
-    import json
     json_path = tmp_path / "knowledge_graph.json"
     json_path.write_text("not json")
     graph = KnowledgeGraph(tmp_path)
@@ -260,7 +259,6 @@ def test_load_from_legacy_json_bad_data(tmp_path):
 
 def test_load_from_sqlite_with_null_weight(tmp_path):
     """_load_from_sqlite handles NULL weight by defaulting to 1.0 (lines 341-349)."""
-    import sqlite3
     graph = KnowledgeGraph(tmp_path)
     db = graph._get_db()
     db.execute(

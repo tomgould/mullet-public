@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from mullet.core.agent.cost import _get_pricing, _get_rates, estimate_cost, estimate_savings, format_cost_summary
+from mullet.core.agent.cost import _get_pricing, _get_rates, format_cost_summary
 from mullet.core.agent.types import TokenUsage
 
 

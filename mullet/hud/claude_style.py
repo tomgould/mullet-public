@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
+from mullet.core.paths import state_dir
 from mullet.hud.colors import (
     RESET,
     BOLD,
@@ -73,9 +74,9 @@ def _speed_color(mode: str) -> str:
 
 
 def _get_provider_from_log() -> Tuple[Optional[str], Optional[str]]:
-    """Read the most recent provider/model from ``~/.mullet/routing.log``."""
+    """Read the most recent provider/model from ``routing.log`` in the state directory."""
     try:
-        log_path = Path.home() / ".mullet" / "routing.log"
+        log_path = state_dir() / "routing.log"
         if not log_path.exists():
             return None, None
         with open(log_path, encoding="utf-8") as fh:
@@ -291,7 +292,7 @@ class ClaudeStyleHUD:
         # Elapsed since last routing.log entry
         elapsed_str = "0s"
         try:
-            log_path = Path.home() / ".mullet" / "routing.log"
+            log_path = state_dir() / "routing.log"
             if log_path.exists():
                 mtime = log_path.stat().st_mtime
                 elapsed = int(time.time() - mtime)

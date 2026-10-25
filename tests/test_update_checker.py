@@ -75,7 +75,7 @@ def test_check_for_update_available():
     assert result["update_available"] is True
     assert result["latest"] == "99.0.0"
     assert "99.0.0" in result["message"]
-    assert "git pull" in result["message"]
+    assert "uv tool upgrade mullet" in result["message"]
     assert "pip install -U mullet" not in result["message"]
 
 
@@ -142,5 +142,5 @@ def test_install_help_points_at_github_not_pypi(capsys, monkeypatch):
     monkeypatch.setattr("sys.argv", ["mullet", "--install-help"])
     cli_main._main_inner()
     out = capsys.readouterr().out
-    assert "git clone https://github.com/tomgould/mullet-public.git" in out
+    assert "uv tool install git+https://github.com/tomgould/mullet-public.git" in out
     assert "pip install mullet" not in out

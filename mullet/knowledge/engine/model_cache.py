@@ -18,7 +18,9 @@ each encode/predict call.
 import gc
 import logging
 import threading
-from typing import Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterator, Optional
 
 import torch
 
@@ -26,6 +28,33 @@ logger = logging.getLogger(__name__)
 
 _instance: Optional["ModelCache"] = None
 _instance_lock = threading.Lock()
+
+# A device forced by use_device() for the current thread (or task).
+_forced_device: ContextVar[Optional[str]] = ContextVar("mullet_embedding_device", default=None)
+
+
+def embedding_device() -> str:
+    """The device to load embedding models on: "cuda" when usable, else "cpu".
+
+    Inside ``use_device(...)`` it is that device instead.
+    """
+    forced = _forced_device.get()
+    if forced:
+        return forced
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+@contextmanager
+def use_device(device: str) -> Iterator[None]:
+    """Load embedding models (and the searcher's reranker) on ``device`` in this thread.
+
+    The reindexer uses ``use_device("cpu")`` when the GPU stays busy.
+    """
+    token = _forced_device.set(device)
+    try:
+        yield
+    finally:
+        _forced_device.reset(token)
 
 
 def get_model_cache() -> "ModelCache":

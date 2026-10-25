@@ -345,7 +345,7 @@ _LOCAL_LARGE_PATTERNS = (
     "20b", "21b", "22b", "24b", "27b", "30b", "32b", "34b", "35b",
     "70b", "72b", "80b", "106b", "120b", "235b", "480b",
 )  # critical — includes modern MoE total sizes (e.g. 35B-A3B, 80B-A3B)
-_LOCAL_CODER_PATTERNS = ("coder", "code", "starcoder", "deepseek-coder", "codellama")
+_LOCAL_CODER_PATTERNS = ("coder", "code", "starcoder", "deepseek-coder", "codellama", "ornith")
 _LOCAL_VISION_PATTERNS = ("vl", "vision", "internvl", "llava", "moondream")
 _LOCAL_REASONING_PATTERNS = ("thinking", "reasoning", "r1", "qwq", "distillation")
 

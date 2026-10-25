@@ -8,6 +8,7 @@ code style, and how to open a PR.
 ```bash
 git clone https://github.com/tomgould/mullet-public.git
 cd mullet-public
+python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 mullet doctor
 ```
@@ -16,20 +17,24 @@ mullet doctor
 
 | Directory | What lives there |
 |:----------|:----------------|
+| `mullet/jobs/` | `mullet job`: planner, private clone, sandbox, gates, ledger, report, notifications |
 | `mullet/core/` | Routing, providers, tools, skills, knowledge engine, orchestration |
 | `mullet/cli/` | CLI entry points and subcommands |
 | `mullet/hud/` | Terminal status bar and budget guard |
 | `mullet/server/` | REST API, WebSocket, MCP server |
-| `tests/` | Full test suite (17,700+ tests) |
+| `tests/` | Full test suite (about 16,900 tests) |
 
 ## Running Tests
 
 ```bash
-# Full suite
-pytest tests/ -q --tb=short -x
+# While working: only the files you changed
+python3 -m pytest tests/test_foo.py -q
 
-# Integration tests (needs LM Studio on localhost:1234)
-pytest tests/integration/ -v
+# Full suite, in parallel (about 4.5 minutes)
+python3 -m pytest tests -q -n 16 --timeout 300
+
+# Live tests (a real model; excluded by default)
+python3 -m pytest -m live tests/integration/ -v
 ```
 
 ## Code Style
@@ -95,8 +100,8 @@ git commit -m "feat(providers): add streaming token cache"
 
 ## Writing a Plugin
 
-No source modification required. Drop a `.py` file in `~/.mullet/plugins/`
-or `.mullet/plugins/`:
+No source modification required. Drop a `.py` file in `plugins/` in the data directory
+(`mullet paths data`) or in `.mullet/plugins/` in the project:
 
 ```python
 def register(tool_registry=None, **kwargs):

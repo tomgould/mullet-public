@@ -35,6 +35,7 @@ import threading
 import time
 from pathlib import Path
 
+from mullet.core.paths import state_dir
 from mullet.core.providers.model_info import get_context_length
 from mullet.core.providers.model_registry import CONTEXT_SAFETY_MARGIN
 from mullet.core.providers.tokenize import estimate_tokens
@@ -60,23 +61,12 @@ def _resolve_configured_model() -> str:
 
 
 def _resolve_kimi_key() -> str | None:
-    """Return KIMI_API_KEY from environment, falling back to .mcp.json."""
-    key = os.environ.get("KIMI_API_KEY") or os.environ.get("MOONSHOT_API_KEY")
-    if key:
-        return key
-    for candidate in [
-        os.path.join(os.getcwd(), ".mcp.json"),
-        os.path.expanduser("~/.mcp.json"),
-    ]:
-        try:
-            data = json.loads(open(candidate).read())
-            for _srv in data.get("mcpServers", {}).values():
-                k = _srv.get("env", {}).get("KIMI_API_KEY") or _srv.get("env", {}).get("MOONSHOT_API_KEY")
-                if k:
-                    return k
-        except Exception:
-            pass
-    return None
+    """Return the Kimi/Moonshot key from the process environment, if set.
+
+    Keys come only from the environment Mullet already loaded (see
+    ``mullet.core.env``), never from a project's .env or .mcp.json.
+    """
+    return os.environ.get("KIMI_API_KEY") or os.environ.get("MOONSHOT_API_KEY") or None
 
 
 # Provider API keys that should be forwarded to opencode so cloud models
@@ -94,49 +84,9 @@ _FORWARDED_API_KEYS = (
 )
 
 
-def _read_dotenv(path: str) -> dict[str, str]:
-    """Parse a .env file into a dict (no shell expansion, no exports)."""
-    out: dict[str, str] = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                if line.startswith("export "):
-                    line = line[len("export "):]
-                k, _, v = line.partition("=")
-                k = k.strip()
-                v = v.strip().strip('"').strip("'")
-                if k:
-                    out[k] = v
-    except Exception:
-        pass
-    return out
-
-
 def _resolve_forwarded_keys() -> dict[str, str]:
-    """Resolve API keys for cloud providers, checking env then known .env files.
-
-    Searches (in order): process env, ~/.mullet/.env, $PWD/.env.
-    Returns only keys that resolved to a value.
-    """
-    found: dict[str, str] = {}
-    dotenv_candidates = [
-        os.path.expanduser("~/.mullet/.env"),
-        os.path.join(os.getcwd(), ".env"),
-    ]
-    dotenv_data: dict[str, str] = {}
-    for path in dotenv_candidates:
-        if os.path.isfile(path):
-            for k, v in _read_dotenv(path).items():
-                dotenv_data.setdefault(k, v)
-
-    for name in _FORWARDED_API_KEYS:
-        val = os.environ.get(name) or dotenv_data.get(name)
-        if val:
-            found[name] = val
-    return found
+    """Return the cloud provider keys that are set in the process environment."""
+    return {name: os.environ[name] for name in _FORWARDED_API_KEYS if os.environ.get(name)}
 
 
 def _mullet_run_fallback(task: str, cwd: str | None) -> dict:
@@ -216,13 +166,19 @@ _CONTEXT_OVERFLOW_ESCALATION_CANDIDATES = (
 )
 
 
-_KNOWN_BAD_MODELS_PATH = Path.home() / ".mullet" / "opencode_known_bad_models.json"
+# Tests point this at a temporary file; None means opencode_known_bad_models.json
+# in the state directory.
+_KNOWN_BAD_MODELS_PATH: Path | None = None
 _KNOWN_BAD_TTL_S = 900  # 15 min: long enough to skip repeat failures within a
                           # working session, short enough to self-heal soon
                           # after the underlying issue is fixed (e.g. LM
                           # Studio reloaded with a bigger context) without
                           # needing a manual cache-clear.
 _known_bad_lock = threading.Lock()
+
+
+def _known_bad_models_path() -> Path:
+    return _KNOWN_BAD_MODELS_PATH or state_dir() / "opencode_known_bad_models.json"
 
 
 def _load_known_bad_models() -> dict:
@@ -234,9 +190,10 @@ def _load_known_bad_models() -> dict:
     request params), same pattern.
     """
     try:
-        if not _KNOWN_BAD_MODELS_PATH.exists():
+        path = _known_bad_models_path()
+        if not path.exists():
             return {}
-        data = json.loads(_KNOWN_BAD_MODELS_PATH.read_text())
+        data = json.loads(path.read_text())
         cutoff = time.time() - _KNOWN_BAD_TTL_S
         return {k: v for k, v in data.items() if v.get("ts", 0) >= cutoff}
     except Exception:
@@ -255,12 +212,13 @@ def _mark_model_bad(model: str, reason: str, message: str) -> None:
         with _known_bad_lock:
             data = _load_known_bad_models()
             data[model] = {"reason": reason, "message": message[:200], "ts": time.time()}
-            _KNOWN_BAD_MODELS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=_KNOWN_BAD_MODELS_PATH.parent, suffix=".tmp")
+            path = _known_bad_models_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
             try:
                 with os.fdopen(fd, "w") as f:
                     json.dump(data, f)
-                os.replace(tmp, _KNOWN_BAD_MODELS_PATH)
+                os.replace(tmp, path)
             except Exception:
                 try:
                     os.unlink(tmp)

@@ -4,7 +4,6 @@ Targets lines not hit by tests/test_budget_probe.py.
 """
 
 import asyncio
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -55,30 +54,6 @@ def test_priority_score_zero_when_credits_remaining_negative():
         billing_model="api",
     )
     assert bal.priority_score == pytest.approx(0.0)
-
-
-# ---------------------------------------------------------------------------
-# _load_dotenv ImportError — lines 176-177
-# ---------------------------------------------------------------------------
-
-def test_load_dotenv_import_error():
-    """When python-dotenv is missing, _load_dotenv must swallow ImportError."""
-    real_import = __builtins__["__import__"]
-
-    def fake_import(name, *args, **kwargs):
-        if name == "dotenv" or name.startswith("dotenv."):
-            raise ImportError("No module named 'dotenv'")
-        return real_import(name, *args, **kwargs)
-
-    # Temporarily remove dotenv from sys.modules so the import is attempted
-    dotenv_modules = {k: sys.modules.pop(k) for k in list(sys.modules) if k == "dotenv" or k.startswith("dotenv.")}
-    try:
-        with patch("builtins.__import__", fake_import):
-            from mullet.core.providers.budget_probe import _load_dotenv
-            # Should not raise even though dotenv is unavailable
-            _load_dotenv()
-    finally:
-        sys.modules.update(dotenv_modules)
 
 
 # ---------------------------------------------------------------------------
@@ -174,34 +149,21 @@ def test_probe_anthropic_main_body_exception():
 
 
 # ---------------------------------------------------------------------------
-# probe_gemini — lines 406-407, 422, 424
+# probe_gemini
 # ---------------------------------------------------------------------------
 
-def test_probe_gemini_import_exception():
-    """Lines 406-407: is_gemini_cli_available import fails → billing='api'."""
-    with patch(
-        "mullet.core.providers.gemini_cli.is_gemini_cli_available",
-        side_effect=ImportError("no module"),
-    ), patch.dict("os.environ", {"GOOGLE_API_KEY": "key"}, clear=False):
+def test_probe_gemini_with_key_is_api_billing():
+    """A Gemini key is reported as API billing with an unknown window."""
+    with patch.dict("os.environ", {"GOOGLE_API_KEY": "key"}, clear=False):
         result = asyncio.run(probe_gemini())
     assert result.billing_model == "api"
+    assert result.error is None
+    assert "window: unknown" in result.window_label
 
 
-def test_probe_gemini_subscription_cli_window():
-    """Line 422: billing == subscription_cli → subscription window string."""
-    with patch(
-        "mullet.core.providers.gemini_cli.is_gemini_cli_available", return_value=True,
-    ), patch.dict("os.environ", {"GOOGLE_API_KEY": "key"}, clear=False):
-        result = asyncio.run(probe_gemini())
-    assert result.billing_model == "subscription_cli"
-    assert "resets midnight Pacific" in result.window_label
-
-
-def test_probe_gemini_no_key_and_not_subscription():
-    """Line 424: no key + not subscription_cli → error balance."""
-    with patch(
-        "mullet.core.providers.gemini_cli.is_gemini_cli_available", return_value=False,
-    ), patch.dict("os.environ", {}, clear=True):
+def test_probe_gemini_no_key():
+    """No key → error balance."""
+    with patch.dict("os.environ", {}, clear=True):
         result = asyncio.run(probe_gemini())
     assert result.billing_model == "api"
     assert result.error is not None
@@ -354,7 +316,7 @@ def test_probe_kimi_http_exception():
 # probe_anthropic — fix lines 303-304, add line 318
 # ---------------------------------------------------------------------------
 
-def test_probe_anthropic_billing_detection_import_error():
+def test_probe_anthropic_billing_detection_import_error_second_case():
     """Lines 303-304: default billing when check_budget works."""
     fake_result = MagicMock()
     fake_result.pressure = 0.1

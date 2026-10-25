@@ -402,8 +402,14 @@ def run_pool_audit(pools_dir: Path) -> None:
     print(format_audit_report(audits))
 
 
-def _purge_pool_sidecars(pool_name: str, pool_slug: str, mullet_home: Path) -> tuple[int, list[str]]:
+def _purge_pool_sidecars(
+    pool_name: str, pool_slug: str, mullet_home: Path, data_home: Path | None = None,
+) -> tuple[int, list[str]]:
     """Purge mullet.db + interactions.db rows and analytics/caches keyed on pool name.
+
+    ``mullet_home`` is the state directory (interactions.db, analytics,
+    state, routing_history) and ``data_home`` the data directory holding
+    mullet.db; it defaults to ``mullet_home``, as on an older install.
 
     Returns (rows_deleted, warnings). Best-effort: missing DBs/tables are silent,
     but SQL errors are captured in warnings so the user sees them.
@@ -413,8 +419,8 @@ def _purge_pool_sidecars(pool_name: str, pool_slug: str, mullet_home: Path) -> t
 
     candidates = {pool_name, pool_slug}
 
-    for db_name in ("mullet.db", "interactions.db"):
-        db_path = mullet_home / db_name
+    for db_name, home in (("mullet.db", data_home or mullet_home), ("interactions.db", mullet_home)):
+        db_path = home / db_name
         if not db_path.exists():
             continue
         try:
@@ -934,7 +940,7 @@ def run_pool_prune(pools_dir: Path, yes: bool = False) -> None:
         print("\nDry run — pass --yes to delete.")
         return
 
-    mullet_home = Path.home() / ".mullet"
+    from mullet.core.paths import data_dir, state_dir
     print()
     for a in candidates:
         slug = a.machine_name or a.name.lower().replace(" ", "_").replace("-", "_")
@@ -946,7 +952,7 @@ def run_pool_prune(pools_dir: Path, yes: bool = False) -> None:
             print(f"  \033[31m✗\033[0m {a.name}: {err}{hint}")
             continue
 
-        rows, warnings = _purge_pool_sidecars(a.name, slug, mullet_home)
+        rows, warnings = _purge_pool_sidecars(a.name, slug, state_dir(), data_dir())
         extra = []
         if rows:
             extra.append(f"{rows} db row{'s' if rows != 1 else ''}")
@@ -1111,9 +1117,9 @@ def run_pool_validate(pools_dir: Path, pool_name: str | None = None) -> int:
         # Skip:
         #   - hidden dirs (.cache, .git, etc.)
         #   - test_init_* pools created by tests/test_cli_e2e.py — they're
-        #     test artifacts that leak into ~/.mullet/pools when the test
+        #     test artifacts that leak into the pools dir when the test
         #     suite runs the `init` wizard against a tmp_path without
-        #     setting MULLET_POOLS_DIR. The validator should ignore them
+        #     setting TRAWL_POOLS_DIR. The validator should ignore them
         #     so nightly health reports don't get noise from leftover tests.
         targets = sorted(
             d for d in pools_dir.iterdir()

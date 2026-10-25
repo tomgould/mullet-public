@@ -473,7 +473,6 @@ def test_backfill_all_fallback_mode_hits_else_branch(tmp_path):
 
 def test_backfill_all_outer_except_observation(tmp_path):
     """Lines 319-320: unexpected error outside per-file loop → outer except swallowed."""
-    from mullet.core.observation_summary import SessionSummary
     summaries_dir = tmp_path / ".mullet" / "observations" / "summaries"
     summaries_dir.mkdir(parents=True)
 

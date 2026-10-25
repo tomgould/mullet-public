@@ -9,7 +9,6 @@ import pytest
 from mullet.core.agent.types import TokenUsage
 from mullet.core.orchestration.swarm import (
     _estimate_cost,
-    _run_swarm_inner,
     _select_decomposer,
     _select_synthesizer_provider,
     _write_report,

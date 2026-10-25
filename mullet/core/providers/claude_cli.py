@@ -1,9 +1,9 @@
 """Claude CLI adapter — use the claude CLI as a Mullet provider.
 
-Wraps the `claude` CLI (which uses Max subscription OAuth)
+Wraps the user's own `claude` CLI (which handles its own login)
 so Mullet can delegate to Sonnet/Opus/Haiku without an API key.
 
-Requires: claude CLI installed and authenticated (Max subscription)
+Requires: claude CLI installed and logged in
 """
 
 import logging
@@ -31,7 +31,7 @@ def is_claude_cli_available() -> bool:
 class ClaudeCLIProvider(Provider):
     """Provider that wraps the claude CLI command.
 
-    Uses Max subscription OAuth — no API key needed.
+    The CLI handles its own login; Mullet never reads Claude credentials.
     Calls `claude -p --model <model>` via subprocess.
     """
 

@@ -109,8 +109,8 @@ def test_read_license_file_from_disk(monkeypatch, tmp_path):
 
 def test_trial_days_remaining_elapsed(monkeypatch, tmp_path):
     """Lines 107-112: trial file exists with old timestamp → computes remaining days."""
-    monkeypatch.setattr("mullet.config.license.Path.home", lambda: tmp_path)
-    trial_file = tmp_path / ".mullet" / ".trial_start"
+    from mullet.core.paths import state_dir
+    trial_file = state_dir() / ".trial_start"
     trial_file.parent.mkdir(parents=True, exist_ok=True)
     # Set start 7 days ago → 7 days remaining
     trial_file.write_text(str(time.time() - 86400 * 7))
@@ -122,8 +122,8 @@ def test_trial_days_remaining_elapsed(monkeypatch, tmp_path):
 
 def test_trial_days_remaining_corrupt_file(monkeypatch, tmp_path):
     """Line 116: trial file has corrupt content → returns 0."""
-    monkeypatch.setattr("mullet.config.license.Path.home", lambda: tmp_path)
-    trial_file = tmp_path / ".mullet" / ".trial_start"
+    from mullet.core.paths import state_dir
+    trial_file = state_dir() / ".trial_start"
     trial_file.parent.mkdir(parents=True, exist_ok=True)
     trial_file.write_text("not-a-float")
 

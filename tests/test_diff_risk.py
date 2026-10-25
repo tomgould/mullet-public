@@ -6,9 +6,8 @@ integration against a real temporary git repository.
 """
 import subprocess
 
-import pytest
 
-from mullet.core.verification.diff_risk import RiskFlag, classify_diff, classify_git_diff
+from mullet.core.verification.diff_risk import classify_diff, classify_git_diff
 
 
 def _categories(flags):

@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/skill_activator.py"""
+"""Tests for mullet/hooks/skill_activator.py"""
 import importlib.util
 import io
 import json
@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-_HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "skill_activator.py"
+_HOOK = Path(__file__).resolve().parent.parent / "mullet" / "hooks" / "skill_activator.py"
 
 
 def _load_hook():
@@ -31,24 +31,19 @@ def _run(prompt: str) -> str:
 
 
 class TestSkillActivatorHook:
-    def test_autopilot_keyword_triggers_hint(self):
-        out = _run("can you use autopilot to implement the auth feature?")
-        assert "autopilot" in out.lower()
-        assert "/autopilot" in out
+    def test_mullet_job_keyword_triggers_hint(self):
+        out = _run("can you start a mullet job to refactor the auth module?")
+        assert "mullet-job" in out
+        assert "/mullet-job" in out
 
-    def test_ralph_keyword_triggers_hint(self):
-        out = _run("ralph this until everything passes")
-        assert "ralph" in out.lower()
-        assert "/ralph" in out
+    def test_brainstorm_keyword_triggers_hint(self):
+        out = _run("let's brainstorm the caching layer first")
+        assert "brainstorm" in out.lower()
+        assert "/brainstorm" in out
 
-    def test_ultrawork_keyword_triggers_hint(self):
+    def test_removed_mode_word_gives_no_hint(self):
         out = _run("ultrawork the test refactor across all modules")
-        assert "ultrawork" in out.lower()
-        assert "/ultrawork" in out
-
-    def test_eco_keyword_triggers_hint(self):
-        out = _run("eco mode — save tokens on this")
-        assert "eco" in out.lower()
+        assert "skill hint" not in out.lower()
 
     def test_short_prompt_no_output(self):
         out = _run("ok")
@@ -63,8 +58,8 @@ class TestSkillActivatorHook:
         assert "skill hint" not in out.lower()
 
     def test_hint_includes_slash_command(self):
-        out = _run("I want to autopilot the whole feature branch")
-        assert "/autopilot" in out
+        out = _run("I want to brainstorm the whole feature branch")
+        assert "/brainstorm" in out
 
     def test_code_review_keyword(self):
         out = _run("please review this pull request for security issues")

@@ -173,15 +173,19 @@ MODEL_DATABASE: dict[str, ModelInfo] = {
     "gemma-2-27b": ModelInfo(8_192, 0.0, 0.0),
 
     # Qwen local models
-    "qwen2.5-coder-7b": ModelInfo(128_000, 0.0, 0.0),
     "qwen2.5-coder-3b": ModelInfo(128_000, 0.0, 0.0),
     "qwen2.5-coder-1.5b": ModelInfo(128_000, 0.0, 0.0),
     "qwen3.5-9b": ModelInfo(128_000, 0.0, 0.0),
     "qwen3.5": ModelInfo(128_000, 0.0, 0.0),
     "qwen3-coder-30b-a3b": ModelInfo(262_144, 0.0, 0.0),       # MoE coder, downloaded 2026-06-13
-    "qwen3-4b-instruct-2507": ModelInfo(262_144, 0.0, 0.0),    # tiny general, VRAM-resident
     "qwen3-4b-thinking-2507": ModelInfo(262_144, 0.0, 0.0),    # tiny reasoning, VRAM-resident
     "qwen3-vl-8b-instruct": ModelInfo(262_144, 0.0, 0.0),      # vision, VRAM-resident
+
+    # Current LM Studio set. All three support 262K, but Mullet loads them at
+    # 32K (lmstudio_manager.LOAD_CONTEXT_LENGTH), so 32K is the usable window.
+    "ornith-1.5-35b-a3b": ModelInfo(32_768, 0.0, 0.0),         # MoE reasoning model, first local preference
+    "qwen3.6-35b-a3b": ModelInfo(32_768, 0.0, 0.0),            # MoE general
+    "ornith-1.5-9b": ModelInfo(32_768, 0.0, 0.0),              # dense reasoning model
 
     # Microsoft Phi local models
     "phi-4-mini": ModelInfo(128_000, 0.0, 0.0),

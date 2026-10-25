@@ -10,8 +10,8 @@ def bash_completion() -> str:
     """Return the Bash completion script."""
     return '''_mullet_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
-    local commands="autopilot budget cli clean completion config cost decisions doctor docs eco evaluate explain graph history hud hud-claude init ingest live-test login logs mcp memory-sync models observations override plugins pool ralph ralphthon recall research review review-session reindex routing schedule search serve setup-claude share source stats team ultrawork watch"
-    local flags="--client --provider --tier --local-only --max-iterations --model --base-url --verbose --json --tools --skills --export --resume --speed --version --help"
+    local commands="budget cli clean completion config cost decisions doctor docs evaluate explain graph history hook hud hud-claude init ingest job live-test login logs mcp memory-sync models observations override plugins pool recall research review review-session reindex routing schedule search serve setup-claude share source stats watch"
+    local flags="--client --provider --tier --local-only --max-iterations --model --base-url --verbose --json --tools --skills --export --speed --version --help"
     local cli_flags="--prompt --provider --mode --resume --continue --session --system-prompt --max-turns --speed --voice --metrics"
     local cli_slash="/help /clear /exit /model /provider /session /context /context add /context list /context clear /add-dir /compare /think /config /compact /undo /retry /forget /history /pin /note /todo /share /diff /branch /peek /open /git /run /grep /search /graph /recall /review /test /stats /doctor /cost /budget /tokens /vim"
 
@@ -55,7 +55,6 @@ def zsh_completion() -> str:
 _mullet() {
     local -a commands flags
     commands=(
-        'autopilot:Full autonomous execution: plan → implement → verify'
         'budget:Show current token budget and pressure'
         'clean:Remove stale HUD agent entries'
         'completion:Generate shell completion scripts'
@@ -64,15 +63,16 @@ _mullet() {
         'decisions:Browse architectural decisions extracted from commits/docs'
         'doctor:Check system health (providers, tools, config)'
         'docs:Library pool documentation management'
-        'eco:Token-saving modifier for any mode'
         'evaluate:Evaluate knowledge pool search quality'
         'explain:Show routing analysis for a task without running'
         'graph:Knowledge graph commands (stats, build, export, prune)'
         'history:Show recent sessions'
+        'hook:Run a Mullet hook for Claude Code'
         'hud:HUD and statusline management'
         'hud-claude:Show Claude Code plugin-style HUD'
         'init:Generate mullet.yaml project config'
         'ingest:Ingest files into a knowledge pool'
+        'job:Plan and run a gated job in a sandboxed clone'
         'live-test:Live provider connectivity test'
         'login:Authenticate with Personal Access Token'
         'logs:View LLM interaction logs (tail, stats, suggest)'
@@ -83,8 +83,6 @@ _mullet() {
         'override:Toggle Opus override window'
         'plugins:List installed plugins'
         'pool:Pool management (list, audit, prune, tune, validate)'
-        'ralph:Persistence loop: keep going until done'
-        'ralphthon:Extended ralph marathon mode'
         'recall:Semantic search across past conversations'
         'research:Iterative research pipeline'
         'review:AI code review of recent git changes'
@@ -94,12 +92,10 @@ _mullet() {
         'schedule:Scheduled task management'
         'search:Search knowledge base'
         'serve:Start API + WebSocket + Prometheus server'
-        'setup-claude:Install Claude Code delegation config'
+        'setup-claude:Register Mullet with Claude Code (MCP, skills, opt-in hooks)'
         'share:Export session as markdown/html/json'
         'source:Manage GitHub/web knowledge sources'
         'stats:Usage analytics (sessions, tools, routing)'
-        'team:N coordinated agents with shared TaskBoard'
-        'ultrawork:Parallel subtask decomposition and execution'
         'watch:Re-run task on file changes'
     )
     flags=(

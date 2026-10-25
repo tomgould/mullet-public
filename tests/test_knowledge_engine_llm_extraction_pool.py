@@ -1,8 +1,6 @@
 """Tests for llm_extraction.py and pool_metadata.py."""
 import json
-import os
 import pytest
-from pathlib import Path
 
 from mullet.knowledge.engine.llm_extraction import (
     CitationMap,

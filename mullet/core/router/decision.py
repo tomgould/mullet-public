@@ -117,7 +117,8 @@ def _quality_history_path() -> Path:
 
 def _quality_tracker_path() -> Path:
     """Return path to provider_quality.json — injectable for tests."""
-    return Path.home() / ".config" / "mullet" / "provider_quality.json"
+    from mullet.core.paths import config_dir
+    return config_dir() / "provider_quality.json"
 
 
 def _load_user_quality_scores(path: Path, min_samples: int = 3) -> dict[str, float]:

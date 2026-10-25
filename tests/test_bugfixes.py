@@ -3,7 +3,6 @@
 Each test targets a specific bug that was fixed and ensures it doesn't regress.
 """
 
-import os
 from unittest.mock import MagicMock, patch
 import pytest
 

@@ -451,7 +451,6 @@ def test_wait_for_callback_serve_function_body():
          patch("mullet.core.mcp.oauth._oauth_port", None), \
          patch("mullet.core.mcp.oauth._find_free_port", return_value=19876):
         # Override threading.Thread to run _serve synchronously before we await
-        import threading as _threading
 
         class SyncThread:
             def __init__(self, target=None, daemon=None):
