@@ -6,6 +6,14 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Licence: the Additional Use Grant now allows production use for any purpose, including
+  inside a company or team, on any number of machines, and to build software you sell or
+  ship. Offering Mullet, or a service whose value comes substantially from it, to others
+  as a hosted, managed or embedded service still needs a commercial licence.
+  Contributions need a DCO sign-off (`git commit -s`) and grant the Licensor the right to
+  relicense them.
+
 ### Fixed
 - The file tools accept paths in the user's temp directory, which on macOS is under
   `/var/folders` rather than `/tmp`.

@@ -323,13 +323,18 @@ def _expand_git_log(ref: ContextReference, cwd: str) -> tuple[str | None, str | 
 def _expand_url(ref: ContextReference) -> tuple[str | None, str | None]:
     """Fetch URL content."""
     import urllib.request
+
+    from mullet.core.tools.url_safety import is_safe_url, safe_urlopen
+
     url = ref.target
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+    if not is_safe_url(url):
+        return None, f"URL blocked: not a public http(s) address: {ref.target}"
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mullet/0.2"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with safe_urlopen(req, timeout=15) as resp:
             content = resp.read().decode("utf-8", errors="replace")
         if len(content) > 20_000:
             content = content[:20_000] + f"\n[truncated — {len(content)} chars total]"

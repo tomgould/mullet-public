@@ -384,7 +384,9 @@ class TestRunServer:
              patch("aiohttp.web.run_app") as mock_run_app:
             run_server(host="0.0.0.0", port=9999)
 
-        mock_create.assert_called_once_with(host="0.0.0.0", port=9999)
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["host"] == "0.0.0.0" and mock_create.call_args.kwargs["port"] == 9999
+        assert mock_create.call_args.kwargs["require_token"] is True and mock_create.call_args.kwargs["token"]
         mock_run_app.assert_called_once()
         call_kwargs = mock_run_app.call_args
         assert call_kwargs[0][0] is mock_app or mock_app in call_kwargs[0]
@@ -421,7 +423,8 @@ class TestRunServer:
              patch("aiohttp.web.run_app"):
             run_server()
 
-        mock_create.assert_called_once_with(host="127.0.0.1", port=3000)
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["host"] == "127.0.0.1" and mock_create.call_args.kwargs["port"] == 3000
 
     def test_run_server_passes_print_none_to_web_run_app(self):
         """run_server suppresses aiohttp's own startup banner (print=None)."""

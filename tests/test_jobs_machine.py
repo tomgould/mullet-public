@@ -190,6 +190,38 @@ def test_the_module_clock_and_sleep_are_used_by_default(holder, monkeypatch):
     assert fake.sleeps == [5, 1]
 
 
+# 12 s less a gap the fake clock at 1000 cannot hold: the last pause would not move it.
+OFF_GRID = 12.0 - ((3.0 + 2.5e-5) - 3.0)
+
+
+def _bounded(fake: FakeTime, limit: int = 50):
+    def sleep(seconds: float) -> None:
+        fake.sleep(seconds)
+        if len(fake.sleeps) > limit:
+            pytest.fail(f"still waiting after {limit} pauses: {fake.sleeps[-3:]}")
+    return sleep
+
+
+def test_a_wait_whose_gap_the_clock_cannot_hold_gives_up_in_time(holder):
+    holder()
+    fake = FakeTime()
+    with pytest.raises(machine.GpuBusy) as caught:
+        with machine.gpu_lease("next", timeout=OFF_GRID, poll=5, clock=fake.clock, sleep=_bounded(fake)):
+            pass
+    assert fake.sleeps[:3] == [5, 5, pytest.approx(2.0, abs=1e-3)] and len(fake.sleeps) <= 4
+    assert str(caught.value).startswith("gave up after 12s waiting for the GPU")
+
+
+def test_a_clock_that_stops_moving_ends_a_finite_wait(holder):
+    holder()
+    fake = FakeTime()
+    with pytest.raises(machine.GpuBusy):
+        with machine.gpu_lease("next", timeout=30, poll=5, clock=fake.clock,
+                               sleep=lambda s: fake.sleeps.append(s)):
+            pass
+    assert fake.sleeps == [5]
+
+
 def test_another_thread_in_the_same_process_waits_too():
     taken, done = threading.Event(), threading.Event()
 
@@ -561,6 +593,24 @@ def test_gives_up_after_the_timeout(no_settings):
     assert caught.value.waited == 12 and caught.value.headroom is busy
     assert str(caught.value) == ("gave up after 12s waiting for headroom: 10 MiB RAM available, "
                                  "needs 8192 MiB [MULLET_RAM_MIN_FREE_MB]")
+
+
+def test_a_headroom_wait_whose_gap_the_clock_cannot_hold_gives_up_in_time(no_settings):
+    fake = FakeTime()
+    busy = machine.Headroom(vram_free_mb=9000, ram_free_mb=10, load_1m=1.0)
+    with pytest.raises(machine.NoHeadroom):
+        machine.wait_for_headroom(timeout=OFF_GRID, poll=5, sample=lambda: busy, clock=fake.clock,
+                                  sleep=_bounded(fake))
+    assert len(fake.sleeps) <= 4
+
+
+def test_a_clock_that_stops_moving_ends_a_finite_headroom_wait(no_settings):
+    fake = FakeTime()
+    busy = machine.Headroom(vram_free_mb=9000, ram_free_mb=10, load_1m=1.0)
+    with pytest.raises(machine.NoHeadroom):
+        machine.wait_for_headroom(timeout=30, poll=5, sample=lambda: busy, clock=fake.clock,
+                                  sleep=lambda s: fake.sleeps.append(s))
+    assert fake.sleeps == [5]
 
 
 def test_the_default_timeout_is_the_max_wait_setting(no_settings, monkeypatch):

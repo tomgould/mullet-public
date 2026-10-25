@@ -21,6 +21,12 @@ job. A provider error on a rung below the top moves the step up without
 using an attempt, and a session is never resumed on another rung. Every
 attempt records its rung and model in the ledger.
 
+A gate that crashes, or a required review that gives no verdict, says
+nothing about the work, so it is never judged: the checks run again on the
+same work up to `MAX_EXECUTOR_CRASHES` times in a row, then the job pauses
+without committing it or using an attempt, and a resume checks that work
+again rather than asking the worker for it anew.
+
 A usage limit pauses the job until the limit resets, without using up an
 attempt. The owner is notified (`mullet.jobs.notify`) when a job blocks,
 pauses for a usage limit or finishes. A stop request kills the executor and every check and leaves the
@@ -52,7 +58,8 @@ from typing import Any
 
 import psutil
 
-from mullet.jobs import children, context
+from mullet.jobs import children, context, reconcile
+from mullet.jobs.budget import earliest_start, headroom as budget_headroom, load_budget
 from mullet.jobs.clone import JobClone, Snapshot
 from mullet.jobs.executors.base import Budget, ExecResult, Executor, ExecutorUnavailable, NodeContext, Task
 from mullet.jobs.gates import (
@@ -61,11 +68,11 @@ from mullet.jobs.gates import (
 )
 from mullet.jobs.ladder import (
     BudgetState, Ladder, LadderConfig, MachineState, PublicCheck, Rung, RungChoice, Tried, apply_night,
-    is_risky, load_config, next_rung, plan_rungs, spend_state, step_group, step_order,
+    is_risky, load_config, model_rung, next_rung, plan_rungs, spend_state, step_group, step_order,
 )
 from mullet.jobs.night import NightState, SETTINGS as NIGHT_SETTINGS
-from mullet.jobs.ledger import JobRecord, Ledger, NodeRecord
-from mullet.jobs.notify import notify_job
+from mullet.jobs.ledger import AttemptRecord, JobRecord, Ledger, NodeRecord
+from mullet.jobs.notify import notify_job, status_line
 from mullet.jobs.paths import job_dir, jobs_home
 from mullet.jobs.profile import Profile, expand_home, safe_env, whole_check_commands
 from mullet.jobs.types import (
@@ -173,6 +180,17 @@ def job_max_spend(ledger: Ledger, job: JobRecord, default: float) -> float:
 def ladder_on(job: JobRecord) -> bool:
     """True for a job planned with the delegation ladder."""
     return bool((job.budget or {}).get("ladder"))
+
+
+def solo_rung(job: JobRecord) -> Rung | None:
+    """The rung a non-ladder opencode job's one model counts as (`model_rung`), or None for any other job.
+
+    It decides whether the job's attempts are paid, so held to its spending cap
+    and the shared limits, and whether the repo must be public (a `:free` model).
+    """
+    if ladder_on(job) or executor_name(job) != "opencode":
+        return None
+    return model_rung(str((job.budget or {}).get("executor_model") or ""))
 
 
 EXECUTORS: tuple[str, ...] = ("claude-code", "opencode")
@@ -308,7 +326,16 @@ class RungPick:
 
 
 class SpendPaused(Exception):
-    """The job reached its spending cap while Claude's week is tight: pause rather than use Claude."""
+    """The job has no spending room left: pause rather than spend more.
+
+    On a ladder job this is the cap reached while Claude's week is tight, so
+    the remaining steps aren't all handed to Claude. `reason` says which limit
+    stopped a non-ladder opencode job.
+    """
+
+    def __init__(self, node_id: str, reason: str = ""):
+        super().__init__(node_id)
+        self.reason = reason
 
 
 def claude_usage(role: str, usage: dict) -> dict:
@@ -381,10 +408,14 @@ class JobRunner:
                  options: RunnerOptions | None = None, *, reviewer: GateFn | None = None,
                  sleep: Callable[[float], None] = time.sleep, now: Callable[[], float] = time.time,
                  ladder: Ladder | None = None, rung_executors: Callable[[Rung], Executor] | None = None,
-                 notify: Callable[..., object] | None = None):
+                 notify: Callable[..., object] | None = None,
+                 snapshot: Callable[[], dict] | None = None):
         """`ladder` and `rung_executors` replace the user's ladder config and the per-rung
-        executors of a ladder job; `notify` replaces `notify_job`. All three are for tests."""
+        executors of a ladder job; `notify` replaces `notify_job`. All three are for tests.
+        `snapshot` reads each paid provider's own usage or balance; it runs when the job starts
+        and stops so the report can compare the ledger with the providers. Without it nothing is probed."""
         self.ledger = ledger
+        self._snapshot_fn = snapshot
         self.job_id = job_id
         self.options = options or RunnerOptions()
         self.root = job_dir(job_id)
@@ -427,10 +458,21 @@ class JobRunner:
             children.kill_stale(self.root / "children.json")
             children.configure(self.root / "children.json")
             try:
+                self._take_snapshot("start")
                 return self._run()
             finally:
+                self._take_snapshot("end")
                 children.configure(None)
                 (self.root / "runner.pid").unlink(missing_ok=True)
+
+    def _take_snapshot(self, when: str) -> None:
+        """Record each paid provider's own figure, for the report's comparison with the ledger."""
+        if self._snapshot_fn is None:
+            return
+        found = reconcile.take(self._snapshot_fn)
+        if found:
+            self.ledger.add_event(self.job_id, "provider_snapshot",
+                                  {"when": when, "at": self._now(), "providers": found})
 
     def _set_status(self, status: JobStatus, error: str | None = None) -> None:
         if self.ledger.get_job(self.job_id).status is not status:
@@ -443,9 +485,20 @@ class JobRunner:
     def _notify(self, event: str, detail: str) -> None:
         """Tell the job's owner; a failure to is logged and never changes the job."""
         try:
-            self._notify_fn(event, self.job_id, self.ledger.get_job(self.job_id).goal, detail)
+            status = self._status_line()
+            self._notify_fn(event, self.job_id, self.ledger.get_job(self.job_id).goal, detail,
+                            **({"status": status} if status else {}))
         except Exception as exc:
             logger.warning("job %s: notification failed: %s", self.job_id, exc)
+
+    def _status_line(self) -> str:
+        """Provider credit and Claude's weekly use, for notifications. Empty without a provider probe."""
+        if self._snapshot_fn is None:
+            return ""
+        windows = [w for w in (self._rate_limit.get("unifiedWindows") or {}).values() if isinstance(w, dict)]
+        weekly = max(windows, key=lambda w: _number(w.get("resetsAt")), default=None)
+        pct = None if weekly is None or weekly.get("utilization") is None else _number(weekly["utilization"]) * 100
+        return status_line(reconcile.take(self._snapshot_fn), pct)
 
     def _done_detail(self) -> str:
         nodes = self.ledger.nodes(self.job_id)
@@ -478,13 +531,22 @@ class JobRunner:
             return JobStatus.PAUSED
         except SpendPaused as paused:
             spend = self._spend()
+            why = (paused.reason if paused.reason else
+                   f"spending cap reached (${spend.spent:.2f} of ${spend.cap:.2f}) and Claude's weekly window is tight")
             self._set_status(JobStatus.PAUSED, (
-                f"spending cap reached (${spend.spent:.2f} of ${spend.cap:.2f}) and Claude's weekly window is "
-                f"tight; step {paused} is waiting. Raise the cap with: mullet job resume {self.job_id} "
+                f"{why}; step {paused} is waiting. Raise the cap with: mullet job resume {self.job_id} "
                 "--max-spend <dollars>, or resume later"))
             self.ledger.add_event(self.job_id, "spend_paused", {"node_id": str(paused), "spent": spend.spent,
                                                                "cap": spend.cap})
             self._notify("spend", "")
+            return JobStatus.PAUSED
+        except GatePaused as paused:
+            logger.warning("job %s paused: %s", self.job_id, paused)
+            self._set_status(JobStatus.PAUSED, (
+                f"a check couldn't run, so nothing was judged: {paused}. Fix the cause, then run "
+                f"mullet job resume {self.job_id} to run the checks again"))
+            self._notify("paused", f"a check couldn't run, so nothing was judged. Fix the cause, then run: "
+                                   f"mullet job resume {self.job_id}")
             return JobStatus.PAUSED
         except Exception as exc:  # every failure leaves the job resumable, never "done"
             logger.error("job %s blocked: %s", self.job_id, exc)
@@ -497,10 +559,15 @@ class JobRunner:
         clone = self._clone(job)
         gates = GateRunner(clone, profile, self.logs / "gates", cache_dir=self.root / "cache")
         self._return_to_recorded_head(job, clone, gates)
+        self._job, self._profile = job, profile
         check_executor_allowed(executor_name(job), profile)
+        solo = solo_rung(job)
+        if solo is not None:
+            # The ladder's prices, spending limits and public check apply to a single opencode model too.
+            self._ladder = self._ladder or Ladder()
+            self._check_free_model(solo)
         self._setup(gates)
         baseline = self._baseline(job, gates)
-        self._job, self._profile = job, profile
         if ladder_on(job):
             # One executor per rung, made when a step first reaches it; the
             # Claude rung's stands in for the job's single worker below.
@@ -543,8 +610,9 @@ class JobRunner:
     def _risk_reviewer(self, job: JobRecord, profile: Profile, executor: Executor) -> GateFn:
         """G7 for a risky step in a job with review off: it must pass, or the attempt fails.
 
-        A step that deletes, kills or sends data is reviewed whoever did it; a
-        review that can't finish counts as a failure here, not as unverified.
+        A step that deletes, kills or sends data is reviewed whoever did it. A
+        block is a failure; a review with no verdict pauses the job, as any
+        required review's does (`run_gates`).
         """
         if self._forced_review is None:
             base = self._make_reviewer(job, profile, executor, force=True)
@@ -552,7 +620,7 @@ class JobRunner:
 
             def strict(ctx: GateContext) -> GateResult:
                 result = base(ctx)
-                if result.status is GateStatus.PASS:
+                if result.status is not GateStatus.FAIL:
                     return result
                 return GateResult("G7", GateStatus.FAIL, "the safety review of a step that deletes, kills or "
                                   f"sends data didn't pass: {result.summary}", result.details, result.log_path,
@@ -651,7 +719,10 @@ class JobRunner:
             baseline = shared_baseline(cache / f"{key}.json", job.base_sha, now=self._now())
             if baseline is None:
                 head = gates.clone.head()
-                baseline = gates.baseline(job.base_sha, Path(job.repo_path))
+                try:
+                    baseline = gates.baseline(job.base_sha, Path(job.repo_path))
+                except Exception as exc:
+                    raise GatePaused(f"G0 (the baseline run) crashed: {type(exc).__name__}: {exc}") from exc
                 gates.clone.reset_to(head, keep=gates.keep)
                 self._check_stop()
                 tmp = cache / f"{key}.json.tmp"
@@ -688,6 +759,56 @@ class JobRunner:
         tree = g1.details.get("tree") if g1 else None
         return (str(session), str(tree), usage.get("rung_key")) if session and tree else None
 
+    def _pending_check(self, node_id: str, start_sha: str, clone: JobClone) -> tuple[AttemptRecord, str] | None:
+        """The node's latest attempt and the tree it left, if the job paused because its checks couldn't run.
+
+        A resumed job checks that work again instead of asking for it anew.
+        A retry, a different start or a tree git no longer has means starting fresh.
+        """
+        attempts = self.ledger.attempts(self.job_id, node_id)
+        if not attempts or attempts[-1].outcome is not AttemptOutcome.PAUSED:
+            return None
+        latest = attempts[-1]
+        retry = self._retry(node_id)
+        if retry and int(retry.get("after_attempt") or 0) >= latest.id:
+            return None
+        paused = [e.data for e in self.ledger.events(self.job_id)
+                  if e.kind == "checks_paused" and e.data.get("attempt_id") == latest.id]
+        if not paused or paused[-1].get("start_sha") != start_sha:
+            return None
+        tree = str(paused[-1].get("tree") or "")
+        if not tree or clone.git("cat-file", "-e", f"{tree}^{{tree}}", check=False).returncode != 0:
+            return None
+        return latest, tree
+
+    def _carry_over(self, attempt_id: int, earlier: AttemptRecord) -> ExecResult:
+        """Record on a recheck who made the work. Its cost stays on the earlier attempt, so it isn't counted twice."""
+        usage = {k: v for k, v in (earlier.usage or {}).items() if k in ("rung", "rung_key", "model")}
+        usage["rechecks_attempt"] = earlier.id
+        self.ledger.record_executor_result(attempt_id, earlier.exit_code, usage, earlier.claim,
+                                           earlier.transcript_path)
+        return ExecResult(exit_code=earlier.exit_code, claim=earlier.claim)
+
+    def _judge(self, ctx: GateContext, reviewer: GateFn | None, fix_ctx: GateContext | None) -> list[GateResult]:
+        """The gates' results (with a parent's fix checked on its own), rerun on the same work if they can't finish.
+
+        A usage limit is raised at once. A crash or a review with no verdict is
+        raised after `MAX_EXECUTOR_CRASHES` runs in a row.
+        """
+        tries = 0
+        while True:
+            try:
+                results = run_gates(ctx, reviewer)
+                return self._check_fix(results, fix_ctx) if fix_ctx is not None else results
+            except GatePaused as paused:
+                tries += 1
+                if paused.until is not None or tries >= MAX_EXECUTOR_CRASHES:
+                    raise
+                logger.warning("job %s: checks of %s rerun: %s", self.job_id, ctx.node.id, paused)
+                self.ledger.add_event(self.job_id, "checks_rerun", {"node_id": ctx.node.id,
+                                                                    "reason": str(paused)[:1000]})
+                self._check_stop()
+
     # The delegation ladder
 
     def _rung_executor(self, rung: Rung) -> Executor:
@@ -721,15 +842,46 @@ class JobRunner:
         self._public = found
         return found
 
+    def _check_free_model(self, rung: Rung) -> None:
+        """Refuse a free model unless the repo is public already, as the ladder's free rung does.
+
+        Raises ExecutorNotAllowed, which blocks the job before any attempt; a
+        resume asks again.
+        """
+        if rung.name != "free":
+            return
+        found = self._public_state()
+        if not found.public:
+            raise ExecutorNotAllowed(f"{rung.model} is a free model, which may only see a repo that is public "
+                                     f"already, and this one isn't verified: {found.reason}")
+
     def _max_spend(self) -> float:
         """The job's spending cap: as planned, or as last raised with `mullet job resume --max-spend`."""
         assert self._job is not None and self._ladder is not None
         return job_max_spend(self.ledger, self._job, self._ladder.config.max_spend)
 
     def _spend(self):
+        """The job's spend against its cap, with the shared budget limits folded in.
+
+        The cap drops to what the envelope has left (this job's own spend included), and
+        per-rung limits are carried along so a rung with none left is skipped.
+        """
         assert self._ladder is not None
-        return spend_state([a.usage for a in self.ledger.attempts(self.job_id)], self._max_spend(),
-                           self._ladder.config)
+        spend = spend_state([a.usage for a in self.ledger.attempts(self.job_id)], self._max_spend(),
+                            self._ladder.config)
+        limits = load_budget()
+        for problem in limits.problems:
+            logger.warning("budget: %s", problem)
+        now = self._now()
+        since = earliest_start(limits, now)
+        if since is None:
+            return spend
+        room = budget_headroom(limits, self.ledger.attempt_usages_since(since), self._ladder.config, now)
+        if room.left is not None and spend.spent + max(0.0, room.left) < spend.cap:
+            spend.cap = spend.spent + max(0.0, room.left)
+            spend.reason = room.reason
+        spend.rung_left, spend.rung_reasons = room.rung_left, room.rung_reasons
+        return spend
 
     def _night_state(self) -> NightState:
         """The current night state, or off when the ladder's night hook fails."""
@@ -918,7 +1070,7 @@ class JobRunner:
         when = time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(resume_at))
         self._set_status(JobStatus.PAUSED, f"usage limit; resumes at {when}")
         self.ledger.add_event(self.job_id, "waiting_for_limit", {"until": resume_at})
-        self._notify("paused", when)
+        self._notify("paused", f"a usage limit; it carries on by itself after {when}")
         while self._now() < resume_at:
             self._check_stop()
             self._sleep(max(0.0, min(self.options.pause_poll_s, resume_at - self._now())))
@@ -950,14 +1102,15 @@ class JobRunner:
 
         The combined check can't see a fix that deletes a child's test file
         (it exists in neither end of the combined diff), so the fix's own
-        change also goes through G2, G3 and G6.
+        change also goes through G2, G3 and G6. A check that crashes raises
+        `GatePaused`, as it would in `run_gates`.
         """
         out = list(results)
         for gate_id, fn in (("G2", gate_scope), ("G3", gate_static), ("G6", gate_test_weakening)):
             try:
                 own = fn(fix_ctx)
-            except Exception as exc:  # a crashed check must never read as a pass
-                own = GateResult(gate_id, GateStatus.FAIL, f"gate crashed: {type(exc).__name__}: {exc}")
+            except Exception as exc:  # Mullet's own bug: neither a pass nor the worker's failure
+                raise GatePaused(f"{gate_id} crashed checking the fix: {type(exc).__name__}: {exc}") from exc
             if own.status is GateStatus.FAIL:
                 for i, r in enumerate(out):
                     if r.gate == gate_id:
@@ -1001,17 +1154,25 @@ class JobRunner:
             # Code that deletes, kills or sends data is reviewed, whoever writes it.
             reviewer = self._risk_reviewer(job, gates.profile, executor)
         resume_from = self._resumable(spec.id) if ladder or hasattr(executor, "resume") else None
+        solo = None if ladder else solo_rung(job)
+        pending = self._pending_check(spec.id, start_sha, clone)
         crashes = 0
         while True:
             self._check_stop()
             reset_at = _limit_reset(self._rate_limit, self.options.pause_at_utilization, self._now())
             if reset_at is not None:
                 self._wait_for_limit(reset_at)
+            rechecking, pending = pending, None
             use_executor = integration_base is None or any(
                 a.outcome is AttemptOutcome.FAILED for a in self.ledger.attempts(self.job_id, spec.id))
             pick: RungPick | None = None
             worker = executor
-            if use_executor and ladder:
+            if rechecking is not None:
+                # The job paused because this work's checks couldn't run: check it again, don't redo it.
+                name = rechecking[0].executor
+                use_executor = name != "integration-check"
+                last = False
+            elif use_executor and ladder:
                 pick = self.executor_for(self.ledger.get_node(self.job_id, spec.id),
                                          integration=integration_base is not None)
                 if pick.rung is None:
@@ -1031,6 +1192,10 @@ class JobRunner:
                 name = executor.name if use_executor else "integration-check"
                 # The last attempt always starts fresh from the node's start.
                 last = self.ledger.attempt_count(self.job_id, spec.id) + 1 >= job.max_attempts
+                if use_executor and solo is not None and solo.paid:
+                    no_room = self._no_room(solo)
+                    if no_room:
+                        raise SpendPaused(spec.id, no_room)
             rung = pick.rung if pick else None
             resume = resume_from if use_executor and not last else None
             if resume and ladder and (rung is None or resume[2] != rung.key):
@@ -1040,7 +1205,9 @@ class JobRunner:
             try:
                 clone.reset_to(start_sha, keep=gates.keep)
                 result = ExecResult(exit_code=0)
-                if use_executor:
+                if rechecking is not None:
+                    result = self._carry_over(attempt_id, rechecking[0])
+                elif use_executor:
                     unusable = None
                     if rung is not None:
                         try:
@@ -1058,8 +1225,8 @@ class JobRunner:
                     if unusable is not None:
                         result = ExecResult(exit_code=None, aborted=True, provider_error=True, error=unusable)
                     else:
-                        if rung is not None:
-                            self._arm(worker, rung, attempt_id)
+                        if rung is not None or solo is not None:
+                            self._arm(worker, rung or solo, attempt_id)
                         result = self._attempt(worker, task, clone.work, self._attempt_budget(budget, rung),
                                                resume, rung)
                     children.kill_in_dir(clone.work, since=attempt_started)
@@ -1071,6 +1238,9 @@ class JobRunner:
                                      model=result.usage.get("model") or rung.model,
                                      provider_error=result.provider_error,
                                      moved_up=bool(result.aborted and pick is not None and pick.moves_up))
+                    elif solo is not None:
+                        # Kept so the job's spend, the shared limits and the report count it.
+                        usage.update(rung=solo.name, rung_key=solo.key, model=result.usage.get("model") or solo.model)
                     self.ledger.record_executor_result(attempt_id, result.exit_code, usage,
                                                        result.claim, result.transcript_path)
                 self._check_stop()
@@ -1102,14 +1272,17 @@ class JobRunner:
                     if crashes >= MAX_EXECUTOR_CRASHES:
                         raise RuntimeError(f"the executor failed {crashes} times in a row: {result.error}")
                     continue
-                delta = clone.snapshot(start_sha)
+                delta = (clone.compare(start_sha, rechecking[1]) if rechecking is not None
+                         else clone.snapshot(start_sha))
                 # The judged change is built from the same tree that gets committed.
                 judged = delta if gate_base == start_sha else clone.compare(gate_base, delta.tree)
                 clone.materialize(judged.tree, keep=gates.keep)
                 ctx = GateContext(gates, spec, judged, baseline, integration_base is not None, Path(job.repo_path),
                                   tests_retired=self._tests_retired(spec.id))
+                fix_ctx = (GateContext(gates, node.spec, delta, baseline, False, Path(job.repo_path))
+                           if integration_base and use_executor and not delta.empty else None)
                 try:
-                    results = run_gates(ctx, reviewer)
+                    results = self._judge(ctx, reviewer, fix_ctx)
                 except GatePaused as paused:
                     clone.reset_to(start_sha, keep=gates.keep)
                     resume_from = None
@@ -1118,16 +1291,16 @@ class JobRunner:
                         finished = True
                         self._wait_for_limit(paused.until)
                         continue
-                    self.ledger.abort_attempt(attempt_id, str(paused))
+                    # Mullet's own checks broke or gave no verdict. That says nothing
+                    # about the work, so it is neither judged nor committed nor held
+                    # against the worker: the job pauses, and a resume checks it again.
+                    self.ledger.pause_attempt(attempt_id, f"checks couldn't run: {paused}")
+                    self.ledger.add_event(self.job_id, "checks_paused", {
+                        "attempt_id": attempt_id, "node_id": spec.id, "start_sha": start_sha,
+                        "tree": delta.tree, "reason": str(paused)[:1000]})
                     finished = True
-                    crashes += 1
-                    if crashes >= MAX_EXECUTOR_CRASHES:
-                        raise RuntimeError(f"failed {crashes} times in a row: {paused}") from paused
-                    continue
+                    raise
                 crashes = 0
-                if integration_base and use_executor and not delta.empty:
-                    fix_ctx = GateContext(gates, node.spec, delta, baseline, False, Path(job.repo_path))
-                    results = self._check_fix(results, fix_ctx)
                 self._check_stop()
                 for r in results:
                     self.ledger.record_gate(attempt_id, r)
@@ -1187,8 +1360,26 @@ class JobRunner:
 
         worker.on_progress = progress  # type: ignore[attr-defined]
         worker.price = config.price(rung.model)  # type: ignore[attr-defined]
+        worker.price_configured = bool(rung.model) and rung.model in config.prices  # type: ignore[attr-defined]
+        worker.spend_limit_usd = self._allowance(rung)  # type: ignore[attr-defined]
+
+    def _allowance(self, rung: Rung) -> float | None:
+        """What one attempt on `rung` may spend: the least of the job's room under its cap (lowered
+        by the envelope) and the rung's room under budget.per_rung. None for an unpaid rung."""
+        if not rung.paid:
+            return None
         spend = self._spend()
-        worker.spend_limit_usd = max(0.0, spend.cap - spend.spent) if rung.paid else None  # type: ignore[attr-defined]
+        allowance = max(0.0, spend.cap - spend.spent)
+        return min(allowance, max(0.0, spend.rung_left.get(rung.name, allowance)))
+
+    def _no_room(self, rung: Rung) -> str:
+        """Why a paid `rung` can't start another attempt (the reasons `plan_rungs` gives), or "" while it can."""
+        spend = self._spend()
+        if spend.capped:
+            return spend.reason or f"the job's spending cap is reached (${spend.spent:.2f} of ${spend.cap:.2f})"
+        if spend.rung_left.get(rung.name, 1.0) <= 0:
+            return spend.rung_reasons.get(rung.name) or f"the {rung.name} spending limit is reached"
+        return ""
 
     @staticmethod
     def _record_limits(usage: dict) -> None:
@@ -1267,7 +1458,7 @@ def main(argv: list[str] | None = None) -> int:
         return 64
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     with Ledger() as ledger:
-        runner = JobRunner(ledger, args[0])
+        runner = JobRunner(ledger, args[0], snapshot=reconcile.probe_providers)
         stop_wanted = threading.Event()
 
         # The handler only sets a flag: stopping takes locks the interrupted

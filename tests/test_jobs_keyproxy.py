@@ -106,12 +106,14 @@ def call(proxy, method="POST", path="/api/v1/chat/completions", body=b"{}", head
 
 def test_the_real_key_replaces_whatever_the_sandbox_sent(proxy):
     p = proxy()
-    status, body = call(p, headers={"x-api-key": "planted", "X-Custom": "kept"})
+    status, body = call(p, headers={"x-api-key": "planted", "X-Title": "kept", "X-Custom": "dropped"})
     assert status == 200 and json.loads(body) == {"ok": True}
     seen = _Upstream.seen[-1]
     assert seen["headers"]["Authorization"] == f"Bearer {KEY}"
     assert "x-api-key" not in {k.lower() for k in seen["headers"]}
-    assert seen["headers"]["X-Custom"] == "kept" and seen["path"] == "/api/v1/chat/completions"
+    assert seen["headers"]["X-Title"] == "kept"
+    assert "x-custom" not in {k.lower() for k in seen["headers"]}
+    assert seen["path"] == "/api/v1/chat/completions"
 
 
 @pytest.mark.parametrize("style, header", [("x-api-key", "x-api-key"), ("x-goog-api-key", "x-goog-api-key")])

@@ -620,7 +620,7 @@ def test_render_json_shape_and_values(report: Any) -> None:
     assert list(data["rungs"]) == ["free", "kimi", "claude", "claude-code"]
     kimi = data["rungs"]["kimi"]
     assert kimi == {
-        "attempts": 5, "steps_first_tried": 2, "steps_passed": 4, "first_attempt_passes": 2,
+        "attempts": 5, "steps_first_tried": 2, "steps_passed": 4, "steps_unverified": 0, "first_attempt_passes": 2,
         "resumed_passes": 1, "escalations_up": 1, "provider_errors": 0,
         "dollars": pytest.approx(2.415), "tokens_in": 2_400_000, "tokens_out": 390_000,
         "wall_seconds": pytest.approx(46.0),
@@ -633,8 +633,8 @@ def test_render_json_shape_and_values(report: Any) -> None:
     assert data["kinds"]["mechanical"]["dollars"] == pytest.approx(0.88)
 
     assert data["models"] == {
-        FREE: {"attempts": 4, "passes": 0, "dollars": 0.0},
-        KIMI: {"attempts": 5, "passes": 4, "dollars": pytest.approx(2.415)},
+        FREE: {"attempts": 4, "passes": 0, "unverified": 0, "dollars": 0.0},
+        KIMI: {"attempts": 5, "passes": 4, "unverified": 0, "dollars": pytest.approx(2.415)},
     }
 
     avoided = data["claude_avoided"]
@@ -670,7 +670,7 @@ def test_render_text_tables(report: Any) -> None:
     rungs = _table_lines(text, "Per rung")
     assert rungs[0].split()[:2] == ["rung", "attempts"]
     assert [r.split()[0] for r in rungs[1:]] == ["free", "kimi", "claude", "claude-code"]
-    assert rungs[2].split()[:8] == ["kimi", "5", "2", "4", "2", "1", "1", "0"]
+    assert rungs[2].split()[:9] == ["kimi", "5", "2", "4", "0", "2", "1", "1", "0"]
     assert "$2.42" in rungs[2]
     assert "46s" in rungs[2]
 
@@ -678,8 +678,8 @@ def test_render_text_tables(report: Any) -> None:
     assert [r.split()[0] for r in kinds[1:]] == ["mechanical", "design", "analysis", "integration"]
 
     models = _table_lines(text, "Per model")
-    assert models[1].split() == [KIMI, "5", "4", "$2.42"]
-    assert models[2].split() == [FREE, "4", "0", "$0.00"]
+    assert models[1].split() == [KIMI, "5", "4", "0", "$2.42"]
+    assert models[2].split() == [FREE, "4", "0", "0", "$0.00"]
 
     providers = _table_lines(text, "Dollars by provider")
     assert providers[1].split() == ["moonshotai", "$2.42"]
@@ -803,3 +803,46 @@ def test_cmd_ladder_bad_since_exits_2(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_cmd_ladder_since_and_days_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MULLET_JOBS_DIR", str(tmp_path))
     assert cmd_ladder(["report", "--since", "2024-01-01", "--days", "1"]) == 2
+
+
+# Unverified steps are reported apart from passes.
+
+KIMI_M = "moonshotai/kimi-k2.7-code"
+_UNVERIFIED_GATES = {"G1": GateStatus.PASS, "G2": GateStatus.PASS, "G3": GateStatus.NOT_RUN,
+                     "G4": GateStatus.PASS, "G5": GateStatus.PASS, "G6": GateStatus.PASS}
+
+
+def _unverified_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    ledger = _rules_ledger(tmp_path, monkeypatch)
+    tokens = {"input": 1000, "output": 500}
+    _rules_job(ledger, [
+        ("mechanical", [_try("kimi", KIMI_M, True, tokens=tokens)]),
+        ("mechanical", [_try("kimi", KIMI_M, True, tokens=tokens, gates=_UNVERIFIED_GATES)]),
+    ])
+    return build(ledger, config=_make_config())
+
+
+def test_unverified_steps_are_not_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rep = _unverified_report(tmp_path, monkeypatch)
+    assert rep.steps_passed_below_claude == 1
+    assert rep.steps_unverified_below_claude == 1
+    assert rep.per_rung["kimi"].steps_passed == 1
+    assert rep.per_rung["kimi"].steps_unverified == 1
+    assert rep.per_kind["mechanical"].steps_passed == 1
+    assert rep.per_kind["mechanical"].steps_unverified == 1
+    assert rep.per_model[KIMI_M].attempts == 2
+    assert rep.per_model[KIMI_M].passes == 1
+    assert rep.per_model[KIMI_M].unverified == 1
+    assert rep.claude_avoided.tokens_in == 1000
+    assert rep.claude_avoided.tokens_out == 500
+
+
+def test_unverified_shows_in_text_and_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rep = _unverified_report(tmp_path, monkeypatch)
+    text = render_text(rep)
+    assert text.splitlines()[0].endswith("1 passed below Claude, 1 unverified")
+    assert "steps unverified below Claude: 1" in text
+    data = render_json(rep)
+    assert data["totals"]["steps_unverified_below_claude"] == 1
+    assert data["rungs"]["kimi"]["steps_unverified"] == 1
+    assert data["models"][KIMI_M]["unverified"] == 1

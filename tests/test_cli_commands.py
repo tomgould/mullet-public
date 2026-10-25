@@ -73,11 +73,11 @@ def test_search_command_pool_flag_not_in_query(mock_sys_argv, capsys):
         return "ok"
 
     with patch('mullet.server.mcp_knowledge.handle_search', side_effect=fake_handle_search):
-        run_mullet_command(['search', 'what is the router', '--pool', 'mullet-dev'], capsys)
+        run_mullet_command(['search', 'what is the router', '--pool', 'my-project'], capsys)
 
-    assert received_args.get("pool_name") == "mullet-dev"
+    assert received_args.get("pool_name") == "my-project"
     assert "--pool" not in received_args.get("query", "")
-    assert "mullet-dev" not in received_args.get("query", "")
+    assert "my-project" not in received_args.get("query", "")
     assert received_args.get("query") == "what is the router"
 
 def test_graph_stats_command(mock_sys_argv, capsys):

@@ -17,6 +17,12 @@ connection to this proxy's Unix socket on the host side. The proxy:
   reach batch and file endpoints;
 - drops whatever credentials the request carries and adds the real key in
   the provider's own header, so the key never enters the sandbox;
+- forwards only an allowlist of the worker's other headers (`FORWARD_HEADERS`,
+  or the `forward_headers` parameter), so it can't steer routing, billing or
+  account selection with headers such as `openai-organization`;
+- clamps `n` in the body to `max_n` (default 1) and, when `max_output_tokens`
+  is set, `max_tokens`, `max_completion_tokens` and `max_output_tokens` to it
+  (the default, None, leaves them alone);
 - streams the response back as it arrives, so server-sent events aren't
   held up;
 - logs the method, path (without query), status and size, never headers.
@@ -34,9 +40,12 @@ import socketserver
 import ssl
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from mullet.jobs.executors.usage_meter import ReportedUsage, ResponseMeter
 
 MAX_BODY_BYTES = 32 * 1024 * 1024
 UPSTREAM_TIMEOUT_S = 600.0
@@ -62,6 +71,17 @@ _CREDENTIALS = frozenset({"authorization", "x-api-key", "x-goog-api-key", "api-k
 _DROP_RESPONSE = frozenset({
     "connection", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
 })
+
+# Request headers a worker may send on, lower case. `anthropic-version` and
+# `anthropic-beta` are the Anthropic API's protocol headers, which its route
+# can't work without. Everything else is dropped, `openai-organization`
+# included. A KeyProxy takes its own set through `forward_headers`.
+FORWARD_HEADERS = frozenset({
+    "content-type", "accept", "user-agent", "accept-language", "x-title", "http-referer",
+    "anthropic-version", "anthropic-beta",
+})
+MAX_N = 1  # choices per request; a larger `n` multiplies the bill
+_TOKEN_FIELDS = ("max_tokens", "max_completion_tokens", "max_output_tokens")
 
 HEADER_STYLES = ("bearer", "x-api-key", "x-goog-api-key")
 
@@ -242,11 +262,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
         refusal = proxy.take_request(len(body))
         if refusal:
-            self._refuse(429, refusal)
+            self._refuse(402 if proxy.out_of_allowance else 429, refusal)
             return
-        drop = _HOP_BY_HOP | _CREDENTIALS if proxy.key else _HOP_BY_HOP
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in drop}
+        headers = {k: v for k, v in self.headers.items() if proxy.forwards_header(k)}
         headers.update(proxy.auth_headers())
+        # Plain bodies only, so the usage in a response can be read.
+        headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
+        headers["Accept-Encoding"] = "identity"
         if body or self.command in ("POST", "PUT", "PATCH"):
             headers["Content-Length"] = str(len(body))
         conn = proxy.connect()
@@ -258,6 +280,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._refuse(502, f"upstream unreachable: {type(exc).__name__}")
             return
         sent = 0
+        meter = ResponseMeter() if resp.status == 200 else None
         try:
             self.send_response_only(resp.status, resp.reason)
             for key, value in resp.getheaders():
@@ -274,11 +297,15 @@ class _Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)  # unbuffered: each piece goes out as it arrives
                     sent += len(chunk)
+                    if meter is not None:
+                        meter.feed(chunk)
                     if not proxy.take_bytes(len(chunk)):
                         break  # the attempt's byte cap: cut the response off
         except OSError:
             pass  # the sandbox side went away
         finally:
+            if meter is not None:
+                proxy.record_usage(meter.usage())
             conn.close()
             self.close_connection = True
             proxy._log(self.command, self.path, resp.status, sent)
@@ -292,7 +319,11 @@ class KeyProxy:
                  max_requests: int = MAX_REQUESTS, max_bytes: int = MAX_BYTES,
                  models: list[str] | None = None, max_connections: int = MAX_CONNECTIONS,
                  paths: tuple[str, ...] | list[str] | None = None,
-                 body_fields: dict[str, object] | None = None):
+                 body_fields: dict[str, object] | None = None,
+                 allowance_usd: float | None = None,
+                 pricer: Callable[[dict[str, int]], float] | None = None,
+                 forward_headers: frozenset[str] | set[str] | None = None,
+                 max_n: int = MAX_N, max_output_tokens: int | None = None):
         parts = urlsplit(upstream)
         if parts.scheme not in ("https", "http") or not parts.hostname:
             raise ProxyError(f"not an http(s) base URL: {upstream!r}")
@@ -320,12 +351,29 @@ class KeyProxy:
         # Top-level fields set on every JSON request body, replacing the worker's
         # own (OpenRouter's `provider` routing, say); None leaves bodies alone.
         self.body_fields = dict(body_fields) if body_fields else None
+        # Client headers passed on (lower case); every other one is dropped.
+        self.forward_headers = (frozenset(h.lower() for h in forward_headers)
+                                if forward_headers is not None else FORWARD_HEADERS)
+        self.max_n = max_n
+        # Cap on the output-token fields of a body; None leaves them as sent.
+        self.max_output_tokens = max_output_tokens
         self.log_path = log_path
         self.requests = 0  # every request seen, refused ones included
         self.forwarded = 0
         self.bytes = 0
         self.capped: str | None = None  # why the attempt's caps stopped a request
         self.refused_models = 0
+        # Dollars this attempt may still spend; None means no limit. Spend is the
+        # provider's own stated cost, else the tokens it reported at `pricer`'s
+        # prices ($ per million tokens), else nothing.
+        self.allowance_usd = allowance_usd
+        self.pricer = pricer
+        self.out_of_allowance = False
+        self.metered = 0  # responses whose usage was read
+        self.spent_usd = 0.0
+        self.provider_cost_usd = 0.0  # the part of spent_usd the provider stated itself
+        self.unpriced = 0  # responses with tokens but neither a stated cost nor a price
+        self.tokens = {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0}
         self._log_lock = threading.Lock()
         self._count_lock = threading.Lock()
         self._server: _Server | None = None
@@ -369,18 +417,56 @@ class KeyProxy:
             return "Mullet: this attempt may only use its own model"
         return None
 
+    def forwards_header(self, name: str) -> bool:
+        """True when a client header may go upstream.
+
+        Hop-by-hop headers never do. Credential headers pass only when the proxy
+        has no key of its own (a local server, a free tier); every other header
+        must be on the allowlist.
+        """
+        low = name.lower()
+        if low in _HOP_BY_HOP:
+            return False
+        if low in _CREDENTIALS:
+            return not self.key
+        return low in self.forward_headers
+
     def with_fields(self, body: bytes) -> bytes | None:
-        """`body` with `body_fields` set, or None when a non-empty body isn't a JSON object."""
-        if not self.body_fields or not body:
+        """`body` with `body_fields` set and `n` and the token fields clamped.
+
+        None when `body_fields` is set and a non-empty body isn't a JSON object,
+        or when a body repeats a key (upstream parsers may read the other one).
+        A body that isn't JSON at all is passed on untouched when nothing is set.
+        """
+        if not body:
             return body
         try:
             data = json.loads(body, object_pairs_hook=_no_duplicates)
+        except _DuplicateKey:
+            return None
         except ValueError:
-            return None
+            return None if self.body_fields else body
         if not isinstance(data, dict):
-            return None
-        data.update(self.body_fields)
-        return json.dumps(data, separators=(",", ":")).encode()
+            return None if self.body_fields else body
+        changed = False
+        if self.body_fields:
+            data.update(self.body_fields)
+            changed = True
+        if "n" in data and data["n"] != self.max_n and not (
+            isinstance(data["n"], int) and not isinstance(data["n"], bool) and data["n"] <= self.max_n
+        ):
+            data["n"] = self.max_n
+            changed = True
+        cap = self.max_output_tokens
+        if cap is not None:
+            for field in _TOKEN_FIELDS:
+                value = data.get(field)
+                if field in data and value is not None and not (
+                    isinstance(value, int) and not isinstance(value, bool) and value <= cap
+                ):
+                    data[field] = cap
+                    changed = True
+        return json.dumps(data, separators=(",", ":")).encode() if changed else body
 
     def path_allowed(self, method: str, path_only: str) -> bool:
         """True for one of the allowlisted API paths under the prefix (any path when none is set)."""
@@ -394,7 +480,11 @@ class KeyProxy:
     def take_request(self, size: int) -> str | None:
         """Count a request against the attempt's caps; the reason it's refused, or None."""
         with self._count_lock:
-            if self.forwarded >= self.max_requests:
+            if self.allowance_usd is not None and self.spent_usd >= self.allowance_usd:
+                self.out_of_allowance = True
+                self.capped = (f"Mullet: this attempt's spending allowance (${self.allowance_usd:.2f}) "
+                               "is used up")
+            elif self.forwarded >= self.max_requests:
                 self.capped = f"Mullet: this attempt's request cap ({self.max_requests}) is used up"
             elif self.bytes + size > self.max_bytes:
                 self.capped = f"Mullet: this attempt's byte cap ({self.max_bytes} bytes) is used up"
@@ -403,6 +493,35 @@ class KeyProxy:
                 self.bytes += size
                 return None
             return self.capped
+
+    def record_usage(self, usage: ReportedUsage | None) -> None:
+        """Add one response's usage to the attempt's spend."""
+        if usage is None:
+            return
+        tokens = usage.tokens()
+        if usage.cost is not None:
+            cost, stated = usage.cost, True
+        elif self.pricer is not None and any(tokens.values()):
+            cost, stated = self.pricer(tokens), False
+        else:
+            cost, stated = 0.0, False
+        with self._count_lock:
+            self.metered += 1
+            self.spent_usd += cost
+            if stated:
+                self.provider_cost_usd += cost
+            elif cost <= 0 and any(tokens.values()):
+                self.unpriced += 1
+            for name, count in tokens.items():
+                self.tokens[name] += count
+
+    def usage_summary(self) -> dict[str, object]:
+        """What the provider's own responses said this attempt used and cost."""
+        with self._count_lock:
+            return {"proxy_cost_usd": round(self.spent_usd, 6),
+                    "proxy_provider_cost_usd": round(self.provider_cost_usd, 6),
+                    "proxy_metered": self.metered, "proxy_unpriced": self.unpriced,
+                    "proxy_tokens": dict(self.tokens)}
 
     def take_bytes(self, size: int) -> bool:
         """Count response bytes; False once the attempt's byte cap is passed."""

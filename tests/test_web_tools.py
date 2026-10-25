@@ -84,7 +84,7 @@ def test_fetch_page_html():
     mock_cm = MagicMock()
     mock_cm.__enter__ = MagicMock(return_value=mock_resp)
     mock_cm.__exit__ = MagicMock(return_value=False)
-    with patch("urllib.request.urlopen", return_value=mock_cm), \
+    with patch("mullet.core.tools.url_safety.safe_urlopen", return_value=mock_cm), \
          patch("mullet.core.tools.url_safety.is_safe_url", return_value=True):
         result = fetch_page("http://example.com")
     assert "Hello World" in result
@@ -98,7 +98,7 @@ def test_fetch_page_text():
     mock_cm = MagicMock()
     mock_cm.__enter__ = MagicMock(return_value=mock_resp)
     mock_cm.__exit__ = MagicMock(return_value=False)
-    with patch("urllib.request.urlopen", return_value=mock_cm), \
+    with patch("mullet.core.tools.url_safety.safe_urlopen", return_value=mock_cm), \
          patch("mullet.core.tools.url_safety.is_safe_url", return_value=True):
         result = fetch_page("http://example.com")
     assert "plain text content" in result
@@ -112,7 +112,7 @@ def test_fetch_page_truncation():
     mock_cm = MagicMock()
     mock_cm.__enter__ = MagicMock(return_value=mock_resp)
     mock_cm.__exit__ = MagicMock(return_value=False)
-    with patch("urllib.request.urlopen", return_value=mock_cm), \
+    with patch("mullet.core.tools.url_safety.safe_urlopen", return_value=mock_cm), \
          patch("mullet.core.tools.url_safety.is_safe_url", return_value=True):
         result = fetch_page("http://example.com", max_chars=10000)
     assert "[...truncated at 10000 chars]" in result
@@ -125,7 +125,7 @@ def test_fetch_page_blocked():
 
 
 def test_fetch_page_exception():
-    with patch("urllib.request.urlopen", side_effect=Exception("connection error")), \
+    with patch("mullet.core.tools.url_safety.safe_urlopen", side_effect=Exception("connection error")), \
          patch("mullet.core.tools.url_safety.is_safe_url", return_value=True):
         result = fetch_page("http://example.com")
     assert "[error]" in result

@@ -286,6 +286,7 @@ def _acquire(fd: int, *, wait: bool, timeout: float, poll: float,
              clock: Callable[[], float], sleep: Callable[[float], None]) -> None:
     started = clock()
     reported: object = _NOT_REPORTED
+    last: float | None = None
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -297,12 +298,40 @@ def _acquire(fd: int, *, wait: bool, timeout: float, poll: float,
         if not wait:
             raise GpuBusy(holder)
         waited = clock() - started
-        if waited >= timeout:
+        left = _time_left(timeout, waited, last)
+        if left <= 0.0:
             raise GpuBusy(holder, waited)
         if on_wait is not None and holder != reported:
             reported = holder
             on_wait(holder)
-        sleep(max(0.0, min(poll, timeout - waited)))
+        last = _pause(sleep, poll, left, waited)
+
+
+# A gap this small is below what a clock reading can resolve, so it is never waited out.
+_MIN_WAIT_S = 1e-6
+
+
+def _time_left(deadline: float, waited: float, last: float | None) -> float:
+    """Seconds still to wait before ``deadline``, or 0.0 when the wait is over.
+
+    The wait is over once the gap is under ``_MIN_WAIT_S``, or when a finite
+    wait's clock did not move across the last pause (``last`` is ``waited``
+    before it): such a gap is too small for the clock to close, so sleeping
+    again would spin. A real clock always moves across a pause.
+    """
+    left = deadline - waited
+    if left < _MIN_WAIT_S:
+        return 0.0
+    if last is not None and waited <= last and math.isfinite(deadline):
+        return 0.0
+    return left
+
+
+def _pause(sleep: Callable[[float], None], poll: float, left: float, waited: float) -> float | None:
+    """Sleep up to ``poll`` within ``left``; return ``waited`` if the pause was positive, else None."""
+    seconds = max(0.0, min(poll, left))
+    sleep(seconds)
+    return waited if seconds > 0.0 else None
 
 
 def current_holder() -> GpuHolder | None:
@@ -722,6 +751,7 @@ def wait_for_headroom(
     sleep = sleep or _sleep
     started = clock()
     reported: tuple[str, ...] | None = None
+    last: float | None = None
     while True:
         room = measure()
         short = room.shortfalls(wanted, own_pids=mine)
@@ -729,7 +759,8 @@ def wait_for_headroom(
             return room
         waited = clock() - started
         deadline = limit if room.has_gpu else min(limit, no_gpu_wait)
-        if waited >= deadline:
+        left = _time_left(deadline, waited, last)
+        if left <= 0.0:
             if room.has_gpu:
                 raise NoHeadroom(room, short, waited)
             logger.info("machine: no GPU, going ahead anyway: %s", "; ".join(map(str, short)))
@@ -738,4 +769,4 @@ def wait_for_headroom(
         if on_wait is not None and checks != reported:
             reported = checks
             on_wait(room, short)
-        sleep(max(0.0, min(poll, deadline - waited)))
+        last = _pause(sleep, poll, left, waited)

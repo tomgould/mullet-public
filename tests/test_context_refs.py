@@ -436,7 +436,7 @@ class TestContextRefsMissingLines:
         ref = ContextReference(raw="@url:https://example.com", kind="url", target="https://example.com")
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"Hello World"
-        with patch("urllib.request.urlopen") as mock_urlopen:
+        with patch("mullet.core.tools.url_safety.safe_urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__.return_value = mock_resp
             mock_urlopen.return_value.__exit__.return_value = False
             content, error = _expand_url(ref)
@@ -448,7 +448,7 @@ class TestContextRefsMissingLines:
         ref = ContextReference(raw="@url:https://example.com", kind="url", target="https://example.com")
         mock_resp = MagicMock()
         mock_resp.read.return_value = ("x" * 25_000).encode()
-        with patch("urllib.request.urlopen") as mock_urlopen:
+        with patch("mullet.core.tools.url_safety.safe_urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__.return_value = mock_resp
             mock_urlopen.return_value.__exit__.return_value = False
             content, error = _expand_url(ref)
@@ -458,7 +458,7 @@ class TestContextRefsMissingLines:
     # Lines 338-339: expand URL exception
     def test_expand_url_exception(self):
         ref = ContextReference(raw="@url:https://example.com", kind="url", target="https://example.com")
-        with patch("urllib.request.urlopen", side_effect=IOError("network error")):
+        with patch("mullet.core.tools.url_safety.safe_urlopen", side_effect=IOError("network error")):
             content, error = _expand_url(ref)
             assert content is None
             assert "url fetch failed" in error.lower()
@@ -493,7 +493,7 @@ def test_expand_reference_url_kind(tmp_path):
     fake_resp.__enter__ = lambda s: s
     fake_resp.__exit__ = MagicMock(return_value=False)
 
-    with patch("urllib.request.urlopen", return_value=fake_resp):
+    with patch("mullet.core.tools.url_safety.safe_urlopen", return_value=fake_resp):
         content, error = _expand_reference(ref, str(tmp_path))
     assert error is None
     assert "example.com" in content
@@ -516,7 +516,7 @@ def test_expand_url_no_scheme_prepends_https(tmp_path):
         captured_urls.append(req.full_url)
         return fake_resp
 
-    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("mullet.core.tools.url_safety.safe_urlopen", side_effect=fake_urlopen):
         content, error = _expand_url(ref)
     assert error is None
     assert any("https://example.com" in u for u in captured_urls)
@@ -528,3 +528,20 @@ def test_resolve_path_blocked_filename():
     # id_rsa is in _BLOCKED_FILES
     result = _resolve_path("id_rsa", "/tmp")
     assert result is None
+
+
+class TestExpandUrlBlocksNonPublic:
+    def test_loopback_url_is_blocked_without_a_fetch(self):
+        ref = ContextReference(raw="@url:http://127.0.0.1/x", kind="url", target="http://127.0.0.1/x")
+        with patch("mullet.core.tools.url_safety.safe_urlopen") as opener:
+            content, error = _expand_url(ref)
+        assert content is None
+        assert "blocked" in error.lower()
+        opener.assert_not_called()
+
+    def test_name_resolving_to_private_address_is_blocked(self, monkeypatch):
+        monkeypatch.setattr("mullet.core.tools.url_safety._resolve", lambda host: {"10.0.0.5"})
+        ref = ContextReference(raw="@url:evil.test", kind="url", target="evil.test")
+        content, error = _expand_url(ref)
+        assert content is None
+        assert "blocked" in error.lower()

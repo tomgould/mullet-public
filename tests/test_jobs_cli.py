@@ -20,7 +20,7 @@ from mullet.jobs.executors.fake import FakeExecutor
 from mullet.jobs.ledger import Ledger
 from mullet.jobs.profile import Checks, Profile, repo_id, save_profile
 from mullet.jobs.runner import JobRunner
-from mullet.jobs.types import JobStatus
+from mullet.jobs.types import JobStatus, NodeStatus
 
 from tests.jobs_helpers import git, good_change, make_source_repo
 
@@ -551,3 +551,65 @@ def test_list_and_tail(repo, capsys):
     assert cmd_job(["tail", job_id]) == 0
     events = capsys.readouterr().out
     assert "job_created" in events and "plan_set" in events
+
+
+def _done_job_with_unverified_node(repo, capsys) -> str:
+    job_id = plan(repo, capsys)
+    cmd_job(["approve", job_id])
+    with Ledger() as ledger:
+        ledger.set_job_status(job_id, JobStatus.RUNNING)
+        with ledger._tx() as conn:
+            ledger._set_node(conn, job_id, "n1", NodeStatus.UNVERIFIED, end_sha="abc")
+        ledger.set_job_status(job_id, JobStatus.DONE)
+    capsys.readouterr()
+    return job_id
+
+
+def test_status_line_separates_unverified_from_passed(repo, capsys):
+    job_id = _done_job_with_unverified_node(repo, capsys)
+    assert cmd_job(["status", job_id]) == 0
+    line = capsys.readouterr().out.splitlines()[0]
+    assert "0 passed, 1 unverified" in line
+    assert "done (unverified)" in line
+
+
+def test_show_does_not_call_a_job_with_unverified_nodes_done(repo, capsys):
+    job_id = _done_job_with_unverified_node(repo, capsys)
+    assert cmd_job(["show", job_id]) == 0
+    assert "[done]" not in capsys.readouterr().out
+
+
+def test_merge_refuses_unverified_nodes_without_the_flag(repo, capsys):
+    job_id = _done_job_with_unverified_node(repo, capsys)
+    assert cmd_job(["merge", job_id, "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "n1" in err and "--allow-unverified" in err
+    with Ledger() as ledger:
+        assert ledger.get_job(job_id).status is JobStatus.DONE
+
+
+def test_merge_with_allow_unverified_warns_and_hands_back(repo, capsys, monkeypatch):
+    from types import SimpleNamespace
+
+    class FakeClone:
+        def __init__(self, root):
+            pass
+
+        def git(self, *args):
+            return SimpleNamespace(stdout="1 file changed")
+
+        def fetch_into(self, target_repo, branch):
+            return "0123456789abcdef"
+
+    monkeypatch.setattr(job_cli, "JobClone", FakeClone)
+    job_id = _done_job_with_unverified_node(repo, capsys)
+    assert cmd_job(["merge", job_id, "--yes", "--allow-unverified"]) == 0
+    assert "Warning: these nodes could not be fully checked: n1" in capsys.readouterr().out
+    with Ledger() as ledger:
+        assert ledger.get_job(job_id).status is JobStatus.MERGED
+
+
+def test_merge_help_documents_allow_unverified(capsys):
+    with pytest.raises(SystemExit):
+        cmd_job(["merge", "--help"])
+    assert "--allow-unverified" in capsys.readouterr().out

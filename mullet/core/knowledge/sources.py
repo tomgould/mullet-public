@@ -25,6 +25,8 @@ try:
 except ImportError:
     _httpx = None
 
+from mullet.core.tools.url_safety import httpx_request_guard
+
 logger = logging.getLogger(__name__)
 
 
@@ -335,6 +337,7 @@ class WebCrawler(BaseConnector):
             timeout=self.source.timeout,
             follow_redirects=True,
             headers=headers,
+            event_hooks={"request": [httpx_request_guard]},
         )
 
         try:

@@ -3,7 +3,7 @@
 Canonical reference for which model to use for which task. Verified against
 live OpenRouter pricing + ping probes on **2026-06-16**.
 
-This page covers routing for `mullet "<task>"`, the API and the delegation tools (`mullet_run`, `mullet_opencode`, `mullet_swarm`). `mullet job` does not use it: job steps go up the delegation ladder (free, local, Kimi, OpenRouter, Claude), described under "Delegation ladder" in the README.
+This page covers routing for the legacy single-task path: `mullet "<task>"`, the API and the delegation tools (`mullet_run`, `mullet_delegate`, `mullet_swarm`). These run unless `MULLET_DELEGATION=off` is set (the default is on). `mullet_opencode` runs as a single-step job on the ladder, so this routing does not choose its model. `mullet job` does not use it either: job steps go up the delegation ladder (free, local, Kimi, OpenRouter, Claude), described under "Delegation ladder" in the README.
 
 Authoritative source code:
 - Cost table: `mullet/core/providers/model_info.py`

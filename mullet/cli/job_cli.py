@@ -37,7 +37,7 @@ from mullet.jobs.profile import (
 from mullet.jobs.report import build_report
 from mullet.jobs.runner import (
     ExecutorNotAllowed, JobRunner, check_executor_allowed, claude_executor, claude_usage, default_executor,
-    executor_name, job_max_spend,
+    executor_name, job_max_spend, solo_rung,
 )
 from mullet.jobs.types import JobStatus, NodeSpec
 
@@ -188,10 +188,12 @@ def show(ledger: Ledger, job_id: str, ladder: Ladder | None = None) -> str:
         worker_line = (f"Worker: the delegation ladder (spending cap ${job_max_spend(ledger, job, 0.0):.2f}); "
                        "the planner, reviewer, design and analysis steps are Claude")
     else:
+        solo = solo_rung(job)
         worker_line = (f"Worker: {worker}" + (f" with {worker_model}" if worker_model else "")
-                       + ("; files pre-loaded" if worker == "opencode" or budget.get("preload_files") else ""))
+                       + ("; files pre-loaded" if worker == "opencode" or budget.get("preload_files") else "")
+                       + (f"; spending cap ${job_max_spend(ledger, job, 0.0):.2f}" if solo and solo.paid else ""))
     lines = [
-        f"Job {job.id}  [{job.status.value}]" + (f"  {job.error}" if job.error else ""),
+        f"Job {job.id}  [{_state_label(job, ledger.nodes(job.id))}]" + (f"  {job.error}" if job.error else ""),
         f"Goal: {job.goal}",
         f"Repo: {job.repo_path} at {job.base_ref} ({job.base_sha[:12]})",
         f"Attempts per node: {job.max_attempts}; per attempt: {budget.get('max_turns', 60)} turns, "
@@ -420,8 +422,8 @@ def cmd_run(args: argparse.Namespace, ledger: Ledger) -> int:
         raise CliError("a runner is already working on this job")
     preflight(job.status, job)
     if args.max_spend is not None:
-        if not (job.budget or {}).get("ladder"):
-            raise CliError("--max-spend applies to jobs planned with the ladder")
+        if not (job.budget or {}).get("ladder") and executor_name(job) != "opencode":
+            raise CliError("--max-spend applies to jobs planned with the ladder or with --executor opencode")
         if args.max_spend < 0:
             raise CliError("--max-spend can't be negative")
         ledger.add_event(args.job_id, "max_spend", {"value": float(args.max_spend)})
@@ -442,13 +444,22 @@ def cmd_run(args: argparse.Namespace, ledger: Ledger) -> int:
     return 0
 
 
+def _state_label(job, nodes) -> str:
+    """The job's status, with a finished job that has unverified nodes marked so it doesn't read as fully done."""
+    if job.status is JobStatus.DONE and any(n.status.value == "unverified" for n in nodes):
+        return "done (unverified)"
+    return job.status.value
+
+
 def _status_line(ledger: Ledger, job_id: str) -> str:
     job = ledger.get_job(job_id)
     nodes = ledger.nodes(job_id)
-    done = sum(1 for n in nodes if n.status.value in ("passed", "unverified"))
+    passed = sum(1 for n in nodes if n.status.value == "passed")
+    unverified = sum(1 for n in nodes if n.status.value == "unverified")
+    counts = f"{passed} passed" + (f", {unverified} unverified" if unverified else "")
     running = " (runner alive)" if _runner_alive(job_id) else ""
     goal = job.goal if len(job.goal) <= 60 else job.goal[:57] + "..."
-    return f"{job.id}  {job.status.value:<17} {done}/{len(nodes)} nodes{running}  {goal}"
+    return f"{job.id}  {_state_label(job, nodes):<17} {counts} (of {len(nodes)} nodes){running}  {goal}"
 
 
 def cmd_status(args: argparse.Namespace, ledger: Ledger) -> int:
@@ -527,9 +538,12 @@ def cmd_merge(args: argparse.Namespace, ledger: Ledger) -> int:
     job = ledger.get_job(args.job_id)
     if job.status is not JobStatus.DONE:
         raise CliError(f"the job is {job.status.value}; only a finished job can be handed back")
+    unverified = [n.node_id for n in ledger.nodes(args.job_id) if n.status.value == "unverified"]
+    if unverified and not args.allow_unverified:
+        raise CliError(f"these nodes could not be fully checked: {', '.join(unverified)}. "
+                       "Review them, then hand the branch back with --allow-unverified")
     clone = JobClone(job_dir(args.job_id) / "clone")
     print(clone.git("diff", "--stat", job.base_sha, "HEAD").stdout)
-    unverified = [n.node_id for n in ledger.nodes(args.job_id) if n.status.value == "unverified"]
     if unverified:
         print(f"Warning: these nodes could not be fully checked: {', '.join(unverified)}")
     target = args.branch or job.branch or f"mullet/{job.id}"
@@ -647,6 +661,38 @@ def ladder_report(ladder: Ladder, repo: Path | None, *, offline: bool = False,
     return "\n".join(lines)
 
 
+def probe_credit() -> dict:
+    """Each paid provider's own balance now (the network; tests replace this)."""
+    from mullet.jobs.reconcile import probe_providers
+
+    return probe_providers()
+
+
+def credit_lines(ladder: Ladder, probe: Callable[[], dict] | None = None, threshold: float | None = None) -> list[str]:
+    """The credit line for the paid rungs that have a key, and a warning for any under the threshold.
+
+    Nothing is probed (and no lines come back) when no paid rung has a key.
+    """
+    from mullet.cli.doctor_checks import low_credit, low_credit_text, warn_below_usd
+    from mullet.jobs.notify import status_line
+    from mullet.jobs.reconcile import take
+
+    try:
+        paid = [r for r in ladder.config.rungs() if r.paid and ladder.has_key(r)]
+    except Exception:
+        return []
+    if not paid:
+        return []
+    names = {r.name for r in paid}
+    found = take(probe or probe_credit)
+    snapshot = {k: v for k, v in found.items() if k in names}
+    line = status_line(snapshot, None)
+    if not line:
+        return []
+    limit = warn_below_usd() if threshold is None else threshold
+    return [line, *("Warning: " + low_credit_text(n, r, limit) for n, r in low_credit(snapshot, limit))]
+
+
 def cmd_retry(args: argparse.Namespace, ledger: Ledger) -> int:
     """Give a blocked step fresh attempts, on the whole ladder again or on one named rung."""
     from mullet.jobs.ladder import RUNG_ORDER
@@ -689,7 +735,12 @@ def cmd_ladder(args: argparse.Namespace, ledger: Ledger) -> int:
         repo: Path | None = _repo_root(args.repo)
     except CliError:
         repo = None
-    print(ladder_report(make_ladder(), repo, offline=args.offline))
+    ladder = make_ladder()
+    print(ladder_report(ladder, repo, offline=args.offline))
+    if not args.offline:
+        lines = credit_lines(ladder)
+        if lines:
+            print("\n" + "\n".join(lines))
     return 0
 
 
@@ -720,7 +771,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--no-ladder", dest="ladder", action="store_false",
                       help="one executor for every node, as before the ladder")
     plan.add_argument("--max-spend", type=_dollars, default=None,
-                      help="dollars the job may spend on paid rungs (default: ladder.max_spend, $2)")
+                      help="dollars the job may spend on paid rungs, or on a paid --executor opencode model "
+                           "(default: ladder.max_spend, $2)")
     plan.add_argument("--executor-model", help="the worker's model; for opencode, a provider/model id")
     plan.add_argument("--preload", action="store_true",
                       help="also pre-load the files in scope into a Claude worker's prompt (opencode always does)")
@@ -746,7 +798,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("job_id")
         p.add_argument("--foreground", action="store_true")
         p.add_argument("--max-spend", type=_dollars, default=None,
-                       help="ladder jobs: a new spending cap in dollars, e.g. after the job paused at its cap")
+                       help="ladder and opencode jobs: a new spending cap in dollars, e.g. after the job "
+                            "paused at its cap")
         p.set_defaults(fn=cmd_run)
 
     status = sub.add_parser("status", help="one job's progress, or all jobs")
@@ -779,6 +832,9 @@ def build_parser() -> argparse.ArgumentParser:
     merge.add_argument("job_id")
     merge.add_argument("--branch", help="name for the branch in your repo")
     merge.add_argument("--yes", action="store_true")
+    merge.add_argument("--allow-unverified", action="store_true",
+                       help="hand the branch back even though some nodes could not be fully checked "
+                            "(unverified); without this flag merge refuses")
     merge.set_defaults(fn=cmd_merge)
     return parser
 

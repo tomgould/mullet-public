@@ -18,14 +18,24 @@ def create_app(
     host: str = "127.0.0.1",
     port: int = 3000,
     cors_origins: list[str] | None = None,
+    require_token: bool = False,
+    token: str | None = None,
+    allowed_hosts: list[str] | None = None,
 ) -> web.Application:
-    """Create the aiohttp application with all routes."""
+    """Create the aiohttp application with all routes.
+
+    Host and Origin are always checked (see ``mullet.server.guard``). With `require_token`,
+    solo-mode requests other than ``/health`` must carry `token`; ``run_server`` turns it on.
+    """
     app = web.Application(client_max_size=1024 * 1024)  # 1MB request limit
 
     # Store config in app
     app["host"] = host
     app["port"] = port
     app["cors_origins"] = cors_origins or ["http://localhost:*", "http://127.0.0.1:*"]
+    app["require_token"] = require_token
+    app["token"] = token
+    app["allowed_hosts"] = list(allowed_hosts or [])
     app["active_tasks"] = {}
 
     # Initialize database
@@ -33,7 +43,9 @@ def create_app(
 
     # Middleware (order matters: error handling → rate limiting → CORS → auth)
     from mullet.server.middleware import error_handling_middleware, rate_limit_middleware
+    from mullet.server.guard import guard_middleware
     app.middlewares.append(error_handling_middleware)
+    app.middlewares.append(guard_middleware)
     app.middlewares.append(rate_limit_middleware)
     app.middlewares.append(cors_middleware)
     app.middlewares.append(auth_middleware)
@@ -151,11 +163,32 @@ async def auth_middleware(request, handler):
     )
 
 
+def _server_settings() -> dict:
+    """The ``server:`` block of the Mullet config file: require_token, allowed_origins, allowed_hosts."""
+    try:
+        from mullet.config.loader import load_from_yaml
+        from mullet.core.paths import config_file
+
+        data = load_from_yaml(str(config_file("config.yaml")))
+    except Exception as exc:
+        logger.warning("could not read the server settings: %s", exc)
+        return {}
+    block = data.get("server") if isinstance(data, dict) else None
+    return block if isinstance(block, dict) else {}
+
+
 def run_server(host: str = "127.0.0.1", port: int = 3000):
     """Start the Mullet API server."""
-    app = create_app(host=host, port=port)
+    settings = _server_settings()
+    require_token = settings.get("require_token", True) is not False
+    from mullet.server.guard import get_or_create_token, token_path
+    app = create_app(host=host, port=port, cors_origins=settings.get("allowed_origins") or None,
+                     require_token=require_token, token=get_or_create_token() if require_token else None,
+                     allowed_hosts=settings.get("allowed_hosts") or None)
     logger.info("Starting Mullet server on %s:%d", host, port)
     print(f"Mullet API server running on http://{host}:{port}")
+    if require_token:
+        print(f"  Token: {token_path()}  (send it as 'Authorization: Bearer <token>'; `mullet serve --show-token` prints it)")
     print(f"  REST: http://{host}:{port}/v1/chat/completions")
     print(f"  WebSocket: ws://{host}:{port}/ws")
     print(f"  Health: http://{host}:{port}/health")

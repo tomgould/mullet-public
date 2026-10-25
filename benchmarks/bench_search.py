@@ -1,6 +1,8 @@
+import os
+
 from mullet.core.knowledge.manager import KnowledgeManager
 
-km = KnowledgeManager("mullet-dev")
+km = KnowledgeManager(os.environ.get("MULLET_BENCH_POOL", "your-project-pool"))
 
 queries = ["resource guard dispatch local LLM", "HUD rate limits display", "provider fallback chain", "team orchestration task board", "context compression structured summary"]
 

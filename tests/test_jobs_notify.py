@@ -80,6 +80,16 @@ class TestMessage:
             assert "ACME" not in body and detail not in body and "j1" in title
         assert "--max-spend" in message("spend", "j1", "g", local=False)[1]
 
+    def test_paused_uses_a_given_reason_and_keeps_the_old_wording_without_one(self):
+        body = message("paused", "j1", "goal", "a check couldn't run, so nothing was judged")[1]
+        assert "Paused: a check couldn't run, so nothing was judged" in body
+        assert "mullet job report j1" in body
+        assert "usage limit" in message("paused", "j1", "goal")[1]
+
+    def test_a_paused_message_that_leaves_the_machine_never_carries_the_reason(self):
+        title, body = message("paused", "j1", "Rewrite billing for ACME", "reason-text", local=False)
+        assert "ACME" not in body and "reason-text" not in body and "j1" in title
+
     def test_unknown_event(self):
         with pytest.raises(ValueError):
             message("exploded", "j1", "goal")
@@ -153,6 +163,41 @@ class TestNotifyJob:
         monkeypatch.setattr("mullet.core.env.dotenv_value", values.get)
         assert notify_job("blocked", "j1", "goal", **calls["kw"]) == []
         assert calls["run"] == []
+
+
+class TestTimeZone:
+    def test_default_is_the_local_zone(self):
+        now = notify._now_in(None)
+        assert now.tzinfo is not None
+        assert now.utcoffset() == datetime.now().astimezone().utcoffset()
+
+    def test_explicit_zone_is_used(self):
+        pytest.importorskip("zoneinfo")
+        try:
+            tokyo = notify._now_in("Asia/Tokyo")
+        except Exception:
+            pytest.skip("no tz database")
+        if str(tokyo.tzinfo) != "Asia/Tokyo":
+            pytest.skip("no tz database")
+        assert tokyo.utcoffset().total_seconds() == 9 * 3600
+
+    def test_unknown_zone_falls_back_to_local_time(self):
+        assert notify._now_in("Not/AZone") is not None
+
+    def test_notify_uses_the_env_zone(self, calls, monkeypatch):
+        seen = []
+        monkeypatch.setattr(notify, "_now_in", lambda tz: seen.append(tz) or TUESDAY_10AM)
+        env = {"MULLET_NOTIFY": "slack", "MULLET_SLACK_WEBHOOK": WEBHOOK, "MULLET_NOTIFY_TZ": "Asia/Tokyo"}
+        assert notify.notify("t", "b", env=env, **calls["kw"]) == ["slack"]
+        assert seen == ["Asia/Tokyo"]
+
+    def test_notify_without_env_zone_asks_for_local(self, calls, monkeypatch):
+        seen = []
+        monkeypatch.setattr(notify, "_now_in", lambda tz: seen.append(tz) or TUESDAY_10AM)
+        env = {"MULLET_NOTIFY": "slack", "MULLET_SLACK_WEBHOOK": WEBHOOK}
+        monkeypatch.setattr("mullet.core.env.dotenv_value", lambda name: None)
+        notify.notify("t", "b", env=env, **calls["kw"])
+        assert seen == [None]
 
 
 class TestNotify:

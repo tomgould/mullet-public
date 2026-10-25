@@ -23,6 +23,8 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from mullet.core.tools.url_safety import httpx_request_guard
+
 from .base import BaseSourceConnector, SyncResult
 from .web_cache import CrawlCache
 from .web_converter import extract_published_date, extract_title, html_to_markdown
@@ -385,7 +387,11 @@ class WebSourceConnector(BaseSourceConnector):
         queue.append(starting_path)
         files_dir = output_dir / "files"
 
-        with httpx.Client(timeout=self.config.timeout, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=self.config.timeout,
+            follow_redirects=True,
+            event_hooks={"request": [httpx_request_guard]},
+        ) as client:
             if self.config.use_sitemap:
                 queue.extend(self._sitemap_paths(client))
 

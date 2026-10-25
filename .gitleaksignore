@@ -21,6 +21,6 @@ tests/test_security_and_budget_helpers.py:jwt:116
 tests/test_redact_trace_budget_notify_balance_helpers.py:stripe-access-token:106
 tests/test_redact_trace_budget_notify_balance_helpers.py:stripe-access-token:104
 # Planted fakes that test the job runner's secret gate (G3)
-tests/test_jobs_gates.py:aws-access-token:115
-tests/test_jobs_gates.py:generic-api-key:117
-tests/test_jobs_gates.py:aws-access-token:123
+tests/test_jobs_gates.py:aws-access-token:116
+tests/test_jobs_gates.py:generic-api-key:118
+tests/test_jobs_gates.py:aws-access-token:124

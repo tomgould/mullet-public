@@ -180,3 +180,15 @@ async def test_ws_token_validation_with_db(aiohttp_client, app, tmp_path):
     assert resp["data"]["email"] == "test@example.com"
     
     db.close()
+
+
+async def test_ws_auth_empty_token_is_refused_in_enterprise_mode(aiohttp_client, app, monkeypatch):
+    """An empty token must not fall through to the solo user outside solo mode."""
+    monkeypatch.setenv("MULLET_MODE", "enterprise")
+    client = await aiohttp_client(app)
+    ws = await client.ws_connect("/ws")
+    await ws.send_json({"type": "authenticate", "data": {"token": ""}})
+    resp = await ws.receive_json()
+    assert resp["type"] == "error"
+    assert resp["data"]["code"] == "auth_failed"
+    await ws.close()

@@ -2,26 +2,15 @@
 
 ## Context
 
-Mullet stopped being useful, and the audits of the current code explain why:
+Mullet 2 exists so that long model-driven work can run unattended and be believed:
 
-- **Nothing it reports can be trusted.** Every "done" or "passed" in the orchestration modes comes from words in a model's reply:
-  - substring checks for PASS and APPROVAL, so "NO APPROVAL" passes (`ralph.py:680`, `verifier.py:91-105`);
-  - `AgentRunner` treats a model that stops calling tools as finished (`runner.py:324`);
-  - swarm returns `applied: True` without applying anything (`mcp_handlers.py:1412`).
-- **There is no isolation.**
-  - Delegates can write anywhere under `$HOME` (`file_ops.py:129`).
-  - They can run any shell command (`terminal.py:87`).
-  - opencode runs with `--auto` and forwards keys from the current directory's `.env` (`opencode_tool.py:65,124,432`).
-- **The long-job tooling is wired to this repo and unsafe.** `overnight_loop.py` can mark failed work done, commit it and push `origin master` (`:313`). autopilot hardcodes Mullet's own test suite.
-- **It only works from this checkout.**
-  - Paths come from `__file__`, and settings come from the checkout's `.env`.
-  - Hooks are registered by absolute path.
-  - `install.sh` installs an unrelated PyPI package.
-  - The portability fixes exist only as patches in the public copy.
-- **Changes are slow to verify.** The suite is 17.9k tests run in series, about 30 minutes.
+- **Status comes from evidence.** A step is done when Mullet's own gates pass: exit codes, test reports and diffs. Words in a model's reply never mark anything passed or done.
+- **Workers are isolated.** Each job runs in a private clone with a sandbox: no write access outside the clone, no network, no loaded keys. Your checkout is never touched.
+- **It runs from any machine.** Paths, settings and keys come from the config directory, never from a source checkout, and Mullet installs from the public repo with `scripts/install.sh`.
+- **Changes are quick to verify.** The suite is about 16,900 tests, run in parallel in about 4.5 minutes.
 
 **Outcome:**
-1. On any Linux or macOS machine: `uv tool install`, then `mullet job plan "<goal>"` in any repo, Mullet included.
+1. On a Linux machine: `uv tool install`, then `mullet job plan "<goal>"` in any repo, Mullet included.
 2. You approve a task tree.
 3. Mullet runs it unattended in a sandboxed private clone, checking every step with tests and checks it runs itself.
 4. It hands back a branch and an evidence report. Your checkout, including `.git`, is untouched until you merge.
@@ -30,7 +19,7 @@ Mullet stopped being useful, and the audits of the current code explain why:
 
 - **Recursion is a task tree with gated nodes.** The planner breaks a goal down until each leaf fits one pass. A parent passes only when its children and its own integration checks pass. Improving Mullet is just a job on the Mullet repo.
 - **Approvals happen twice:** the plan before work starts and the merge at the end. In v1.1, a runtime split inside the approved scope runs without asking, and a split that widens the scope pauses.
-- **Platforms are Linux and macOS**, with Windows through WSL. Linux works first, and macOS follows in the same release.
+- **Jobs run on Linux**, and on Windows through WSL. On macOS the rest of Mullet works, but jobs refuse to start until a macOS sandbox exists.
 - **Agents spawning agents (recommendation):**
   - Workers never spawn Mullet workers. Only the orchestrator creates nodes, so budgets, depth and checks live in one place.
   - Claude Code's own subagents inside a node count against that node's budget.
@@ -47,7 +36,6 @@ Mullet stopped being useful, and the audits of the current code explain why:
   - never uses the Agent SDK with subscription login;
   - strips `ANTHROPIC_API_KEY` from the worker's environment unless `billing: api` is set, because in `-p` mode the key silently wins over the subscription;
   - runs one Claude worker at a time across all jobs, since they share your subscription quota. opencode workers on paid or local models have their own slots (`MULLET_API_WORKERS`, default 3) and run alongside it.
-- **Mullet 2 is built natively in Claude Code with delegation off.** The delegation ladder in the project CLAUDE.md files no longer applies, and P5 rewrites it.
 
 ## Architecture
 
@@ -73,7 +61,8 @@ The new package is `mullet/jobs/`. It is built alongside the old code and doesn'
 
 ### Sandbox (`sandbox.py`)
 - One wrapper for the worker's Bash, `setup`, and every gate command: bubblewrap on Linux, Seatbelt on macOS.
-- It allows writes to the clone's working tree only, gives no network, and passes an allowlisted environment, so none of Mullet's own loaded keys get through (`server/mcp.py:17-44` loads them all into `os.environ`).
+- It allows writes to the clone's working tree only, gives no network, and passes an allowlisted environment, so none of Mullet's own loaded keys get through (the MCP server loads `.env` into `os.environ`).
+- The one exception is `setup`: its commands run with the host's network (no `--unshare-net`), because package managers need it. They can reach anything the host can, loopback services and the local network included, and nothing filters hosts. They are still confined in every other way (read-only filesystem apart from the clone and the job's caches, allowlisted environment, none of Mullet's keys). Setup commands come from the stored profile or from `.mullet/project.yaml` as committed at the job's base commit (an in-repo file may change `setup`; it can't set `setup_writable`, `expose_ro`, `copy_in` or `opencode_lsp`). A worker's edits never change them. Unshared-network setup would need a proxy or pre-fetched dependencies, which isn't built.
 - Gates run the code the worker just wrote, so they need the sandbox as much as the worker does.
 - The worker's Claude settings are fail-closed:
   - `sandbox.enabled`
@@ -106,7 +95,7 @@ The new package is `mullet/jobs/`. It is built alongside the old code and doesn'
   - `protected_paths`;
   - `data_class`: private by default;
   - `copy_in`.
-- Default protected paths: `.git`, `.gitmodules`, `.gitattributes`, `.lfsconfig`, `.husky`, `CLAUDE.md`, `.claude/`, `.mcp.json`, `opencode.json`, `.mullet/`, `.env*`, CI workflows, lockfiles, and test runner config (`pytest.ini`, `tox.ini`, `jest.config.*`, `phpunit.xml*` and similar). The profile's `copy_in` paths are protected too. Changing any of them needs node-level permission in the approved plan. `.gitignore` is not protected, because anything it hides is removed before gates run.
+- Default protected paths: `.git`, `.gitmodules`, `.gitattributes`, `.lfsconfig`, `.husky`, `CLAUDE.md`, `.claude/`, `.mcp.json`, `opencode.json`, `.mullet/`, `.env*`, CI workflows (`.github/workflows`, `.github/actions`, `.gitlab-ci.yml`), `.pre-commit-config.yaml`, files your own tools run when you open the repo (`.envrc`, `.vscode`, `.devcontainer`, `.npmrc`, `.yarnrc`, `.pypirc`), `AGENTS.md`, lockfiles, and test runner config (`pytest.ini`, `tox.ini`, `jest.config.*`, `phpunit.xml*` and similar). The list is `DEFAULT_PROTECTED` in `mullet/jobs/profile.py`. The profile's `copy_in` paths are protected too. Changing any of them needs node-level permission in the approved plan. `.gitignore` is not protected, because anything it hides is removed before gates run.
 - Mullet's git commands ignore the user's global and system git config and attributes files, so a `.gitattributes` in the work tree can't switch on filter or diff drivers. Diffs are always read as text.
 - `copy_in` files (for example a test `.env`):
   - are copied only into the gate sandbox, after the executor exits;
@@ -116,7 +105,7 @@ The new package is `mullet/jobs/`. It is built alongside the old code and doesn'
 
 ### Gates (`gates.py`)
 - A new gate runner with profile timeouts and full logs, and per-test results from junit XML.
-- `orchestration/verification.py::run_check` is the template, but its fixed 300s timeout and 2,000-character output tail are too small.
+- Each gate command runs with the profile's timeout, and its full output is kept in the job's logs.
 
 | Gate | Check | Outcome |
 |---|---|---|
@@ -125,9 +114,9 @@ The new package is `mullet/jobs/`. It is built alongside the old code and doesn'
 | G2 scope | Files against the node scope, protected paths, size limits, symlinks pointing out of the repo | Fails when anything falls outside them |
 | G3 static | `diff_risk.py`, secret scan (`gitleaks --redact`, or a regex fallback), deletion count | Fails when flags or secrets are over the limit |
 | G4 build | Lint, typecheck and build | Fails on a non-zero exit |
-| G5 tests | Targeted tests per node: the planner's acceptance commands, tests touched in the diff, and tests mapped by name. The full suite at parent nodes and at job end. | Fails when a test that passed on base no longer passes (a skip counts as a loss), when a test newly fails, when no report is produced, or when no tests run. In a targeted run only the tests that ran are compared, and the full run catches tests that vanished. A failure is rerun twice on the branch before it counts, which filters out flaky tests. |
+| G5 tests | Targeted tests per node: the planner's acceptance commands, tests touched in the diff, and tests mapped by name. The full suite at parent nodes and at job end. | Fails when a test that passed on base no longer passes (a skip counts as a loss), when a test newly fails, when no report is produced, or when no tests run. In a targeted run only the tests that ran are compared, and the full run catches tests that vanished. A failure is rerun up to twice on the branch, which filters out flaky tests: a test is excused only if it passed in one of the runs. A test that failed and never passed (skipped or missing in the other runs) is a regression, whichever run it failed in. |
 | G6 test weakening | Diff of test files | Fails when assertions are removed, skip/xfail is added or the assertion count drops, unless the node allows it |
-| G7 review | A fresh `claude -p` reviewer session, run after G1 to G6 pass, with no author transcript and no `copy_in` files, gives a schema-checked JSON verdict | The reviewer can block a node. It can never pass one. |
+| G7 review | A fresh `claude -p` reviewer session, run after G1 to G6 pass, with no author transcript and no `copy_in` files, gives a schema-checked JSON verdict | The reviewer can block a node. It can never pass one. A review with no verdict is never read as unverified: the job pauses (see the runner below). |
 
 ### Executor (`executors/claude_code.py`)
 - Command: `claude -p --restricted --strict-mcp-config --disable-slash-commands --tools Read,Edit,Write,Glob,Grep,Bash --settings <job.json> --permission-mode dontAsk --permission-prompts none --output-format stream-json --json-schema <result>`, with cwd set to the clone.
@@ -162,7 +151,7 @@ The new package is `mullet/jobs/`. It is built alongside the old code and doesn'
   - The first attempt runs the gates only. If that fails, later attempts give the executor the gate feedback to fix the integration.
   - An integration check that changes nothing makes no commit.
 - G7 (`review.py`) is on unless `--no-review`:
-  - When on, it is a required gate, so a node can't pass without it. A review that doesn't complete leaves the node unverified.
+  - When on, it is a required gate, so a node can't pass without it. A review that gives no verdict (it crashed, timed out or answered neither approve nor block) is treated like a crashed gate: the job pauses, nothing is committed, and a resume runs the review again on the same work.
   - The reviewer sees the node, the diff and the clone, never the author's transcript or the copied-in files.
 - The runner (`runner.py`):
   - A detached process (`setsid`) with a lock file per job.
@@ -170,6 +159,7 @@ The new package is `mullet/jobs/`. It is built alongside the old code and doesn'
   - Waiting for the machine-wide worker lock can be interrupted by a stop.
   - On start, the branch is reset to the last commit the ledger recorded, so a commit made just before a crash, and never recorded, is dropped and its node runs again.
   - An executor that ends without a result (a crash, a lost login) doesn't use up an attempt, but three in a row block the job.
+  - A gate that crashes (G0 to G7, the check of a parent's own fix and the final check) is a bug or outage in Mullet's checks, not a verdict on the work, and so is a required review with no verdict. The checks run again on the same work, up to three times in a row; then the attempt is set aside as paused (not counted, so the worker's model isn't marked as having failed the step), nothing is committed and the job pauses with the reason. `mullet job resume` runs the checks again on that same work without asking the worker for it anew. Only work the gates refuse to run against (an unsafe work tree or `copy_in` path) still fails the gate.
   - `mullet job run` accepts a job left RUNNING by a dead runner. It tells whether a runner is alive from the job's lock, not a pid, so foreground runners count too, and `stop` checks the pid's start time before signalling.
   - A partial attempt is thrown away. Neither that nor a usage-limit pause counts as an attempt.
   - If your base branch moves during a job, the job carries on from the pinned base. Reconciling the two is left to you at merge time, which keeps the job's evidence about exactly the commits it checked.
@@ -192,7 +182,7 @@ Mullet's local GPU work shares one laptop with LM Studio and test suites. On a s
 
 | Phase | Work | Claude Code time |
 |---|---|---|
-| P0 Stop the worst | Disable `overnight_loop` (ungated, pushes master). Make swarm's `applied` honest (`mcp_handlers.py:1412-1414`). Delete `CheckpointManager` (destructive restore, unused). Nothing else, because `MULLET_DELEGATION=off` already blocks the four delegation tools (`mcp_handlers.py:103-114`). | 1h |
+| P0 Stop the worst | Disable `overnight_loop` (ungated, pushes master). Make swarm's `applied` honest. Delete `CheckpointManager` (destructive restore, unused). Nothing else, because `MULLET_DELEGATION=off` already blocks the four delegation tools. | 1h |
 | P1 Runner foundation | Check the `claude -p` flags; clone manager; sandbox wrapper with self-test; dependency handling; ledger; profile and detection; gate runner with junit parsing; gates G0 to G6; fake-executor test harness | 9–13h |
 | P2 Runner execution | Claude Code executor; detached runner with resume and process-group handling; rebase on base moves; report; CLI; `/mullet-job` skill. **Milestone:** a 3-node job on a sample Python repo runs unattended, a planted failure is reset and retried, and a `kill -9` followed by a resume continues correctly. | 7–11h |
 | P3 Planner and review | Task-tree planner with schema validation and approval flow; parent and integration gates; G7 reviewer | 4–6h |
@@ -203,14 +193,7 @@ Mullet's local GPU work shares one laptop with LM Studio and test suites. On a s
 
 ### P5.5 External executors with full context (about 8 to 10h estimated)
 
-Today `mullet_opencode` mostly never reaches opencode:
-- Low and standard tasks go to Mullet's own small agent loop on a local 8K-context model.
-- When opencode does run, it gets the bare task text: no files, no repo map, a cheap model, and one shot.
-- The retry route names a model that doesn't exist.
-- opencode falls back to the user's `~/.claude/CLAUDE.md` and Claude skills.
-- Language-server diagnostics are off.
-
-This phase replaces all of that with an opencode executor in the job runner, at least as well informed as an interactive session. Built: everything below except `mullet job bench` and the `mullet_opencode` rewiring, which are still to do.
+The job runner has an opencode executor that is at least as well informed as an interactive session: it gets the repo's files, a repo map and the gate feedback, runs on a model you name, and never loads the user's own Claude files or skills. Built: everything below except `mullet job bench`, which is still to do.
 
 - **Choosing it:** `mullet job plan "<goal>" --executor opencode --executor-model <provider/model>`. The planner and the G7 reviewer stay on Claude. `--preload` also pre-loads files into a Claude worker's prompt.
 - **Privacy:** the profile's `allowed_executors` is `[claude-code]` by default. Only the user's stored profile can add `opencode`; the in-repo file can only narrow the list. `plan`, preflight and the runner all refuse an executor the profile doesn't list, and the message names the stored profile to edit. `data_class` appears in that message but doesn't gate on its own.
@@ -237,7 +220,7 @@ This phase replaces all of that with an opencode executor in the job runner, at 
   - No sandbox, no run.
 - **Checked against opencode 1.18.30** with a local fake OpenAI-compatible server, no real model: the brief and AGENTS.md reach the system prompt, `--file` attachments arrive as Read results, denied and chained commands are refused, the shell has no network or key, a 401 comes back as an `error` event, `--session` continues the conversation, and a whole job passes through the runner. The key proxy is checked the same way: the real binary, with no network, ran a job for `openrouter/moonshotai/kimi-k2.7-code` and for `moonshotai/kimi-k2.7-code` through socat and the proxy to a fake upstream. The provider SDKs are built into the binary, so nothing was downloaded. The upstream saw only the real key (the dummy never left the sandbox), chunked SSE replies streamed through, and cost was reported. A dead upstream came back as a 502, opencode retried, then gave an `error` event and the attempt was aborted. Not checked yet: a real provider (TLS to openrouter.ai and api.moonshot.ai), that opencode passes the shell exactly the command it was given (the wrapper's own refusal relies on it), and the other security fixes (cleared nested environment, rebuilt home, symlink checks, LSP off) with the real binary; those are tested with the fake CLI only.
 - **Proof (to do):** `mullet job bench` runs one plan file once per executor and compares, from the ledgers, first-attempt pass rate, attempts, time and cost.
-- **One-off delegations (to do):** `mullet_opencode` (the MCP tool) becomes a single-node gated job. The result is applied to the caller's working tree only after its gates pass. Mullet's small local agent loop stops being the default route.
+- **One-off delegations:** `mullet_opencode` (the MCP tool) runs the task as a single-node gated job on the ladder. The result is applied to the caller's working tree only after its gates pass.
 
 ### P5.6 The delegation ladder (`ladder.py`)
 
@@ -259,8 +242,8 @@ Goal (the owner's "balanced performance"): Claude when the work needs it and the
   - `free` needs the public check: the stored profile's `data_class: public`, no `copy_in`, no `.gitmodules` or gitlinks at the base commit, `origin` on GitHub (owner and repo never `.` or `..`), GitHub's API saying `private: false`, public visibility and `fork: false`, and its compare API putting the base commit on the default branch. The result is cached per repo and base for an hour in the state dir and asked again only when older; a GitHub outage (not a 404) is never cached and skips the free rung for that attempt only.
   - `local` needs a model LM Studio lists (`GET /api/v0/models`, which reports each model's state and never runs a completion), no other process holding the GPU lease, and machine-guard headroom (VRAM a loaded model holds counts as free). The attempt takes the GPU lease without waiting.
   - the paid rungs stop at the job's spending cap; a rung whose executor isn't in `allowed_executors`, or whose provider has no key, is skipped; `start` removes rungs cheaper than a kind may use.
-- **Walking the ladder** (`next_rung`, `executor_for`): one attempt per rung; Claude gets what is left of the job's attempts (at least one), or one when its week is tight. A model that failed a step's gates is never tried again on another provider (OpenRouter's Kimi after Moonshot's); only a provider error lets the same model run elsewhere. After `max_below_claude` counted attempts below Claude, Claude takes its turn before any other rung ahead of it. The position comes from the ledger, so a resumed job carries on where it was, and the rungs are chosen afresh each attempt. Free and local attempts get `cheap_minutes` of wall clock. A provider error (an opencode `error` event, a proxy cap or refused request, an executor that can't start, a busy GPU, the spend limit) or a broken run on any rung but Claude is an aborted attempt with `moved_up`: no attempt used, no crash counted. A session is resumed only on the rung that started it. Risky steps always get G7, even with review off, and there it must pass.
-- **Spending:** each attempt's cost is what the provider reported, or its tokens times the price when it reported none or $0 (a paid model reporting $0 for real tokens has no catalogue price, and the cap would otherwise never fire). opencode passes its usage on after every `step_finish`, and the runner writes it to the ledger as it comes (`record_progress`), so a killed attempt keeps its cost; an attempt whose running cost passes what is left of the job's cap is stopped and moves up. Over the cap while Claude's level is high, the job pauses with a notification ("spend cap reached and Claude's weekly window is tight") rather than handing every remaining step to Claude; `mullet job resume <job> --max-spend <dollars>` raises the cap. Costs seen on real jobs: a small edit $0.05 to $0.28 on Kimi, a 2-step chunk with reviews $2.44.
+- **Walking the ladder** (`next_rung`, `executor_for`): one attempt per rung; Claude gets what is left of the job's attempts (at least one), or one when its week is tight. A model that failed a step's gates is never tried again on another provider (OpenRouter's Kimi after Moonshot's); only a provider error lets the same model run elsewhere. A step gets at most `max_below_claude` counted attempts (passed, unverified or failed) on the rungs below Claude, before or after Claude's own; then only Claude may take it, and without Claude it has run out of rungs. Night mode adds `extra_below_claude`. Every rung whose requests go to OpenRouter, whatever its name, gets `data_collection: deny` and the default quantisations fp8, fp16, bf16 and fp32 (no fp4, int4, int8 or `unknown`; `ladder.routing.<model>.quantizations` replaces the list, so a user can add `unknown`); the free rung on its `:free` model carries no filter, since it only sees code the public check found public. The position comes from the ledger, so a resumed job carries on where it was, and the rungs are chosen afresh each attempt. Free and local attempts get `cheap_minutes` of wall clock. A provider error (an opencode `error` event, a proxy cap or refused request, an executor that can't start, a busy GPU, the spend limit) or a broken run on any rung but Claude is an aborted attempt with `moved_up`: no attempt used, no crash counted. A session is resumed only on the rung that started it. Risky steps always get G7, even with review off, and there it must pass: a block fails the attempt and a review with no verdict pauses the job.
+- **Spending:** each attempt's cost is what the provider's own responses say (the key proxy reads the usage in each one; OpenRouter states the cost), or its tokens times the `ladder.prices` price when the provider states none or $0 (a paid model reporting $0 for real tokens has no catalogue price, and the cap would otherwise never fire). The recorded cost never falls below what the responses say. The proxy refuses an attempt's requests with HTTP 402 once its allowance is spent. The allowance is the least of what is left of the job's cap (lowered by `budget.envelope`) and of the rung's `budget.per_rung` limit; see [CONFIGURATION.md](CONFIGURATION.md). At job end `mullet job report` sets the ledger's spend beside each paid provider's own figure. opencode passes its usage on after every `step_finish`, and the runner writes it to the ledger as it comes (`record_progress`), so a killed attempt keeps its cost; an attempt whose running cost passes what is left of the job's cap is stopped and moves up. Over the cap while Claude's level is high, the job pauses with a notification ("spend cap reached and Claude's weekly window is tight") rather than handing every remaining step to Claude; `mullet job resume <job> --max-spend <dollars>` raises the cap. A non-ladder opencode job is held to the same rules: its model counts as a rung (`model_rung`: `:free` is free, LM Studio and ollama are local, OpenRouter is openrouter, any other provider kimi), a paid one gets the allowance and pauses at the cap, and a `:free` one blocks the job unless the public check passes. Costs seen on real jobs: a small edit $0.05 to $0.28 on Kimi, a 2-step chunk with reviews $2.44.
 - **Blocked steps:** a step with no rung left blocks ("ran out of rungs") and the owner is notified. `mullet job retry <job> <node> [--rung claude|kimi|openrouter:<model>]` gives it fresh attempts, on the ladder again or on the named rung (the job's `max_attempts` there), always starting fresh; the profile, keys and cap still apply. `mullet job resume` carries on with it and the remaining steps.
 - **Security around it:** the clone holds only the base commit's history (see Isolation). The key proxy, pinned to the attempt's model, takes only identity-encoded JSON bodies without duplicate keys that name that model and no other field naming a model (no OpenRouter `models` list), on an allowlist of paths (`chat/completions`, `completions`, `messages`, `responses`, `models`; no batch or file endpoints), and its socket is created under a 0077 umask. The check commands a worker may run exactly as written (with `;`) come only from the user's stored profile or Mullet's detection, recorded at plan time as `trusted_commands`; a repo's `.mullet/project.yaml` can't add one. Slack notifications carry fixed wording only (job id, status, what to run next), never the goal, gate output, block reasons or error text; desktop ones may show the goal's first line.
 - **Ledger and report:** each attempt's usage records `rung`, `rung_key`, `model`, `provider_error` and `moved_up`; planner and reviewer sessions are `claude_usage` events (turns, tokens, the CLI's estimate). Old ledgers read as before (no schema change). The report shows each attempt's rung, model, cost and tokens, all of Claude's work, and a line like "4 of 6 steps passed below Claude; spent $0.31: Kimi $0.27, OpenRouter $0.04; Claude used on 2 steps", counting leaf steps only.
@@ -270,11 +253,11 @@ Goal (the owner's "balanced performance"): Claude when the work needs it and the
 
 The private repo stays the only place code is written. The public repo is generated from it by `sync-to-public.sh` and never edited by hand. The script makes a committed-files-only export, overlays `.public/` files and patches, removes private paths, applies text replacements, and runs the banned-terms and gitleaks checks. A public issue or PR is fixed here and then synced.
 
-1. Leave only public-only patches in `.public/patches`: licence wording, and the public CI refreshed for the macOS and parallel test matrix. Everything else is folded into this repo.
+1. `.public/` holds only what the public copy alone gets: `README.md`, `LICENSE` and `patches/` (the public CI for the macOS and parallel test matrix). Everything else is in this repo.
 2. Review the `EXCLUDE` and `REPLACE` lists for the new files, and decide whether this design doc goes public as-is or as a public version. `./sync-to-public.sh --check` must pass. It is the release's acceptance test.
 3. Rewrite `.public/README.md` around jobs:
    - install with `uv tool install` from the public repo;
-   - requirements: Linux or macOS, Claude Code, bubblewrap and socat;
+   - requirements: Linux for jobs, Claude Code, bubblewrap and socat;
    - `mullet doctor`, then `mullet setup-claude`.
 
    Bump the version to 2.0.0, renumbering the parked "v2.0.0 Web UI" roadmap entry, and add a changelog entry.
@@ -287,8 +270,8 @@ Branches: `mullet-2` is pushed to the private origin after each phase as a backu
 
 | Phase | Work | Claude Code time |
 |---|---|---|
-| Trawl extra | Move the resource manager into core (`core/router/resource_guard.py:10`); make the knowledge-backed delegation paths optional (`mcp_handlers.py:892,1235,1262`); `mullet mcp --trawl`; heavy dependencies into `[trawl]`; drop the `../trove` fallback (`core/knowledge/manager.py:37-38`); CI with and without the extra | 3–5h |
-| Cheap executors | opencode executor inside Mullet's sandbox, with a per-job config instead of `--auto`; `base_url` and `api_key_env` survive the config loader (`config/loader.py:151-162`); stop labelling localhost as "local" (`openai_compat.py:625-626`); escalation ladder by data class, kind and attempt; OpenRouter `data_collection: deny`; freellmapi as a provider entry | 6–10h |
+| Trawl extra | Move the resource manager into core (`core/router/resource_guard.py`); make the knowledge-backed delegation paths optional (in `mcp_handlers.py`); `mullet mcp --trawl`; heavy dependencies into `[trawl]`; drop the `../trove` fallback (in `core/knowledge/manager.py`); CI with and without the extra | 3–5h |
+| Cheap executors | opencode executor inside Mullet's sandbox, with a per-job config instead of `--auto`; `base_url` and `api_key_env` survive the config loader (in `config/loader.py`); stop labelling localhost as "local" (in `openai_compat.py`); escalation ladder by data class, kind and attempt; OpenRouter `data_collection: deny`; freellmapi as a provider entry | 6–10h |
 | Runtime splits | A worker returns a structured split request; splits inside the approved scope run without asking, and splits that widen it pause | 2–4h |
 | MCP job tools | `mullet_job_plan`, `mullet_job_status`, `mullet_job_approve` and `mullet_job_report`, none of which block | 2–3h |
 | Parallel subtrees | Nodes with disjoint scopes run in separate clones and merge into the job branch | 4–6h |
@@ -311,7 +294,7 @@ The whole vision is about **60 to 95 hours of Claude Code time**.
 - **Usage limits.**
   - Long unattended jobs can hit the 5-hour and weekly limits, which Anthropic says "assume ordinary, individual usage".
   - The runner pauses and resumes, runs one worker at a time, and per-job budgets cap use.
-- **Distribution terms are unresolved.** Whether distributing a tool that drives users' own `claude` counts as "offering claude.ai login" is not covered by the docs. Mullet never touches credentials and documents an API-key mode.
+- **Anthropic's terms for a tool that drives a user's own `claude`.** Whether that counts as "offering claude.ai login" is not covered by Anthropic's docs. Mullet never touches credentials and documents an API-key mode. Mullet's own licence is the Business Source License 1.1 (see `LICENSE`): production use is free for any purpose except offering Mullet to others as a hosted service.
 - **`--bare` may become the default for `-p`.** Bare mode ignores subscription login, so the executor passes its flags explicitly and doctor reports the auth mode.
 - **Weak tests mean weak gates.** The report says which gates actually ran, and an "unverified" node is never presented as passed.
 

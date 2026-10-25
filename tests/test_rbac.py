@@ -9,7 +9,7 @@ def db():
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE projects (id TEXT, name TEXT, pool_name TEXT, description TEXT)")
     conn.execute("CREATE TABLE user_projects (user_id TEXT, project_id TEXT, access_level TEXT)")
-    conn.execute("INSERT INTO projects VALUES ('p1', 'mullet-dev', 'mullet-dev', 'Test project')")
+    conn.execute("INSERT INTO projects VALUES ('p1', 'my-project', 'my-project', 'Test project')")
     conn.execute("INSERT INTO user_projects VALUES ('u1', 'p1', 'write')")
     conn.execute("INSERT INTO user_projects VALUES ('u2', 'p1', 'read')")
     conn.commit()
@@ -21,19 +21,19 @@ def test_admin_bypasses():
 
 
 def test_no_db_denies():
-    assert check_project_access({"id": "u1"}, "mullet-dev") is False
+    assert check_project_access({"id": "u1"}, "my-project") is False
 
 
 def test_write_access(db):
-    assert check_project_access({"id": "u1"}, "mullet-dev", "write", db) is True
+    assert check_project_access({"id": "u1"}, "my-project", "write", db) is True
 
 
 def test_read_access(db):
-    assert check_project_access({"id": "u2"}, "mullet-dev", "read", db) is True
+    assert check_project_access({"id": "u2"}, "my-project", "read", db) is True
 
 
 def test_insufficient_access(db):
-    assert check_project_access({"id": "u2"}, "mullet-dev", "write", db) is False
+    assert check_project_access({"id": "u2"}, "my-project", "write", db) is False
 
 
 def test_unknown_project(db):
@@ -43,7 +43,7 @@ def test_unknown_project(db):
 def test_get_user_projects(db):
     projects = get_user_projects("u1", db)
     assert len(projects) == 1
-    assert projects[0]["name"] == "mullet-dev"
+    assert projects[0]["name"] == "my-project"
     assert projects[0]["access"] == "write"
 
 

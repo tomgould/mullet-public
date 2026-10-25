@@ -4,11 +4,13 @@ Real git repositories, a real ledger and injectable ladder config; no models
 or network.
 """
 
+import subprocess
 import time
 from pathlib import Path
 
 import pytest
 
+from mullet.jobs import children
 from mullet.jobs import delegate as delegate_mod
 from mullet.jobs import machine, sandbox
 from mullet.jobs.delegate import create_delegation_job, delegate, restrict_ladder
@@ -304,6 +306,32 @@ def test_a_timeout_stops_the_job_and_leaves_the_caller_tree_alone(env):
     assert snapshot(source) == before
     job = env["ledger"].get_job(result["job_id"])
     assert job.status in (JobStatus.PAUSED, JobStatus.BLOCKED)
+
+
+@needs_sandbox
+def test_a_timeout_stops_only_its_own_delegations_processes(env):
+    save_checked_profile(env["source"])
+    other = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    mine: list[subprocess.Popen] = []
+
+    def slow(work, task):
+        proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        mine.append(proc)
+        with children.track(proc):
+            proc.wait()
+        good_change(work)
+
+    fakes = {"kimi": FakeExecutor([slow]), "openrouter": FakeExecutor([good]), "claude": FakeExecutor([good])}
+    try:
+        with children.track(other):  # tracked by this thread's owner, as another job would be
+            result = run_delegate(env, fakes, timeout_s=3, stop_grace_s=60)
+            assert result["status"] == "timeout", result
+            assert mine and mine[0].poll() is not None, "the delegation's own child is stopped"
+            assert other.poll() is None, "another owner's child is left running"
+    finally:
+        for proc in (other, *mine):
+            proc.kill()
+            proc.wait()
 
 
 @needs_sandbox

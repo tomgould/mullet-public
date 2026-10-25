@@ -210,6 +210,12 @@ except ImportError:
 
 
 @pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Every hostname resolves to one public address, so URL checks need no network."""
+    monkeypatch.setattr("mullet.core.tools.url_safety._resolve", lambda host: {"93.184.216.34"})
+
+
+@pytest.fixture(autouse=True)
 def _reset_rate_limiter():
     """Reset the global rate limiter before every test to prevent 429 bleed."""
     if _HAS_SERVER:

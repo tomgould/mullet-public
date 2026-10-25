@@ -1,0 +1,49 @@
+# Versions the test suite passed with in CI (run 40187842852: 17472 passed on
+# Linux Python 3.12, and the 3.10, 3.11 and macOS cells passed too).
+# Unpinned installs drifted from the author's machine before (psutil 7.2.2 in
+# CI against 5.9.0 locally), so the direct dependencies are held here and
+# bumped on purpose. Transitive packages still float.
+#
+# psutil is 7.2.2, the version CI last passed with on every OS and Python.
+# The code uses only long-standing calls (cpu_count, virtual_memory,
+# process_iter, Process, getloadavg and the NoSuchProcess, AccessDenied and
+# TimeoutExpired errors), which 5.9.0 (the floor in pyproject.toml and the
+# author's own install) also has. 5.9.0 is not pinned because it is old
+# enough that CI may have to build it from source on newer Pythons.
+#
+# torch is left out on purpose: the workflow installs the CPU build from the
+# PyTorch index first, and a pin here would fight its local version tag.
+#
+# Use: pip install -c ci/constraints.txt -e ".[dev]"
+aiohttp==3.14.5
+anthropic==2.3.0
+chromadb==1.5.9
+click==8.5.0
+colorama==0.4.6
+markdownify==1.2.3
+mcp==2.3.0
+networkx==3.4.2 ; python_version < "3.11"
+networkx==3.6.1 ; python_version >= "3.11"
+nltk==3.10.4
+openai==3.37.0
+prompt-toolkit==3.0.53
+psutil==7.2.2
+pydantic==2.14.1
+pypdf==6.21.2
+pyperclip==1.11.0
+pytest==9.1.1
+pytest-aiohttp==1.1.1
+pytest-asyncio==1.4.0
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+python-dotenv==1.2.4
+pyyaml==6.0.3
+rank-bm25==0.2.2
+rich==15.0.0
+sentence-transformers==6.2.0
+textual==8.2.8
+tree-sitter==0.21.3
+tree-sitter-languages==1.10.2
+unstructured==0.18.32 ; python_version < "3.11"
+unstructured==0.27.34 ; python_version >= "3.11"
+wcwidth==0.9.4

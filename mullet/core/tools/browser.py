@@ -38,34 +38,8 @@ _HEADERS = {
 
 def _is_safe_url(url: str) -> bool:
     """Block SSRF: reject private/internal IP ranges."""
-    import socket
-    parsed = urllib.parse.urlparse(url)
-    hostname = parsed.hostname or ""
-
-    # Block obvious internal addresses
-    blocked = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
-    if hostname in blocked:
-        return False
-
-    # Resolve and check IP ranges
-    try:
-        ip = socket.gethostbyname(hostname)
-        parts = ip.split(".")
-        if len(parts) == 4:
-            first = int(parts[0])
-            second = int(parts[1])
-            if first == 10:
-                return False
-            if first == 172 and 16 <= second <= 31:
-                return False
-            if first == 192 and second == 168:
-                return False
-            if first == 169 and second == 254:
-                return False
-    except Exception as _exc:
-        logger.warning("browser: IP resolution failed for %s: %s", hostname, _exc)
-
-    return True
+    from mullet.core.tools.url_safety import is_safe_url
+    return is_safe_url(url)
 
 
 def browse(url: str, action: str = "read", selector: str = "", max_chars: int = 10000, **_kwargs) -> str:
@@ -74,7 +48,8 @@ def browse(url: str, action: str = "read", selector: str = "", max_chars: int = 
         return "[error] URL blocked: internal/private addresses not allowed"
     try:
         req = urllib.request.Request(url, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        from mullet.core.tools.url_safety import safe_urlopen
+        with safe_urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
         return f"[error] Failed to fetch {url}: {e}"

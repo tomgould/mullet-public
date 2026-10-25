@@ -34,8 +34,6 @@ GATE_RULE_GATES = ("G3", "G5", "G6", "G7")
 GATE_MIN_ATTEMPTS = 5  # cheap-rung attempts where the gate ran
 GATE_FAIL_SHARE = 0.5  # more than this share failing it
 
-_PASSED = (AttemptOutcome.PASSED, AttemptOutcome.UNVERIFIED)
-
 
 @dataclass
 class RungStats:
@@ -44,6 +42,7 @@ class RungStats:
     attempts: int = 0
     steps_first_tried: int = 0
     steps_passed: int = 0
+    steps_unverified: int = 0
     first_attempt_passes: int = 0
     resumed_passes: int = 0
     escalations_up: int = 0
@@ -61,6 +60,7 @@ class KindStats:
     attempts: int = 0
     steps_first_tried: int = 0
     steps_passed: int = 0
+    steps_unverified: int = 0
     first_attempt_passes: int = 0
     resumed_passes: int = 0
     escalations_up: int = 0
@@ -77,6 +77,7 @@ class ModelStats:
 
     attempts: int = 0
     passes: int = 0
+    unverified: int = 0
     dollars: float = 0.0
 
 
@@ -108,6 +109,7 @@ class LadderReport:
     jobs: int = 0
     steps: int = 0
     steps_passed_below_claude: int = 0
+    steps_unverified_below_claude: int = 0
     dollars_by_provider: dict[str, float] = field(default_factory=dict)
     claude_worker_attempts: int = 0
     claude_planner_sessions: int = 0
@@ -320,7 +322,7 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
                 tally = by_rung_model.setdefault((rung, model), _Tally())
                 tally.attempts += 1
                 tally.dollars += dollars
-                if attempt.outcome in _PASSED:
+                if attempt.outcome is AttemptOutcome.PASSED:
                     tally.passes += 1
 
                 if rung in CHEAP_RUNGS:
@@ -339,8 +341,10 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
                     model_stats = report.per_model.setdefault(model, ModelStats())
                     model_stats.attempts += 1
                     model_stats.dollars += dollars
-                    if attempt.outcome in (AttemptOutcome.PASSED, AttemptOutcome.UNVERIFIED):
+                    if attempt.outcome is AttemptOutcome.PASSED:
                         model_stats.passes += 1
+                    elif attempt.outcome is AttemptOutcome.UNVERIFIED:
+                        model_stats.unverified += 1
 
                 if usage.get("rung") in ladder.PAID_RUNGS:
                     provider = _provider_of(model)
@@ -369,18 +373,25 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
             if winner:
                 winner_rung = _rung_of(winner)
                 winner_usage = winner.usage or {}
-                report.per_rung.setdefault(winner_rung, RungStats()).steps_passed += 1
-                report.per_kind.setdefault(kind, KindStats()).steps_passed += 1
+                verified = winner.outcome is AttemptOutcome.PASSED
+                if verified:
+                    report.per_rung.setdefault(winner_rung, RungStats()).steps_passed += 1
+                    report.per_kind.setdefault(kind, KindStats()).steps_passed += 1
+                else:
+                    report.per_rung.setdefault(winner_rung, RungStats()).steps_unverified += 1
+                    report.per_kind.setdefault(kind, KindStats()).steps_unverified += 1
 
-                if winner == first_attempt:
+                if verified and winner == first_attempt:
                     report.per_rung.setdefault(winner_rung, RungStats()).first_attempt_passes += 1
                     report.per_kind.setdefault(kind, KindStats()).first_attempt_passes += 1
 
-                if winner_usage.get("resumed"):
+                if verified and winner_usage.get("resumed"):
                     report.per_rung.setdefault(winner_rung, RungStats()).resumed_passes += 1
                     report.per_kind.setdefault(kind, KindStats()).resumed_passes += 1
 
-                if winner_rung != "claude":
+                if winner_rung != "claude" and not verified:
+                    report.steps_unverified_below_claude += 1
+                elif winner_rung != "claude":
                     report.steps_passed_below_claude += 1
                     won_in, won_out = _tokens(winner_usage)
                     report.claude_avoided.tokens_in += won_in
@@ -416,7 +427,7 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
 RUNG_ORDER = ("free", "local", "kimi", "openrouter", "claude")
 KIND_ORDER = ("mechanical", "design", "analysis", "integration")
 
-_STEP_HEADERS = ("attempts", "first tried", "passed", "first-try passes", "resumed passes",
+_STEP_HEADERS = ("attempts", "first tried", "passed", "unverified", "first-try passes", "resumed passes",
                  "escalated up", "provider errors", "dollars", "tokens in", "tokens out", "wall time")
 
 
@@ -460,7 +471,7 @@ def _table(title: str, headers: tuple[str, ...], rows: list[tuple[str, ...]]) ->
 
 
 def _step_row(name: str, s: RungStats | KindStats) -> tuple[str, ...]:
-    return (name, _count(s.attempts), _count(s.steps_first_tried), _count(s.steps_passed),
+    return (name, _count(s.attempts), _count(s.steps_first_tried), _count(s.steps_passed), _count(s.steps_unverified),
             _count(s.first_attempt_passes), _count(s.resumed_passes), _count(s.escalations_up),
             _count(s.provider_errors), _money(s.dollars), _count(s.tokens_in), _count(s.tokens_out),
             _duration(s.wall_seconds))
@@ -476,7 +487,9 @@ def render_text(report: LadderReport) -> str:
     jobs = "job" if report.jobs == 1 else "jobs"
     steps = "step" if report.steps == 1 else "steps"
     lines = [f"Ladder report {period}: {report.jobs} {jobs}, {report.steps} {steps}, "
-             f"{report.steps_passed_below_claude} passed below Claude", ""]
+             f"{report.steps_passed_below_claude} passed below Claude"
+             + (f", {report.steps_unverified_below_claude} unverified"
+                if report.steps_unverified_below_claude else ""), ""]
 
     lines += _table("Per rung", ("rung", *_STEP_HEADERS),
                     [_step_row(name, report.per_rung[name])
@@ -486,9 +499,9 @@ def render_text(report: LadderReport) -> str:
                     [_step_row(name, report.per_kind[name])
                      for name in _ordered(report.per_kind, KIND_ORDER)])
     lines.append("")
-    lines += _table("Per model", ("model", "attempts", "passes", "dollars"),
-                    [(name, _count(m.attempts), _count(m.passes), _money(m.dollars))
-                     for name, m in sorted(report.per_model.items())] or [("(none)", "0", "0", _money(0.0))])
+    lines += _table("Per model", ("model", "attempts", "passes", "unverified", "dollars"),
+                    [(name, _count(m.attempts), _count(m.passes), _count(m.unverified), _money(m.dollars))
+                     for name, m in sorted(report.per_model.items())] or [("(none)", "0", "0", "0", _money(0.0))])
     lines.append("")
 
     providers = [(name, _money(d)) for name, d in sorted(report.dollars_by_provider.items())]
@@ -507,6 +520,8 @@ def render_text(report: LadderReport) -> str:
         "Claude work avoided (an estimate at Claude API prices; on a subscription it isn't "
         "billed, it is allowance not used)",
         f"  steps passed below Claude: {_count(report.steps_passed_below_claude)}",
+        f"  steps unverified below Claude: {_count(report.steps_unverified_below_claude)} "
+        "(not counted above or in the tokens below)",
         f"  tokens those attempts used: {_count(avoided.tokens_in)} in, {_count(avoided.tokens_out)} out",
         f"  estimated Claude cost: {_money(avoided.estimated_dollars)} "
         f"({avoided.model} at ${avoided.input_per_1k:g} in and ${avoided.output_per_1k:g} out "
@@ -523,7 +538,7 @@ def render_text(report: LadderReport) -> str:
 
 def _step_dict(s: RungStats | KindStats) -> dict[str, Any]:
     return {"attempts": s.attempts, "steps_first_tried": s.steps_first_tried,
-            "steps_passed": s.steps_passed, "first_attempt_passes": s.first_attempt_passes,
+            "steps_passed": s.steps_passed, "steps_unverified": s.steps_unverified, "first_attempt_passes": s.first_attempt_passes,
             "resumed_passes": s.resumed_passes, "escalations_up": s.escalations_up,
             "provider_errors": s.provider_errors, "dollars": s.dollars, "tokens_in": s.tokens_in,
             "tokens_out": s.tokens_out, "wall_seconds": s.wall_seconds}
@@ -539,6 +554,7 @@ def render_json(report: LadderReport) -> dict[str, Any]:
             "jobs": report.jobs,
             "steps": report.steps,
             "steps_passed_below_claude": report.steps_passed_below_claude,
+            "steps_unverified_below_claude": report.steps_unverified_below_claude,
             "dollars_by_provider": dict(sorted(report.dollars_by_provider.items())),
             "claude_worker_attempts": report.claude_worker_attempts,
             "claude_planner_sessions": report.claude_planner_sessions,
@@ -546,7 +562,7 @@ def render_json(report: LadderReport) -> dict[str, Any]:
         },
         "rungs": {name: _step_dict(report.per_rung[name]) for name in _ordered(report.per_rung, RUNG_ORDER)},
         "kinds": {name: _step_dict(report.per_kind[name]) for name in _ordered(report.per_kind, KIND_ORDER)},
-        "models": {name: {"attempts": m.attempts, "passes": m.passes, "dollars": m.dollars}
+        "models": {name: {"attempts": m.attempts, "passes": m.passes, "unverified": m.unverified, "dollars": m.dollars}
                    for name, m in sorted(report.per_model.items())},
         "claude_avoided": {
             "estimate": True,

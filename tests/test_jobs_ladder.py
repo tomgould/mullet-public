@@ -745,8 +745,9 @@ def test_paid_openrouter_requests_never_go_to_hosts_that_keep_prompts():
         "openrouter/bad": ["z-ai"],
     }})
     glm = config.request_fields(Rung("openrouter", "openrouter/z-ai/glm-5.3"))
-    assert glm == {"provider": {"data_collection": "deny", "quantizations": ["fp8", "fp16", "bf16", "fp32", "unknown"],
-                                "only": ["z-ai"], "allow_fallbacks": False}}
+    assert glm == {"provider": {"data_collection": "deny", "quantizations": ["fp8", "fp16", "bf16", "fp32"],
+                                "only": ["z-ai"], "allow_fallbacks": False},
+                   "usage": {"include": True}}  # OpenRouter then states each request's real cost
     # Settings Mullet doesn't pass on are dropped with a note, never guessed.
     assert config.request_fields(Rung("openrouter", "openrouter/x/y")) == \
         LadderConfig().request_fields(Rung("openrouter", "openrouter/x/y"))

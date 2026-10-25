@@ -13,11 +13,16 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from mullet.core import paths
 
 Row = tuple[str, str, str]
+Snapshot = Mapping[str, Mapping[str, Any]]
+
+DEFAULT_WARN_BELOW_USD = 5.0
 
 MIN_PYTHON = (3, 10)
 _VERSION_TIMEOUT = 10
@@ -224,4 +229,115 @@ def claude_setup_checks() -> list[Row]:
     command = status_line.get("command", "") if isinstance(status_line, dict) else ""
     if "mullet" in command and not (Path(command).is_file() or shutil.which(command)):
         rows.append(("Claude statusLine", f"Not found: {command}", "warn"))
+    return rows
+
+
+# --- Spending limits and provider credit ----------------------------------------------
+def warn_below_usd(path: Path | None = None) -> float:
+    """The `budget.warn_below_usd` setting from the Mullet config file: the credit, in dollars,
+    under which a paid provider is flagged. 5.0 when unset or not a number of 0 or more."""
+    import yaml
+
+    from mullet.jobs.ladder import config_path
+
+    try:
+        data = yaml.safe_load((path or config_path()).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return DEFAULT_WARN_BELOW_USD
+    budget = data.get("budget") if isinstance(data, dict) else None
+    value = budget.get("warn_below_usd") if isinstance(budget, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return DEFAULT_WARN_BELOW_USD
+    return float(value)
+
+
+def low_credit(snapshot: Snapshot | None, threshold: float) -> list[tuple[str, float]]:
+    """Providers whose remaining credit is under `threshold` dollars, as (provider, remaining).
+
+    A provider that reports only usage, or nothing, can't be judged and is left out.
+    """
+    low = []
+    for name, figures in sorted((snapshot or {}).items()):
+        remaining = figures.get("remaining_usd") if isinstance(figures, Mapping) else None
+        if isinstance(remaining, (int, float)) and not isinstance(remaining, bool) and remaining < threshold:
+            low.append((name, float(remaining)))
+    return low
+
+
+def low_credit_text(name: str, remaining: float, threshold: float) -> str:
+    """One line saying a provider is under the warning threshold, and how to change it."""
+    return (f"{name} has ${remaining:.2f} left, under ${threshold:g} (budget.warn_below_usd): "
+            "top it up, or unattended jobs on that rung will stop")
+
+
+def spending_limit_check(load: Callable[[], Any] | None = None) -> Row | None:
+    """A warning when no spending envelope or per-rung limit is set."""
+    from mullet.jobs.budget import load_budget
+
+    if (load or load_budget)().active:
+        return None
+    return ("Spending limits", "No spending envelope is set: unattended jobs are limited only per job. "
+            "Add budget.envelope.daily/weekly to your config (see `mullet config show budget`).", "warn")
+
+
+def toolset_checks(policy: Any = None) -> list[Row]:
+    """A warning naming each non-Claude provider the toolset policy lets run commands or touch files."""
+    from mullet.core.toolset_policy import KNOWN_TOOLSETS, load_policy, risky_grants
+
+    grants = risky_grants(policy or load_policy(), KNOWN_TOOLSETS)
+    if not grants:
+        return []
+    who = "; ".join(f"{name} ({', '.join(tools)})" for name, tools in grants)
+    return [("Delegation toolsets",
+             f"These providers may act on this machine: {who}. A model that reads a hostile page or file "
+             "could misuse them. Limit them with delegation.toolsets (see `mullet config show delegation`).",
+             "warn")]
+
+
+def credit_checks(probe: Callable[[], Snapshot] | None = None, threshold: float | None = None,
+                  providers: list[str] | None = None) -> list[Row]:
+    """Each paid provider's credit, with a warning under the threshold.
+
+    `providers` defaults to the paid rungs of the ladder config that have a key;
+    with none, nothing is probed. `probe` (default: the providers' own balance
+    APIs, so it uses the network) is for tests.
+    """
+    from mullet.jobs import reconcile
+
+    if providers is None:
+        from mullet.jobs.ladder import PAID_RUNGS, load_config, rung_has_key
+
+        try:
+            providers = sorted({r.name for r in load_config().rungs() if r.name in PAID_RUNGS and rung_has_key(r)})
+        except Exception:
+            providers = []
+    if not providers:
+        return []
+    limit = warn_below_usd() if threshold is None else threshold
+    snapshot = reconcile.take(probe)
+    rows: list[Row] = []
+    for name in providers:
+        figures = snapshot.get(name) or {}
+        remaining, used = figures.get("remaining_usd"), figures.get("used_usd")
+        if remaining is not None:
+            below = low_credit({name: figures}, limit)
+            if below:
+                rows.append((f"{name} credit", low_credit_text(name, remaining, limit), "warn"))
+            else:
+                rows.append((f"{name} credit", f"${remaining:.2f} left", "ok"))
+        elif used is not None:
+            rows.append((f"{name} credit", f"${used:.2f} used (no balance reported)", "info"))
+        else:
+            rows.append((f"{name} credit", "Couldn't read the balance", "info"))
+    return rows
+
+
+def spending_checks(full: bool = False, probe: Callable[[], Snapshot] | None = None) -> list[Row]:
+    """The spending-limit warning, plus provider credit when `full` (that one calls the providers)."""
+    rows: list[Row] = []
+    limits = spending_limit_check()
+    if limits:
+        rows.append(limits)
+    if full:
+        rows.extend(credit_checks(probe))
     return rows

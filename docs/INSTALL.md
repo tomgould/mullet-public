@@ -9,7 +9,7 @@
 ## 1. Prerequisites
 
 - **Linux or macOS.** On Windows, use WSL. Jobs run in a bubblewrap sandbox, so they need Linux for now; the macOS sandbox is planned.
-- **Python 3.10 or newer**, and **git**.
+- **Python 3.10 to 3.12**, and **git**.
 - **uv** ([install](https://docs.astral.sh/uv/)) or **pipx** ([install](https://pipx.pypa.io/)). The installer uses whichever it finds.
 - **Claude Code**, installed and logged in. Mullet's jobs run your own `claude` CLI under your subscription:
   ```bash

@@ -4,10 +4,10 @@ import urllib.request
 import urllib.parse
 from mullet.core.tools.browser import browse, register, _is_safe_url, _html_to_text, _extract_forms, _extract_element, BROWSE_SCHEMA
 
-# Mock urllib.request.urlopen for all tests
+# Mock safe_urlopen for all tests
 @pytest.fixture
 def mock_urlopen():
-    with patch('urllib.request.urlopen') as mock_urlopen:
+    with patch('mullet.core.tools.url_safety.safe_urlopen') as mock_urlopen:
         yield mock_urlopen
 
 @pytest.fixture
@@ -129,12 +129,12 @@ def test_is_safe_url_blocked_localhost(mock_socket_gethostbyname):
     mock_socket_gethostbyname.return_value = "127.0.0.1"
     assert not _is_safe_url("http://localhost")
 
-def test_is_safe_url_blocked_private_ip(mock_socket_gethostbyname):
-    mock_socket_gethostbyname.return_value = "192.168.1.1"
+def test_is_safe_url_blocked_private_ip(monkeypatch):
+    monkeypatch.setattr("mullet.core.tools.url_safety._resolve", lambda host: {"192.168.1.1"})
     assert not _is_safe_url("http://internal.com")
 
-def test_is_safe_url_allowed_public_ip(mock_socket_gethostbyname):
-    mock_socket_gethostbyname.return_value = "8.8.8.8"
+def test_is_safe_url_allowed_public_ip(monkeypatch):
+    monkeypatch.setattr("mullet.core.tools.url_safety._resolve", lambda host: {"8.8.8.8"})
     assert _is_safe_url("http://google.com")
 
 

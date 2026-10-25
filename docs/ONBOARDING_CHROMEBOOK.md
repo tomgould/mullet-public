@@ -7,7 +7,7 @@
 - [1. Before You Start](#1-before-you-start)
 - [2. Enable Linux on Your Chromebook](#2-enable-linux-on-your-chromebook)
 - [3. Open the Linux Terminal](#3-open-the-linux-terminal)
-- [4. Install Python 3.10+](#4-install-python-310)
+- [4. Install Python 3.10 to 3.12](#4-install-python-310-to-312)
 - [5. Install Git](#5-install-git)
 - [6. Install Node.js via nvm](#6-install-nodejs-via-nvm)
 - [7. Install Claude Code](#7-install-claude-code)
@@ -80,9 +80,9 @@ After Linux is enabled, you need to open the **Linux Terminal** app, not the Chr
 
 ---
 
-## 4. Install Python 3.10+
+## 4. Install Python 3.10 to 3.12
 
-Mullet is written in **Python**, a popular programming language. The Linux container usually comes with Python already installed, but let's make sure it's 3.10 or newer.
+Mullet is written in **Python**, a popular programming language. The Linux container usually comes with Python already installed, but let's make sure it is 3.10 to 3.12.
 
 In Terminal, type:
 
@@ -90,9 +90,9 @@ In Terminal, type:
 python3 --version
 ```
 
-**If you see `Python 3.10.x` or higher** (for example, `Python 3.11.2`), you're good, skip to [Section 5](#5-install-git).
+**If you see `Python 3.10.x`, `3.11.x` or `3.12.x`** (for example, `Python 3.11.2`), you're good, skip to [Section 5](#5-install-git).
 
-**If you see `command not found` or a version below 3.10**, run:
+**If you see `command not found` or a version outside 3.10 to 3.12**, run:
 
 ```bash
 sudo apt update && sudo apt install -y python3 python3-pip
@@ -108,7 +108,7 @@ You may be asked for your Linux password (the one you set during Linux setup). T
 python3 --version
 ```
 
-You should now see `Python 3.10.x` or higher.
+You should now see `Python 3.10.x`, `3.11.x` or `3.12.x`.
 
 ---
 
@@ -254,7 +254,7 @@ Prices are on Anthropic's pricing page.
 
 ## 9. Install Mullet
 
-Now for the main event. One command downloads Mullet from GitHub and installs it on your Chromebook. It needs **git** and **Python 3.10+** (you installed both above). The installer uses **uv** or **pipx**, whichever you have, and stops with a message if you have neither. See [INSTALL.md](INSTALL.md) for installing one of them.
+Now for the main event. One command downloads Mullet from GitHub and installs it on your Chromebook. It needs **git** and **Python 3.10 to 3.12** (you installed both above). The installer uses **uv** or **pipx**, whichever you have, and stops with a message if you have neither. See [INSTALL.md](INSTALL.md) for installing one of them.
 
 In Terminal, run:
 

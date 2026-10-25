@@ -526,7 +526,11 @@ def build_agent(args, task: str = "") -> tuple[AgentRunner, str, list[str]]:
         task, _ = strip_escape_prefix(task)
 
     registry = build_tool_registry()
-    toolsets = ["terminal", "file", "web", "code", "browser", "delegation", "session", "git", "testing", "vision", "docker", "lsp"]
+    from mullet.core.toolset_policy import apply_policy
+    toolsets = apply_policy(
+        ["terminal", "file", "web", "code", "browser", "delegation", "session", "git", "testing", "vision", "docker", "lsp"],
+        getattr(provider, "name", None),
+    )
     from mullet.core.agent.prompts import build_base_prompt
     model_name = getattr(provider, "model", "") if provider else ""
     system_prompt = build_base_prompt(project_name=args.client, model=model_name)
@@ -674,7 +678,7 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
         Exit code: 0 if all checks pass (or all fixed when fix=True), 1 otherwise.
     """
     import mullet
-    from mullet.cli.doctor_checks import claude_setup_checks, gpu_checks, toolchain_checks
+    from mullet.cli.doctor_checks import claude_setup_checks, gpu_checks, spending_checks, toolchain_checks
 
     print(f"Mullet v{mullet.__version__} — System Health Check\n")
 
@@ -723,6 +727,13 @@ def _run_doctor(full: bool = False, fix: bool = False) -> int:
     # The GPU: free VRAM, temperature, who holds Mullet's GPU lease, LM Studio
     # on the GPU, and the power limit.
     checks.extend(gpu_checks())
+
+    # No spending limits set; with --full, paid providers running low on credit.
+    checks.extend(spending_checks(full))
+
+    # Providers allowed to run commands or touch files on this machine.
+    from mullet.cli.doctor_checks import toolset_checks
+    checks.extend(toolset_checks())
 
     # Google Gemini
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
@@ -2055,9 +2066,16 @@ def _main_inner():
 
     if command == "serve":
         if task in ("--help", "-h", "help"):
-            print("Usage: mullet serve [--host HOST] [--port PORT]")
+            print("Usage: mullet serve [--host HOST] [--port PORT] [--show-token]")
             print("Start the Mullet API server (REST + WebSocket). Default: 127.0.0.1:3000")
+            print("Requests need this install's token (Authorization: Bearer <token>); --show-token prints it.")
+            print("Settings: server.require_token, server.allowed_origins, server.allowed_hosts in the config file.")
             sys.exit(0)
+        if task == "--show-token" or "--show-token" in task_parts:
+            from mullet.server.guard import get_or_create_token, token_path
+            print(f"Token file: {token_path()}")
+            print(get_or_create_token())
+            return
         host = "127.0.0.1"
         port = 3000
         # Parse serve-specific args from task_parts

@@ -6,6 +6,7 @@ logs, ps, and images. Requires Docker to be installed and accessible.
 
 import json
 import logging
+import os
 import shlex
 import subprocess
 
@@ -20,17 +21,57 @@ _BLOCKED_FLAGS = {
     "--security-opt",
     "--pid=host",
     "--network=host",
-    "-v /:/",
-    "--volume=/:/",
+    "--ipc=host",
+    "--userns=host",
+    "--uts=host",
+    "--device",
 }
 
 
+def _mount_sources(options: str) -> list[str]:
+    """The host paths that `-v`, `--volume` and `--mount` options would bind into a container."""
+    try:
+        tokens = shlex.split(options)
+    except ValueError:
+        return ["<unparseable options>"]
+    sources: list[str] = []
+    for i, token in enumerate(tokens):
+        value = None
+        if token in ("-v", "--volume", "--mount") and i + 1 < len(tokens):
+            value = tokens[i + 1]
+        elif token.startswith(("--volume=", "--mount=")):
+            value = token.split("=", 1)[1]
+        elif token.startswith("-v") and len(token) > 2:
+            value = token[2:]
+        if value is None:
+            continue
+        if "=" in value and "," in value or value.startswith(("type=", "source=", "src=")):
+            for part in value.split(","):
+                key, _, rest = part.partition("=")
+                if key in ("source", "src"):
+                    sources.append(rest)
+        else:
+            sources.append(value.split(":", 1)[0])
+    return [s for s in sources if s.startswith(("/", "~", ".", "$", "<"))]
+
+
 def _check_blocked_flags(options: str) -> str | None:
-    """Return an error message if options contain blocked flags, else None."""
+    """Return an error message if options contain blocked flags or mounts, else None."""
     opts_lower = options.lower()
     for flag in _BLOCKED_FLAGS:
         if flag.lower() in opts_lower:
             return f"Blocked flag '{flag}' detected in options. This flag is not allowed for security reasons."
+    from mullet.core.tools.sensitive_paths import covers, denied_by, load_deny
+
+    patterns = load_deny()
+    for source in _mount_sources(options):
+        expanded = os.path.expanduser(source)
+        if source.startswith(("$", "<")) or expanded.rstrip("/") == "":
+            return f"Blocked mount '{source}': the host path can't be checked or is the whole filesystem."
+        hit = denied_by(expanded, patterns) or covers(expanded, patterns)
+        if hit:
+            return (f"Blocked mount '{source}': it holds or contains {hit}, which is on the deny list "
+                    "(delegation.file_deny in the Mullet config file).")
     return None
 
 DOCKER_SCHEMA = {

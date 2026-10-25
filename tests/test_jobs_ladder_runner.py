@@ -372,15 +372,15 @@ def test_a_risky_step_is_reviewed_even_with_review_off_and_must_pass(env, monkey
 
     def reviewer(ctx):
         reviews.append(ctx.node.id)
-        verdict = GateStatus.NOT_RUN if len(reviews) == 1 else GateStatus.PASS
-        return GateResult("G7", verdict, "review timed out" if verdict is GateStatus.NOT_RUN else "fine")
+        verdict = GateStatus.FAIL if len(reviews) == 1 else GateStatus.PASS
+        return GateResult("G7", verdict, "reviewer blocked" if verdict is GateStatus.FAIL else "fine")
 
     monkeypatch.setattr(JobRunner, "_make_reviewer",
                         lambda self, job, profile, executor, force=False: reviewer if force else None)
     risky = NodeSpec(id="n1", goal="add sub() and kill stray workers", kind="mechanical")
     safe = NodeSpec(id="n2", goal="write notes", kind="mechanical")
     notes = lambda w, t: (w / "NOTES.md").write_text("notes\n") and None  # noqa: E731
-    # n1: kimi's work fails the safety review (it couldn't finish), openrouter's passes it; n2: kimi.
+    # n1: kimi's work fails the safety review, openrouter's passes it; n2: kimi.
     fakes = {"kimi": FakeExecutor([good, notes]), "openrouter": FakeExecutor([good]), "claude": FakeExecutor([])}
     job_id = make_job(env, [risky, safe])
     assert run(env, job_id, fakes, ladder=make_ladder({"kimi": KIMI, "openrouter": [QWEN]}))[0] is JobStatus.DONE

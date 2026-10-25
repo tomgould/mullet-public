@@ -41,15 +41,24 @@ python3 -m pytest -m live tests/integration/ -v
 
 ```bash
 pip install "ruff==0.17.1"
-ruff check --select E9,F63,F7,F82 mullet scripts   # what CI requires to pass
-ruff check mullet scripts                          # the full rule set (advisory)
+ruff check --select E9,F63,F7,F82 mullet scripts tests   # what CI requires to pass
+ruff check mullet scripts                                 # the full rule set (advisory)
 ```
+
+CI installs the dependencies with `pip install -c ci/constraints.txt -e ".[dev]"`,
+so a new release of a dependency can't change a result unannounced. When you
+bump a dependency, update `ci/constraints.txt` to a version the suite passes
+with. Third-party GitHub Actions are pinned to a commit SHA with the tag in a
+comment; to move one, look up the tag's commit with
+`git ls-remote https://github.com/<owner>/<repo> refs/tags/<tag>` (add `^{}`
+for an annotated tag). A leak found by `gitleaks detect` that is a checked fake
+goes in `.gitleaksignore` as `commit:path:rule:line`, with a comment.
 
 CI also runs Black and mypy as advisory checks. Most of the code base isn't
 Black-formatted yet, so don't run `black .` over the whole tree; keep
 formatting-only changes in a PR of their own.
 
-We target **Python >= 3.10** and require type hints on all public APIs.
+We target **Python 3.10 to 3.12** (the versions CI tests) and require type hints on all public APIs.
 No placeholder TODOs or commented-out code in production paths.
 
 ## Commit Conventions
@@ -122,8 +131,17 @@ def register(tool_registry=None, **kwargs):
 
 Then `mullet --tools` will surface it automatically.
 
-## Contributor Licence
+## Contributor Licence and sign-off
 
-By submitting a contribution you agree that your contribution is licensed
-under the same terms as the rest of the project: the **Business Source
-License 1.1** (see [LICENSE](LICENSE)).
+Contributions are welcome. Each commit needs a `Signed-off-by:` line, which you add
+with `git commit -s`. It says you wrote the change or have the right to submit it, as
+set out in the [Developer Certificate of Origin](https://developercertificate.org/).
+A check on pull requests fails any commit without one.
+
+Your contribution is licensed under the same terms as the rest of the project: the
+**Business Source License 1.1** (see [LICENSE](LICENSE)). In addition, by contributing
+you grant the Licensor, Tom Gould, a perpetual, worldwide, non-exclusive, royalty-free
+right to use, modify and sublicense your contribution under that licence and under any
+other licence the Licensor chooses, including the Change License. That is what lets the
+project change its licence later, or offer a commercial licence, without asking every
+contributor again.

@@ -132,6 +132,13 @@ def file_ops_handler(**kwargs) -> str:
     if not any(path.resolve().is_relative_to(r.resolve()) for r in allowed_roots):
         return json.dumps({"error": f"Path traversal blocked: {path} is outside allowed directories"})
 
+    from mullet.core.tools.sensitive_paths import denied_by, load_deny
+
+    hit = denied_by(path, load_deny())
+    if hit:
+        return json.dumps({"error": f"Blocked: {path} is on the file tool's deny list ({hit}). "
+                                    "The list is delegation.file_deny in the Mullet config file."})
+
     if action == "read_file":
         if not path.is_file():
             return json.dumps({"error": f"File not found: {path}"})

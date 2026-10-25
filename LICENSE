@@ -6,11 +6,15 @@ Licensor:             Tom Gould
 Licensed Work:        Mullet
                       The Licensed Work is (c) 2026 Tom Gould
 Additional Use Grant: You may make production use of the Licensed Work, free
-                      of charge, if you are one individual developer using it
-                      yourself, on one running instance. This grant does not
-                      cover providing the Licensed Work, or a service based on
-                      it, to anyone else, for example as a hosted, managed or
-                      shared service.
+                      of charge, for any purpose, including inside a company
+                      or team, on any number of machines, and to build
+                      software you sell or ship. This grant does not cover
+                      offering the Licensed Work, or a service whose value
+                      comes substantially from it, to third parties as a
+                      hosted, managed or embedded service (for example an
+                      API, platform or SaaS in which Mullet's job runner or
+                      search is operated for other people). Contact the
+                      Licensor for a licence for that.
 Change Date:          2030-04-03
 Change License:       Apache License, Version 2.0
 

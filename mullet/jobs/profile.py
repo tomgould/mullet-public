@@ -46,6 +46,18 @@ DEFAULT_PROTECTED: tuple[str, ...] = (
     ".github/workflows/**",
     ".gitlab-ci.yml",
     ".husky/**",
+    ".github/actions/**",
+    ".pre-commit-config.yaml",
+    # Files the user's own tools run or read when they open the repo or merge the branch:
+    # editors, dev containers, shell hooks, and package-manager settings.
+    ".envrc",
+    ".vscode/**",
+    ".devcontainer/**",
+    ".npmrc",
+    ".yarnrc",
+    ".yarnrc.yml",
+    ".pypirc",
+    "AGENTS.md",
     "CLAUDE.md",
     ".claude/**",
     ".mcp.json",

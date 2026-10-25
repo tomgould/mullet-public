@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
-from mullet.jobs import handback
+from mullet.jobs import children, handback
 from mullet.jobs.clone import resolve_commit
 from mullet.jobs.ladder import Ladder, LadderConfig, Rung, attempt_cost, is_risky
 from mullet.jobs.ledger import JobStatus, Ledger
@@ -181,15 +181,21 @@ def _preflight(ledger: Ledger, job_id: str) -> str | None:
 
 
 def _run_in_thread(ledger_path: Path, job_id: str, runner_kwargs: dict[str, Any],
-                   started: list[Any], errors: list[BaseException]) -> None:
-    """Run the job with its own ledger connection (sqlite connections stay on one thread)."""
+                   started: list[Any], errors: list[BaseException],
+                   tracker: children.Tracker) -> None:
+    """Run the job with its own ledger connection (sqlite connections stay on one thread).
+
+    The job's child processes are recorded in `tracker`, so stopping this
+    delegation never kills another delegation's or job's children.
+    """
     from mullet.jobs.runner import JobRunner
 
     ledger = Ledger(ledger_path)
     try:
-        runner = JobRunner(ledger, job_id, **runner_kwargs)
-        started.append(runner)
-        runner.run()
+        with children.use(tracker):
+            runner = JobRunner(ledger, job_id, **runner_kwargs)
+            started.append(runner)
+            runner.run()
     except BaseException as exc:  # reported by the caller, never lost with the thread
         errors.append(exc)
     finally:
@@ -250,15 +256,17 @@ def run_delegation(
                                          "reviewer": reviewer}
         started: list[Any] = []
         errors: list[BaseException] = []
+        tracker = children.Tracker()
         thread = threading.Thread(
-            target=_run_in_thread, args=(ledger.path, job_id, runner_kwargs, started, errors),
+            target=_run_in_thread, args=(ledger.path, job_id, runner_kwargs, started, errors, tracker),
             name=f"mullet-delegate-{job_id}", daemon=True,
         )
         thread.start()
         thread.join(timeout_s)
         if thread.is_alive():
             if started:
-                started[0].request_stop()
+                with children.use(tracker):
+                    started[0].request_stop()
             thread.join(stop_grace_s)
             status = "timeout"
             reason = f"the job did not finish within {timeout_s:g} seconds"

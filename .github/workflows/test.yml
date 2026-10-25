@@ -12,6 +12,9 @@ permissions:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    # The slowest cell (Linux, 3.12) took about 14 minutes end to end; the job
+    # limit is roughly 3x that so a hung run is cut off instead of burning 6 hours.
+    timeout-minutes: 45
     env:
       # No test needs a real embedding model; without this, code that tries
       # to load one pulls an ~90 MB model from Hugging Face during the run.
@@ -26,15 +29,50 @@ jobs:
           - os: macos-latest
             python-version: '3.11'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
       # The CPU build of PyTorch is enough for the tests and far smaller than
       # the CUDA build that sentence-transformers would otherwise pull in.
       - if: runner.os == 'Linux'
+        timeout-minutes: 15
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev]"
+      # ci/constraints.txt holds the versions the suite last passed with, so a
+      # new release of a dependency can't change the result unannounced.
+      - timeout-minutes: 15
+        run: pip install -c ci/constraints.txt -e ".[dev]"
       # The job sandbox tests skip themselves where bubblewrap can't run
       # (macOS, or a Linux runner without user namespaces).
-      - run: python -m pytest tests/ -q --tb=short -n auto --timeout 300 -k "not delegation_safety_d2"
+      # tests/test_delegation_safety_d2.py is left out here and runs in the
+      # delegation-safety-d2 job below. -k matches the module name, so this
+      # deselects that whole file.
+      - name: Tests
+        timeout-minutes: 35
+        run: |
+          echo "::notice::tests/test_delegation_safety_d2.py is deselected here and runs in the non-blocking delegation-safety-d2 job"
+          python -m pytest tests/ -q --tb=short -n auto --timeout 300 -k "not delegation_safety_d2"
+
+  # This file has been excluded from the main run since the first CI commit
+  # (6937fe1), and the reason was not recorded there or in the history. It is a
+  # small offline test that passes locally, so it runs on its own and cannot
+  # fail the build until someone confirms it is safe to fold back in.
+  delegation-safety-d2:
+    name: delegation-safety-d2 (previously excluded, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+        timeout-minutes: 10
+      - run: pip install -c ci/constraints.txt -e ".[dev]"
+        timeout-minutes: 10
+      - name: Tests
+        timeout-minutes: 5
+        run: python -m pytest tests/test_delegation_safety_d2.py -q --tb=short --timeout 300

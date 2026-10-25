@@ -278,3 +278,16 @@ def test_delegate_with_fallback_empty_chain_forwards_allowlist():
         )
 
     assert captured == [frozenset({"haiku"})]
+
+
+def test_spend_log_goes_under_the_throwaway_home_not_the_real_one():
+    """Without the suite-wide HOME isolation, tests would write into the real ~/.mullet."""
+    import os
+    from pathlib import Path
+
+    from mullet.core.paths import state_dir
+
+    _log_spend("isolation probe", "probe", 1, True)
+    home = Path(os.environ["HOME"]).resolve()
+    db = (state_dir() / "delegation_spend.db").resolve()
+    assert db.is_file() and db.is_relative_to(home)

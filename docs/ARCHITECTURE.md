@@ -6,7 +6,7 @@
 
 Mullet is a Python monolith (about 84K lines in about 370 modules, about 16,900 tests). Its main job is `mullet job`: large coding jobs that run unattended in a sandboxed clone, with every step checked by gates Mullet runs itself (see Jobs below). It also routes single tasks to the cheapest capable model, serves the Trawl knowledge engine over MCP, and keeps an OpenAI-compatible API. It installs from GitHub with `scripts/install.sh` (never `pip install mullet`: that PyPI package is someone else's).
 
-The diagram below is the single-task path (`mullet "<task>"`, the API and the delegation tools). Jobs have their own path, described under Jobs.
+The diagram below is the legacy single-task path (`mullet "<task>"`, the API and the delegation tools). It runs unless `MULLET_DELEGATION=off` is set (the default is on), and jobs do not use it. Jobs have their own path, described under Jobs.
 
 ```
 User → CLI/API/MCP → Router → Provider → Agent Loop → Tools → Response
@@ -45,7 +45,7 @@ User → CLI/API/MCP → Router → Provider → Agent Loop → Tools → Respon
 ### Router (`mullet/core/router/`)
 - **complexity.py** — Signal extraction + scoring. Lexical (keywords) + structural (subtasks, deps, domain) + context (failures, chain depth, plan complexity) → score → tier.
 - **decision.py** — Routes to optimal provider. Health-filtered, budget-gated, tier-mapped. Auto-downgrades when budget blocks premium.
-- **budget.py** — Token spend tracking with dollar limits. Per-task, per-session, per-day.
+- **budget.py** — Token spend tracking with dollar limits. Per-task, per-session, per-day. Gated jobs do not use it; their limits are in `mullet/jobs/budget.py`.
 - **fallback.py** — FallbackManager with tried-provider tracking and turn-scoped restoration.
 - **resolver.py** — Bridges routing decisions to actual Provider instances.
 
@@ -99,7 +99,7 @@ Trawl knowledge engine. Over 40 MCP tools covering pools, search, graphs, ingest
 - **`mullet/core/knowledge/predigest.py`** — Local LLM pre-processes heavy content → stores summary → cloud reasons over it.
 
 ### Orchestration (`mullet/core/orchestration/`)
-- **swarm** — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. It returns text, can save a JSON report, and never edits project files. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
+- **swarm** (legacy single-task path; `mullet_swarm` refuses to run when `MULLET_DELEGATION=off`) — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. It returns text, can save a JSON report, and never edits project files. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
 - **shared_memory.py**: file-backed key/value store behind the `shared_mem` tool.
 - **scheduler.py**: recurring tasks for `mullet schedule`.
 - **autoresearch.py**: research pipeline object behind `mullet research`.
@@ -112,14 +112,16 @@ Long, unattended work runs as a `mullet job`: a planned set of nodes, each run b
 - **clone.py**: private clone; the worker never sees its git directory.
 - **sandbox.py**: bubblewrap on Linux, no unsandboxed fallback. Jobs refuse to start on macOS for now.
 - **gates.py**, **review.py**: gates G0 to G7.
-- **ledger.py**: SQLite ledger; **report.py** builds the report from it.
-- **profile.py**: per-repo setup and check commands. The stored profile lives in the `projects` folder of the config directory.
+- **ledger.py**: SQLite ledger; **report.py** builds the report from it, and **ladder_report.py** sums the ladder across jobs.
+- **profile.py**: per-repo setup, checks and protected paths. The stored profile lives in the `projects` folder of the config directory.
 - **runner.py**: detached runner with resume; **notify.py**: desktop and Slack messages when a job blocks, pauses or finishes.
-- **executors/claude_code.py**: the only worker today.
+- **ladder.py**: which worker attempts each step (free, local, Kimi, OpenRouter, Claude); **night.py**: night mode; **budget.py**: spending limits across jobs; **reconcile.py**: the provider check at job end.
+- **machine.py**: the GPU lease and headroom waits; **reaper.py**: `mullet reap`.
+- **executors/claude_code.py**: the user's own `claude -p`. **executors/opencode.py** runs opencode behind **executors/keyproxy.py**, which holds the provider key and meters each response's usage (**executors/usage_meter.py**).
 
-Job data (clones, ledger, logs) lives in `jobs/` under the data directory; `MULLET_JOBS_DIR` overrides it.
+Job data (clones, ledger, logs) lives in `jobs/` under the data directory, and profiles in the `projects` folder of the config directory. `MULLET_JOBS_DIR` and `MULLET_PROFILES_DIR` override them, and `mullet job` and `mullet ladder report` need the same values when jobs live elsewhere.
 
-Coming, and not built yet: an opencode worker, a delegation ladder across Claude, OpenRouter, Kimi, free and local models, `mullet job bench`, a machine guard (a GPU lease) and a macOS sandbox.
+Not built: `mullet job bench` and a macOS sandbox.
 
 ### Skills (`mullet/core/skills/`) — 6 built-in (brainstorm, code-review, mullet-job, plan, pool-improve, session-review)
 - **loader.py** — Discovers SKILL.md files across builtin/user/project scopes.
@@ -129,6 +131,7 @@ Coming, and not built yet: an opencode worker, a delegation ladder across Claude
 
 ### Server (`mullet/server/`)
 - **app.py** — aiohttp with CORS, auth, rate limiting, error handling, graceful shutdown.
+- **guard.py**: checks `Host` and `Origin` on every request and, in solo mode, the install's token (`serve-token`). See [CONFIGURATION.md](CONFIGURATION.md#mullet-serve).
 - **api.py** — REST: /health, /v1/chat/completions (SSE), /api/v1/projects, search, memory.
 - **websocket.py** — Real-time task execution with full tool parity.
 - **mcp.py** + **mcp_handlers.py** — 10 mullet_* MCP tools + over 40 trawl_* knowledge tools for Claude Code integration.

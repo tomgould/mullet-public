@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import time
 
-from mullet.jobs.ladder import LadderConfig, attempt_cost, load_config, spend_state
+from mullet.jobs.ladder import LadderConfig, attempt_cost, load_config, model_rung, spend_state
 from mullet.jobs.ledger import Ledger
+from mullet.jobs.reconcile import reconcile
 from mullet.jobs.types import AttemptOutcome, GateStatus, NodeStatus
 
 _GATE_WORD = {
@@ -72,6 +73,7 @@ def ladder_summary(nodes, attempts, config: LadderConfig) -> str:
     parents = {n.parent_id for n in nodes if n.parent_id}
     nodes = [n for n in nodes if n.node_id not in parents]
     below = 0
+    unverified = 0
     claude_steps = set()
     for node in nodes:
         mine = [a for a in attempts if a.node_id == node.node_id]
@@ -82,9 +84,13 @@ def ladder_summary(nodes, attempts, config: LadderConfig) -> str:
                           None)
             rung = (winner.usage or {}).get("rung") if winner else None
             if rung and rung != "claude":
-                below += 1
+                if node.status is NodeStatus.PASSED:
+                    below += 1
+                else:
+                    unverified += 1
     spend = spend_state([a.usage for a in attempts], config.max_spend, config)
-    parts = [f"{below} of {len(nodes)} steps passed below Claude"]
+    passed = f"{below} of {len(nodes)} steps passed below Claude"
+    parts = [passed + (f", {unverified} unverified" if unverified else "")]
     spent = f"spent ${spend.spent:.2f}"
     if spend.by_rung:
         spent += ": " + ", ".join(f"{_RUNG_NAMES.get(r, r)} ${v:.2f}" for r, v in sorted(spend.by_rung.items(),
@@ -118,10 +124,8 @@ def usage_lines(job, attempts, config: LadderConfig, events=()) -> list[str]:
         by_provider: dict[str, float] = {}
         for a in opencode:
             usage = dict(a.usage or {})
-            # A single-executor opencode job has no rung: tell from the model.
-            model = str(usage.get("model") or "")
-            usage.setdefault("rung", "local" if model.startswith("lmstudio/") else "free" if model.endswith(":free")
-                             else "openrouter" if model.startswith("openrouter/") else "kimi")
+            # A single-executor opencode attempt recorded before rungs were kept for it: tell from the model.
+            usage.setdefault("rung", model_rung(str(usage.get("model") or "")).name)
             if usage["rung"] not in ("kimi", "openrouter"):
                 continue
             dollars, guess = attempt_cost(usage, config)
@@ -158,6 +162,22 @@ def usage_lines(job, attempts, config: LadderConfig, events=()) -> list[str]:
     return lines
 
 
+def provider_check_lines(events, attempts, config: LadderConfig) -> list[str]:
+    """The ledger's spend against each paid provider's own figure, from the snapshots taken around the job."""
+    snapshots = [e.data for e in events if e.kind == "provider_snapshot"]
+    starts = [s for s in snapshots if s.get("when") == "start"]
+    ends = [s for s in snapshots if s.get("when") == "end"]
+    if not starts or not ends:
+        return []
+    recorded: dict[str, float] = {}
+    for attempt in attempts:
+        usage = attempt.usage or {}
+        if usage.get("rung") in ("kimi", "openrouter"):
+            recorded[usage["rung"]] = recorded.get(usage["rung"], 0.0) + attempt_cost(usage, config)[0]
+    found = reconcile(starts[0].get("providers") or {}, ends[-1].get("providers") or {}, recorded)
+    return ["Provider check (the ledger against each provider's own figure):"] + [f"- {r.line()}" for r in found]
+
+
 def build_report(ledger: Ledger, job_id: str, config: LadderConfig | None = None) -> str:
     """The job's report as Markdown. `config` (the ladder's prices) defaults to the user's."""
     job = ledger.get_job(job_id)
@@ -185,6 +205,7 @@ def build_report(ledger: Ledger, job_id: str, config: LadderConfig | None = None
     lines.append("Nodes: " + ", ".join(f"{n} {s.value}" for s, n in counts.items()))
     if ladder:
         lines.append("Ladder: " + ladder_summary(nodes, attempts, config))
+        lines.extend(provider_check_lines(events, attempts, config))
     unverified = [n.node_id for n in nodes if n.status is NodeStatus.UNVERIFIED]
     if unverified:
         lines.append(f"Not verified (some checks could not run): {', '.join(unverified)}")

@@ -44,7 +44,7 @@ Use this when the user signals they are wrapping up, done for the day, or explic
 5. **Commit changes** — once all items are processed:
    `git add docs/DESIGN_PRINCIPLES.md && git commit -m "docs: session review YYYY-MM-DD"`
 
-6. **Reindex** — run `mullet reindex --pool mullet-dev` so the updated principles are available for future sessions.
+6. **Reindex** — run `mullet reindex --pool <your-project-pool>` so the updated principles are available for future sessions.
 </Steps>
 
 ## Rules

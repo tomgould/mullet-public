@@ -6,7 +6,7 @@
 
 - [1. Before You Start](#1-before-you-start)
 - [2. Check Your Shell](#2-check-your-shell)
-- [3. Install Python 3.10+](#3-install-python-310)
+- [3. Install Python 3.10 to 3.12](#3-install-python-310-to-312)
 - [4. Install Git](#4-install-git)
 - [5. Install Node.js via nvm](#5-install-nodejs-via-nvm)
 - [6. Install Claude Code](#6-install-claude-code)
@@ -62,9 +62,9 @@ echo $SHELL
 
 ---
 
-## 3. Install Python 3.10+
+## 3. Install Python 3.10 to 3.12
 
-Mullet is written in **Python**, a popular programming language. Most Linux distributions come with Python already installed, but let's make sure it's new enough. The installer needs Python 3.10 or higher.
+Mullet is written in **Python**, a popular programming language. Most Linux distributions come with Python already installed, but let's make sure it's new enough. The installer needs Python 3.10 to 3.12.
 
 In your terminal, type:
 
@@ -72,9 +72,9 @@ In your terminal, type:
 python3 --version
 ```
 
-**If you see `Python 3.10.x` or higher** (for example, `Python 3.12.4`), you're good. Skip to [Section 4](#4-install-git).
+**If you see `Python 3.10.x`, `3.11.x` or `3.12.x`** (for example, `Python 3.12.4`), you're good. Skip to [Section 4](#4-install-git).
 
-**If you see `command not found` or a version below 3.10**, install Python via your package manager:
+**If you see `command not found` or a version outside 3.10 to 3.12**, install Python via your package manager:
 
 **Ubuntu / Debian:**
 ```bash
@@ -93,7 +93,7 @@ You may be asked for your password. Type it and press `Return`. You won't see an
 python3 --version
 ```
 
-You should now see `Python 3.10.x` or higher.
+You should now see `Python 3.10.x`, `3.11.x` or `3.12.x`.
 
 ---
 
@@ -254,7 +254,7 @@ An **API key** is like a password that lets Mullet talk to AI services on your b
 
 ## 8. Install Mullet
 
-The installer uses **uv** or **pipx** (whichever you have) to install Mullet from GitHub as a tool of its own. It needs `git` and Python 3.10 or higher, which you set up above, and it stops with an error if you have neither uv nor pipx.
+The installer uses **uv** or **pipx** (whichever you have) to install Mullet from GitHub as a tool of its own. It needs `git` and Python 3.10 to 3.12, which you set up above, and it stops with an error if you have neither uv nor pipx.
 
 Check for them:
 

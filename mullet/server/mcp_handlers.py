@@ -15,6 +15,8 @@ from pathlib import Path
 import sys
 from typing import Tuple, List
 
+from mullet.core.toolset_policy import apply_policy
+
 # Legacy single-slot writes moved into OpenAICompatibleProvider._hud_agent_track
 # (see mullet/core/providers/openai_compat.py). The provider hook adds the agent
 # on create() entry and removes on exit, with a per-call id so concurrent
@@ -75,7 +77,7 @@ def _sanitize_paths(files: List[str], target_dir: str) -> Tuple[List[str], str, 
         safe_files = []
         for file_path in files:
             resolved = (safe_target / file_path).resolve()
-            if not str(resolved).startswith(str(safe_target)):
+            if not resolved.is_relative_to(safe_target):
                 _security_log.warning(
                     "security.path_traversal blocked file=%r target_dir=%s", file_path, safe_target
                 )
@@ -909,6 +911,7 @@ def _handle_mullet_run_inner(arguments: dict) -> dict:
     toolsets = ["terminal", "file", "web", "code", "browser", "delegation", "session", "git", "testing", "vision", "docker"]
     if client:
         toolsets.append("trove")
+    toolsets = apply_policy(toolsets, getattr(provider, "name", None))
 
     # D1: estimator must never break dispatch — fall back to char-based count
     # if tiktoken itself raises.
@@ -1054,7 +1057,10 @@ def handle_mullet_delegate(arguments: dict) -> str:
     parent = AgentRunner(
         provider=provider,
         tool_registry=registry,
-        toolsets=["terminal", "file", "web", "code", "browser", "session", "git", "testing", "vision", "docker"],
+        toolsets=apply_policy(
+            ["terminal", "file", "web", "code", "browser", "session", "git", "testing", "vision", "docker"],
+            getattr(provider, "name", None),
+        ),
         max_iterations=50,
         allowed_providers=frozenset(allowed_providers) if allowed_providers else None,
     )

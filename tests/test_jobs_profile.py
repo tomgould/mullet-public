@@ -571,3 +571,21 @@ def test_unknown_base_sha_raises(repo: Path) -> None:
     commit_all(repo)
     with pytest.raises(ProfileError, match="git ls-tree failed"):
         load_profile(repo, base_sha="0" * 40)
+
+
+@pytest.mark.parametrize("path", [
+    ".envrc", ".vscode/settings.json", ".vscode/tasks.json", ".devcontainer/devcontainer.json",
+    ".devcontainer/Dockerfile", ".pre-commit-config.yaml", ".github/actions/setup/action.yml", "AGENTS.md",
+    "sub/AGENTS.md", ".npmrc", ".yarnrc.yml", ".pypirc",
+])
+def test_files_the_users_own_tools_run_on_merge_are_protected_by_default(path):
+    from mullet.jobs.globs import matches_any
+
+    assert matches_any(path, list(DEFAULT_PROTECTED))
+
+
+def test_ordinary_source_files_are_not_protected():
+    from mullet.jobs.globs import matches_any
+
+    assert not matches_any("src/app.py", list(DEFAULT_PROTECTED))
+    assert not matches_any("docs/guide.md", list(DEFAULT_PROTECTED))

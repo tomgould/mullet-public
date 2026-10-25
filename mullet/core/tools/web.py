@@ -79,12 +79,12 @@ def web_search(query: str, max_results: int = 5, **_kwargs) -> str:
 def fetch_page(url: str, max_chars: int = 10000, **_kwargs) -> str:
     """Fetch a web page and return text content."""
     try:
-        from mullet.core.tools.url_safety import is_safe_url
+        from mullet.core.tools.url_safety import is_safe_url, safe_urlopen
         if not is_safe_url(url):
             return f"[error] URL blocked by SSRF protection: {url}"
 
         req = urllib.request.Request(url, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with safe_urlopen(req, timeout=15) as resp:
             content_type = resp.headers.get("Content-Type", "")
             if "text/html" in content_type:
                 html = resp.read().decode("utf-8", errors="replace")

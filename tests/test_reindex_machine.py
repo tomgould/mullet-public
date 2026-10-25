@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 import types
 from argparse import Namespace
 
@@ -183,6 +184,34 @@ def test_a_gpu_that_stays_held_indexes_on_the_cpu(reindex, indexed, other_holder
     last = _lines(capsys)[-1]
     assert last.startswith(_line("gave up after 12s waiting for the GPU: reindex of pool trag (pid "))
     assert last.endswith("; indexing on the CPU instead")
+
+
+class _Uptime:
+    """``time`` for the reindexer, with ``monotonic`` reading like a machine up ``start`` seconds."""
+
+    def __init__(self, start: float) -> None:
+        self.now = start
+
+    def monotonic(self) -> float:
+        self.now += 2.5e-5
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@pytest.mark.parametrize("uptime", [3.0, 1000.0])
+def test_a_gpu_held_on_a_freshly_booted_machine_still_gives_up_in_time(
+        reindex, indexed, other_holder, monkeypatch, capsys, uptime):
+    # Below 512 s of uptime the budget left over has finer bits than the fake clock at 1000 can
+    # hold, so the last gap could be too small to move it and the wait used to spin.
+    monkeypatch.setenv("MULLET_GPU_WAIT_MAX_S", "12")
+    monkeypatch.setattr(reindex, "time", _Uptime(uptime))
+    reindex._reindex_one("news", Namespace(no_wait=False), quiet=True)
+    assert reindex.on_cpu == ["cpu"]
+    assert indexed[0][1].purpose == "reindex of pool trag", "the other holder still has it"
+    assert len(reindex.time_.sleeps) < 10
+    assert _lines(capsys)[-1].startswith(_line("gave up after 12s waiting for the GPU: "))
 
 
 def test_a_failed_recheck_lets_go_of_the_lease_and_uses_the_cpu(reindex, indexed, monkeypatch):

@@ -77,7 +77,7 @@ def _parse_value(raw: str) -> object:
 
 def _print_usage() -> None:
     print(
-        "Usage: mullet config {get <key>|set <key> <value>|list|edit|reset|budget [show|set|monthly|reset]}",
+        "Usage: mullet config {get <key>|set <key> <value>|list|edit|reset|show [--json] [section]|budget [show|set|monthly|reset]}",
         file=sys.stderr,
     )
 
@@ -163,6 +163,11 @@ def cmd_config(argv: list[str]) -> int:
 
     if action == "budget":
         return _cmd_budget(args)
+
+    if action == "show":
+        from mullet.cli.config_show import cmd_show
+
+        return cmd_show(args)
 
     print(f"Unknown action: {action}", file=sys.stderr)
     _print_usage()

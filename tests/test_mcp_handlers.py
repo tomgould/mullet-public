@@ -591,3 +591,37 @@ def test_sanitize_paths_resolution_failure():
     files, target_str, err = _sanitize_paths(["somefile"], None)
     assert files == []
     assert err is not None
+
+
+def test_sanitize_paths_sibling_with_shared_prefix_is_rejected(tmp_path):
+    from mullet.server.mcp_handlers import _sanitize_paths
+    allowed = tmp_path / "allowed"
+    evil = tmp_path / "allowed-evil"
+    allowed.mkdir()
+    evil.mkdir()
+    (evil / "x.txt").write_text("x")
+    files, _, err = _sanitize_paths(["../allowed-evil/x.txt"], str(allowed))
+    assert files == []
+    assert "traversal" in err.lower()
+
+
+def test_sanitize_paths_symlink_escape_is_rejected(tmp_path):
+    from mullet.server.mcp_handlers import _sanitize_paths
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("s")
+    (allowed / "link").symlink_to(outside)
+    files, _, err = _sanitize_paths(["link/secret.txt"], str(allowed))
+    assert files == []
+    assert "traversal" in err.lower()
+
+
+def test_sanitize_paths_legitimate_nested_path_is_kept(tmp_path):
+    from mullet.server.mcp_handlers import _sanitize_paths
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "b.py").write_text("")
+    files, _, err = _sanitize_paths(["a/b.py", "a/../a/b.py"], str(tmp_path))
+    assert err is None
+    assert files == ["a/b.py", "a/b.py"]

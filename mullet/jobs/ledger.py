@@ -615,6 +615,19 @@ class Ledger:
             )
         return [_attempt_record(row) for row in rows.fetchall()]
 
+    def attempt_usages_since(self, since: float) -> list[tuple[float, dict[str, Any]]]:
+        """(start time, usage) of every attempt in any job that started at or after `since`, running ones included."""
+        rows = self._conn.execute(
+            "SELECT started_at, usage_json FROM attempts WHERE started_at >= ? AND usage_json IS NOT NULL",
+            (since,),
+        ).fetchall()
+        found = []
+        for started, text in rows:
+            usage = _loads(text)
+            if isinstance(usage, dict):
+                found.append((started, usage))
+        return found
+
     def get_attempt(self, attempt_id: int) -> AttemptRecord:
         """Return one attempt, or raise KeyError."""
         return _attempt_record(self._attempt_row(self._conn, attempt_id))

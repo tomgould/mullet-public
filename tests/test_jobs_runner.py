@@ -521,14 +521,17 @@ def test_the_built_in_reviewer_runs_in_the_worker_slot(env):
     assert ledger.audit(job_id) == []
 
 
-def test_an_incomplete_review_leaves_the_node_unverified(env):
+def test_an_incomplete_review_pauses_the_job_and_commits_nothing(env):
     def reviewer(ctx):
         return GateResult("G7", GateStatus.NOT_RUN, "the review didn't complete: timed out")
 
     job_id = make_job(env, [NodeSpec(id="n1", goal="add sub()")], review=True)
     ledger = env["ledger"]
-    assert JobRunner(ledger, job_id, FakeExecutor([lambda w, t: good_change(w)]), reviewer=reviewer).run() is JobStatus.DONE
-    assert ledger.get_node(job_id, "n1").status is NodeStatus.UNVERIFIED
+    assert JobRunner(ledger, job_id, FakeExecutor([lambda w, t: good_change(w)]), reviewer=reviewer).run() is JobStatus.PAUSED
+    assert ledger.get_node(job_id, "n1").status is not NodeStatus.UNVERIFIED
+    assert ledger.attempt_count(job_id, "n1") == 0
+    assert "G7 gave no verdict" in ledger.get_job(job_id).error
+    assert not any(a.end_sha for a in ledger.attempts(job_id, "n1"))
 
 
 def _helper_then_break_then(fix):

@@ -18,11 +18,15 @@ and failed there, so later gates can tell a regression from an old failure.
     G6 test weakening no assertions, tests or test files removed, no skips added
     G4 build          lint, typecheck and build still pass where they passed on base
     G5 tests          every test that passed on base and ran still passes, no new
-                      failures, a report was produced; failures are rerun to rule
-                      out flaky tests
+                      failures, a report was produced; failures are rerun, and a
+                      test is excused as flaky only if it passed in one of the runs
 
 The cheap static gates run first. After the first failure the rest are
-recorded as skipped. A gate that crashes counts as a failure.
+recorded as skipped. A gate that crashes raises `GatePaused`, and so does a
+reviewer that gives no verdict: a bug or an outage in Mullet's own checks says
+nothing about the change, so it is never a verdict. Work the gates refuse to
+run against (`UnsafeWorkTree`, an unsafe copy_in path) is the change's fault
+and fails the gate.
 """
 
 from __future__ import annotations
@@ -82,10 +86,10 @@ class UnsafeWorkTree(RuntimeError):
 
 
 class GatePaused(Exception):
-    """A gate couldn't finish for reasons outside the change (a usage limit, a crash).
+    """A gate couldn't finish for reasons outside the change (a usage limit, a crash, no verdict).
 
-    It is not a verdict: the runner pauses or aborts the attempt without
-    counting it. `until` is when a usage limit resets, or None for a crash.
+    It is not a verdict: the runner sets the attempt aside without counting
+    it. `until` is when a usage limit resets, or None for a crash.
     """
 
     def __init__(self, reason: str, until: float | None = None):
@@ -418,8 +422,8 @@ def _timed(gate_id: str, fn: Callable[[], GateResult]) -> GateResult:
         result = GateResult(gate_id, status, f"checks could not run: {exc}")
     except UnsafeWorkTree as exc:
         result = GateResult(gate_id, GateStatus.FAIL, f"unsafe work tree: {exc}")
-    except Exception as exc:  # a crashed gate must never read as a pass
-        result = GateResult(gate_id, GateStatus.FAIL, f"gate crashed: {type(exc).__name__}: {exc}")
+    except Exception as exc:  # Mullet's own bug: neither a pass nor the worker's failure
+        raise GatePaused(f"{gate_id} crashed: {type(exc).__name__}: {exc}") from exc
     result.duration_s = time.monotonic() - started
     return result
 
@@ -438,7 +442,9 @@ def run_gates(ctx: GateContext, reviewer: GateFn | None = None) -> list[GateResu
     """Run G1 to G6 in order, then G7 if a reviewer is given; every result, skipped ones included.
 
     The reviewer runs last, on a freshly materialized snapshot with no copy_in
-    files in place, and only when everything else passed.
+    files in place, and only when everything else passed. A given reviewer is
+    required, so one that answers neither approve nor block raises
+    `GatePaused` rather than leaving the attempt unverified.
     """
     static: list[tuple[str, GateFn]] = [
         ("G1", gate_real_change), ("G2", gate_scope), ("G3", gate_static), ("G6", gate_test_weakening),
@@ -455,6 +461,8 @@ def run_gates(ctx: GateContext, reviewer: GateFn | None = None) -> list[GateResu
                 ctx.clone.materialize(ctx.snapshot.tree, keep=ctx.runner.keep)
                 return fn(ctx)
             result = _timed(gate_id, reviewed)
+            if result.status not in (GateStatus.PASS, GateStatus.FAIL):
+                raise GatePaused(f"G7 gave no verdict: {result.summary}")
         else:
             result = run_check_gate(ctx, gate_id, fn)
         results.append(result)
@@ -907,15 +915,26 @@ def gate_tests(ctx: GateContext) -> GateResult:
     # G6 still judges any test file this step does change.
     touches_tests = any(is_test_path(f.path) for f in ctx.snapshot.files)
     allow_lost = ctx.node.allow_test_weakening or (ctx.tests_retired and not touches_tests)
-    runs = [runner.run_command(name, command, runner.timeout_for(name), tests=tests)]
-    problem = regressions(runs[-1], base, full=full, allow_lost=allow_lost)
-    # A problem only counts if it happens on every run, which rules out flaky tests.
-    for _ in range(FLAKY_RERUNS):
-        if not problem:
+    # Failures are rerun to rule out flaky tests, but only a test that passed
+    # in one of the runs is excused. A test that failed and then didn't pass
+    # (it was skipped, or didn't run) still counts, whichever run it failed in.
+    # A run with no per-test result (a timeout, no report) decides on its own.
+    failed: set[str] = set()
+    passed: set[str] = set()
+    runs: list[CheckRun] = []
+    problem: Problem = None
+    for i in range(1 + FLAKY_RERUNS):
+        if i and not problem:
             break
-        runs.append(runner.run_command(f"{name}-rerun", command, runner.timeout_for(name), tests=tests))
-        again = regressions(runs[-1], base, full=full, allow_lost=allow_lost)
-        problem = problem & again if isinstance(problem, set) and isinstance(again, set) else again
+        run_name = name if not i else f"{name}-rerun"
+        runs.append(runner.run_command(run_name, command, runner.timeout_for(name), tests=tests))
+        found = regressions(runs[-1], base, full=full, allow_lost=allow_lost)
+        passed |= runs[-1].passing_tests or set()
+        if isinstance(found, str):
+            problem = found
+            continue
+        failed |= found or set()
+        problem = (failed - passed) or None
     details["runs"] = [r.to_dict() for r in runs]
     last = runs[-1]
     if problem:

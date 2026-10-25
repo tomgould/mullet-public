@@ -12,7 +12,7 @@ Mullet 2.0.0 is maintained. Jobs run on Linux. On macOS they refuse to start for
 
 ## Install
 
-Mullet isn't on PyPI (the name there belongs to another package), so install it from GitHub. It needs Python 3.10 or later, git, and uv or pipx. Jobs also need the `claude` command-line tool, logged in, and on Linux, bubblewrap and socat.
+Mullet isn't on PyPI (the name there belongs to another package), so install it from GitHub. It needs Python 3.10 to 3.12, git, and uv or pipx. Jobs also need the `claude` command-line tool, logged in, and on Linux, bubblewrap and socat.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash
@@ -104,9 +104,24 @@ ladder:
 
 Coming, and not in 2.0.0: a macOS sandbox, so jobs can run there.
 
+## Spending limits and other settings
+
+Spending is unlimited until you set limits in `~/.config/mullet/config.yaml`. `ladder.max_spend` caps one job; `budget.envelope` and `budget.per_rung` cap all jobs together per UTC day or week:
+
+```yaml
+budget:
+  envelope: {daily: 25.0, weekly: 100.0}
+  per_rung:
+    kimi: {daily: 15.0}
+    openrouter: {weekly: 40.0}
+  warn_below_usd: 5.0                      # doctor and notifications flag provider credit under this
+```
+
+Cost comes from what the provider's responses say. Each attempt gets an allowance, and the key proxy refuses requests with HTTP 402 once it is spent. `mullet job report` ends with a provider check that sets the ledger's spend beside each provider's own figure. [docs/CONFIGURATION.md](docs/CONFIGURATION.md) covers these, which toolsets and files a delegated model may touch (`delegation.toolsets`, `delegation.file_deny`), and how `mullet serve` guards itself (Host and Origin checks, a token in `serve-token`). `mullet config show` lists every active setting and where it came from.
+
 ## Notifications
 
-Mullet tells you when a job blocks, pauses or finishes. Desktop notifications are on by default. A Slack incoming webhook is sent only in working hours.
+Mullet tells you when a job blocks, pauses or finishes. Desktop notifications are on by default. A Slack incoming webhook is sent only in working hours. Each message ends with your paid providers' credit and Claude's weekly use, when Mullet can read them.
 
 | Variable | Meaning |
 | --- | --- |
@@ -143,6 +158,7 @@ The guides are in [`docs/`](docs/):
 - [Quick start](docs/QUICKSTART.md)
 - [Installation](docs/INSTALL.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Settings: limits, toolsets, the API server](docs/CONFIGURATION.md)
 - [Model routing](docs/MODEL_ROUTING.md)
 - [API reference](docs/API.md)
 - [Reindexing knowledge pools](docs/REINDEX.md)
@@ -152,6 +168,6 @@ The guides are in [`docs/`](docs/):
 
 ## Licence
 
-Mullet is source-available under the [Business Source License 1.1](LICENSE). You may copy, change and redistribute it, and use it outside production. One developer may also use it in production, free, for their own work on one running instance, but not offer it, or a service based on it, to anyone else. Any other production use needs a commercial licence; [LICENSE](LICENSE) says how to ask.
+Mullet is source-available under the [Business Source License 1.1](LICENSE). You may copy, change and redistribute it, and use it outside production. You may also use it in production, free, for any purpose: on your own, inside a company or team, on any number of machines, to build software you sell or ship. The one thing the licence does not cover is offering Mullet, or a service whose value comes substantially from it, to other people as a hosted, managed or embedded service (an API or SaaS that runs Mullet's job runner or search for them). That needs a commercial licence; [LICENSE](LICENSE) says how to ask.
 
 Each version becomes available under the Apache License 2.0 on 3 April 2030, or four years after its first public release if that comes sooner.

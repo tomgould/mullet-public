@@ -833,6 +833,10 @@ class OpencodeExecutor:
         # callback that gets the usage so far after every step.
         self.spend_limit_usd: float | None = None
         self.price: dict[str, float] = {}
+        # True when the user set a price for this model (with cache rates, if it has them).
+        # Only then are tokens turned into dollars from the provider's own usage reports.
+        self.price_configured = False
+        self._proxy: KeyProxy | None = None
         self.on_progress: Callable[[dict[str, Any]], None] | None = None
         self.read_paths = list(read_paths or [])
         self.deps_paths = list(deps_paths or [])
@@ -1148,15 +1152,22 @@ class OpencodeExecutor:
                              max_bytes=self.max_bytes,
                              models=api_model_ids(self.model, route.definition) if self.pin_model else None,
                              paths=API_PATHS if self.pin_model else None,
-                             body_fields=self.request_fields or None)
+                             body_fields=self.request_fields or None,
+                             allowance_usd=self.spend_limit_usd,
+                             pricer=self._price_tokens if self.price_configured else None)
         except ProxyError as exc:
             raise ExecutorUnavailable(f"can't reach provider {route.provider!r} safely: {exc}") from exc
-        with proxy:
-            launch = self.launcher(shutil.which("socat") or "socat", proxy.socket_path, argv)
-            result = self._launch(launch, work, attempt_dir, env, budget, proxy_dir)
+        self._proxy = proxy
+        try:
+            with proxy:
+                launch = self.launcher(shutil.which("socat") or "socat", proxy.socket_path, argv)
+                result = self._launch(launch, work, attempt_dir, env, budget, proxy_dir)
+        finally:
+            self._proxy = None
         result.usage.update(attached_files=len(picked), attached_tokens=sum(f.tokens for f in picked),
                             resumed=bool(session_id), lsp=self.lsp, provider_host=urlsplit(route.upstream).hostname,
                             provider_requests=proxy.requests, provider_bytes=proxy.bytes)
+        self._take_provider_cost(result.usage, proxy)
         if proxy.capped or proxy.refused_models:
             # Mullet's own caps stopped the run: like a provider's, not the worker's failure.
             result.usage["proxy_refused"] = proxy.capped or "a request named another model"
@@ -1258,13 +1269,31 @@ class OpencodeExecutor:
             "session_id": state.session_id,
         }
 
-    def running_cost(self, state: _Stream) -> float:
-        """The attempt's cost so far: what opencode reported, else its tokens at `self.price`."""
-        if state.cost > 0:
-            return state.cost
+    def _price_tokens(self, tokens: dict[str, int]) -> float:
         from mullet.jobs.ladder import token_cost
 
-        return token_cost(state.tokens, self.price)
+        return token_cost(tokens, self.price)
+
+    @staticmethod
+    def _take_provider_cost(usage: dict[str, Any], proxy: KeyProxy) -> None:
+        """Record what the provider's own responses said, and never leave the cost below it.
+
+        opencode prices steps from its own catalogue, which can lack a model's cache
+        rates; the provider's stated cost (or the user's configured price) is the better figure.
+        """
+        summary = proxy.usage_summary()
+        usage.update(summary)
+        if summary["proxy_cost_usd"] > float(usage.get("total_cost_usd") or 0.0):
+            usage["total_cost_usd"] = summary["proxy_cost_usd"]
+            usage["cost_reported"] = True
+            usage["cost_source"] = "provider" if summary["proxy_provider_cost_usd"] > 0 else "configured price"
+
+    def running_cost(self, state: _Stream) -> float:
+        """The attempt's cost so far: the most of what opencode reported, what the provider said, or tokens at `self.price`."""
+        from mullet.jobs.ladder import token_cost
+
+        proxied = self._proxy.spent_usd if self._proxy is not None else 0.0
+        return max(state.cost, proxied) if max(state.cost, proxied) > 0 else token_cost(state.tokens, self.price)
 
     def _progress(self, state: _Stream, duration: float) -> bool:
         """After a step: pass the usage so far on, and say whether the attempt is past its spend."""

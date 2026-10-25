@@ -4,7 +4,7 @@ From nothing to a planned job in a few minutes. [INSTALL.md](INSTALL.md) has the
 
 ## 1. Install
 
-On Linux or macOS, with git and either uv or pipx:
+On Linux or macOS, with Python 3.10 to 3.12, git and either uv or pipx:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tomgould/mullet-public/main/scripts/install.sh | bash

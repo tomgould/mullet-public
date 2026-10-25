@@ -7,9 +7,21 @@ its build. Every such process gets:
   also hides sockets such as Docker's and the SSH agent's;
 - write access only to the paths the caller names, normally the clone;
 - read-only overlays for dependency directories inside those paths;
-- no network unless the caller asks for it (only setup does);
+- no network unless the caller asks for it (only setup does, see below);
 - a fresh environment built from an allowlist, never Mullet's own, which
   holds API keys loaded from .env.
+
+Setup commands share the host's network. `GateRunner.setup` passes
+`network=True`, so those commands run without `--unshare-net` and can reach
+anything the host can, loopback services and the local network included: the
+package managers in them (`pip`, `npm`, `composer`, `cargo`) need the
+internet, and there is no per-host filter here. Setup is still sandboxed in
+every other way (filesystem, environment, no Mullet keys), and it is the only
+step with network. Workers, checks and gates run with the network unshared.
+Setup commands come from the profile: the user's stored profile, and the
+repo's `.mullet/project.yaml` as committed at the job's base commit, never
+from files the worker edits. Treat a repo you don't trust as able to run
+arbitrary network-capable commands during setup.
 
 There is no unsandboxed fallback. If the sandbox can't start,
 `SandboxUnavailable` is raised and the caller must refuse the work.

@@ -10,8 +10,9 @@ they have all passed.
 The diff is the author's text, so it is fenced with a random per-call marker
 and labelled untrusted, and each file's part is capped so one huge file can't
 push the rest out of view. A review that hits a usage limit or crashes raises
-`GatePaused`: that says nothing about the change, so the attempt is paused or
-aborted, not judged.
+`GatePaused`, and one with no verdict returns "not run", which `run_gates`
+turns into `GatePaused`: none of that says anything about the change, so the
+attempt is set aside and the job pauses, never judged or committed.
 """
 
 from __future__ import annotations

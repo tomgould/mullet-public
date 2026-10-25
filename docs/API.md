@@ -1,5 +1,7 @@
 # Mullet API Reference
 
+The REST and WebSocket API (`mullet serve`) and the `mullet_*` MCP delegation tools are the single-task path. Long, unattended work runs as `mullet job` instead (see [MULLET2.md](MULLET2.md)), which has no REST API. By default every request except `GET /health` needs this install's token, and the server checks `Host` and `Origin` too; see [CONFIGURATION.md](CONFIGURATION.md#mullet-serve).
+
 ## REST API
 
 ### Health
@@ -120,7 +122,7 @@ Returns: complexity score, tier, signals, learning suggestion, project context.
 GET /metrics
 ```
 
-Prometheus-compatible metrics. It needs a token in enterprise mode (`MULLET_MODE=enterprise`).
+Prometheus-compatible metrics. It needs the install's token in solo mode and a personal access token in enterprise mode (`MULLET_MODE=enterprise`).
 
 The output has `mullet_uptime_seconds` plus counters, gauges and histograms for request counts, token usage, LLM latency, tool calls and active tasks.
 
@@ -208,7 +210,7 @@ ws://localhost:3000/ws
 
 ## MCP Tools
 
-Available when running `mullet mcp`:
+Available when running `mullet mcp`. `mullet_run`, `mullet_delegate`, `mullet_swarm` and `mullet_opencode` send work to a model provider. They are the legacy single-task path and refuse to run when `MULLET_DELEGATION=off` (the default is on; set it in the environment or in Mullet's `.env`). The other tools, and the `trawl_*` knowledge tools, do not check it.
 
 | Tool | Description |
 |---|---|

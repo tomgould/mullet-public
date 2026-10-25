@@ -8,6 +8,7 @@ the way a careless or dishonest executor might, then checks a gate catches it.
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,11 +17,11 @@ from mullet.jobs.clone import ChangedFile, JobClone, Snapshot, resolve_commit
 from mullet.jobs.executors.base import Budget, Task
 from mullet.jobs.executors.fake import FakeExecutor
 from mullet.jobs.gates import (
-    Baseline, CheckRun, GateContext, GateRunner, added_lines_between, is_test_file, is_test_path,
+    Baseline, CheckRun, GateContext, GatePaused, GateRunner, added_lines_between, is_test_file, is_test_path,
     parse_junit, regressions, run_gates, scan_gitleaks, scan_secrets, select_tests, symlink_escapes,
 )
 from mullet.jobs.profile import Checks, Profile
-from mullet.jobs.types import AttemptOutcome, GateStatus, NodeSpec, judge
+from mullet.jobs.types import AttemptOutcome, GateResult, GateStatus, NodeSpec, judge
 
 from tests.jobs_helpers import BASE_FILES, FAKE_KEY, git, good_change, write
 
@@ -682,14 +683,100 @@ def test_checks_use_job_caches_not_the_users(tmp_path, monkeypatch):
 
 
 @needs_bwrap
-def test_a_crashing_gate_fails_the_attempt(tmp_path, monkeypatch):
+def test_a_crashing_gate_pauses_instead_of_judging(tmp_path, monkeypatch):
+    # A bug in Mullet's own gate says nothing about the work, so it's never a verdict.
     env = make_env(tmp_path, monkeypatch)
 
     def boom(ctx):
         raise RuntimeError("bug in a gate")
 
     monkeypatch.setattr(gates, "gate_scope", boom)
+    with pytest.raises(GatePaused) as paused:
+        attempt(env, good_change)
+    assert "G2 crashed: RuntimeError: bug in a gate" in str(paused.value)
+    assert paused.value.until is None
+
+
+@needs_bwrap
+def test_work_that_trips_a_safety_check_still_fails(tmp_path, monkeypatch):
+    env = make_env(tmp_path, monkeypatch)
+
+    def unsafe(ctx):
+        raise gates.UnsafeWorkTree("planted symlink")
+
+    monkeypatch.setattr(gates, "gate_build", unsafe)
     results, outcome = attempt(env, good_change)
-    assert results["G2"].status is GateStatus.FAIL
-    assert "crashed" in results["G2"].summary
+    assert results["G4"].status is GateStatus.FAIL
     assert outcome is AttemptOutcome.FAILED
+
+
+@needs_bwrap
+@pytest.mark.parametrize("status", [GateStatus.NOT_RUN, GateStatus.SKIPPED])
+def test_a_review_with_no_verdict_pauses(tmp_path, monkeypatch, status):
+    env = make_env(tmp_path, monkeypatch)
+    node = NodeSpec(id="n1", goal="change things")
+    good_change(env.clone.work)
+    snap = env.clone.snapshot()
+    ctx = GateContext(env.runner, node, snap, env.baseline, False, env.source)
+    with pytest.raises(GatePaused) as paused:
+        run_gates(ctx, lambda ctx: GateResult("G7", status, "the review didn't complete: no verdict"))
+    assert "G7 gave no verdict" in str(paused.value)
+
+# ---- G5 reruns: only a test that passed in some run is excused as flaky --------------------
+
+def _g5(base: CheckRun, runs: list[CheckRun]):
+    scripted = list(runs)
+    names: list[str] = []
+
+    class Runner:
+        def run_command(self, name, command, timeout, *, tests=None, **kwargs):
+            names.append(name)
+            return scripted.pop(0)
+
+        def timeout_for(self, name):
+            return 1.0
+
+    ctx = SimpleNamespace(
+        profile=Profile(repo_id="fixture", checks=Checks(test_full="python3 runtests.py", junit=True)),
+        runner=Runner(), node=NodeSpec(id="n1", goal="change things"),
+        baseline=Baseline("base", {"test_full": base}), full_tests=True,
+        snapshot=Snapshot(tree="tree", base="base"), tests_retired=False,
+    )
+    return gates.gate_tests(ctx), names
+
+
+def test_g5_excuses_tests_that_passed_in_another_run():
+    base = _run({"t::a", "t::b"})
+    result, names = _g5(base, [_run({"t::b"}, failed={"t::a"}, code=1), _run({"t::a"}, failed={"t::b"}, code=1)])
+    assert result.status is GateStatus.PASS
+    assert names == ["test_full", "test_full-rerun"]
+
+
+def test_g5_a_test_that_never_passed_is_a_regression_whichever_run_it_failed_in():
+    # x and y are new tests. Each fails in one run and doesn't pass in the
+    # other (skipped), so neither has ever passed: both are regressions.
+    base = _run({"t::a"})
+    x_fails = _run({"t::a"}, failed={"t::x"}, skipped={"t::y"}, code=1)
+    y_fails = _run({"t::a"}, failed={"t::y"}, skipped={"t::x"}, code=1)
+    result, names = _g5(base, [x_fails, y_fails, x_fails])
+    assert result.status is GateStatus.FAIL
+    assert result.details["regressions"] == ["t::x", "t::y"]
+    assert len(names) == 3
+
+
+def test_g5_a_failure_followed_by_a_run_where_the_test_is_missing_still_counts():
+    base = _run({"t::a"})
+    new_fails = _run({"t::a"}, failed={"t::new"}, code=1)
+    new_gone = _run({"t::a"})
+    result, _ = _g5(base, [new_fails, new_gone, new_gone])
+    assert result.status is GateStatus.FAIL
+    assert result.details["regressions"] == ["t::new"]
+
+
+def test_g5_a_test_failing_in_every_run_is_a_regression():
+    base = _run({"t::a", "t::b"})
+    a_fails = _run({"t::b"}, failed={"t::a"}, code=1)
+    result, names = _g5(base, [a_fails, a_fails, a_fails])
+    assert result.status is GateStatus.FAIL
+    assert result.details["regressions"] == ["t::a"]
+    assert len(names) == 3

@@ -72,7 +72,7 @@ If unsure, err toward the more ceremonious mode. Escalating mid-cycle is fine; d
 
 ### 4.1 REQUIREMENTS & PLAN
 
-- Read the next item from `TODO.md`, `ROADMAP.md`, or `GAP_ANALYSIS.md`. If ambiguous or blocked, STOP and ask — do not invent scope.
+- Read the next item from `docs/TODO.md`, `docs/ROADMAP.md`, or `GAP_ANALYSIS.md` when the end-of-loop step (§8) has produced one. If ambiguous or blocked, STOP and ask — do not invent scope.
 - Draft a step-by-step implementation plan (files to touch, test cases, success criteria).
 - **VALIDATION CHECKPOINT — Plan critique**
      - Delegate to **OpenRouter (Rung 2)**: *Review this plan. Flag security issues, missed edge cases, architectural conflicts, hidden assumptions. Suggest test cases not in the plan.*
@@ -112,7 +112,7 @@ If unsure, err toward the more ceremonious mode. Escalating mid-cycle is fine; d
 
 - Update `TODO.md`: tick the item, update any `%` indicators, add new items surfaced during the cycle.
 - Update `CHANGELOG.md`: one entry under `## [Unreleased]` in Conventional Commits style.
-- Append to `progress.txt`: `YYYY-MM-DD HH:MM <what shipped>`.
+- Append to `.mullet/progress.txt`: `YYYY-MM-DD HH:MM <what shipped>`.
 - **Non-negotiable:** documentation happens in the same cycle as the code. Never batch.
 
 ### 4.7 COMMIT, PUSH & REINDEX
@@ -180,12 +180,12 @@ Honour these for the current cycle. Do not carry over to the next cycle unless p
 
 ## 6. Error Handling & Root-Cause Analysis
 
-- **Model failure (any Rung):** retry once. If it fails again, fall back one rung down (for simpler abstraction) OR escalate one rung up (if the task is too complex). Log in `progress.txt` with the failure message.
+- **Model failure (any Rung):** retry once. If it fails again, fall back one rung down (for simpler abstraction) OR escalate one rung up (if the task is too complex). Log in `.mullet/progress.txt` with the failure message.
 - **Reindex failure:** log, continue the loop, flag at end of session.
-- **Test failure after 2 fix attempts:** **STOP.** Write a Root Cause Analysis to `progress.txt`: failing stack, hypothesised cause, what was tried. Surface to user. Do not guess a third fix.
+- **Test failure after 2 fix attempts:** **STOP.** Write a Root Cause Analysis to `.mullet/progress.txt`: failing stack, hypothesised cause, what was tried. Surface to user. Do not guess a third fix.
 - **Ambiguous requirement:** **STOP.** Do not invent scope. Ask.
    - **Checkpoint circuit-breaker:** any validation checkpoint (plan-critique, peer review, etc.) looping >3 times without convergence → escalate to Opus Rung 5 for one-shot arbitration, then proceed with the arbitrated decision.
-- **Provider hallucinates tool calls:** record in `progress.txt` as a delegation-safety incident; strip tool mentions from delegate prompts where the provider has no tool access.
+- **Provider hallucinates tool calls:** record in `.mullet/progress.txt` as a delegation-safety incident; strip tool mentions from delegate prompts where the provider has no tool access.
 
 ---
 
@@ -195,14 +195,14 @@ Approaching the token/context budget, do this in order:
 
 1. Finish the current loop **sub-step only**. Do not start a new step.
 2. Commit WIP: `wip: <summary> [resume-here]`. No push. No reindex.
-3. Append to `progress.txt`:
+3. Append to `.mullet/progress.txt`:
    - **Completed:** what's done.
    - **Pending:** exact step (4.1–4.8) to resume at.
    - **State:** files mid-edit, failing tests, pending reviews, unmerged decisions.
 4. **STOP.** Do not begin another iteration.
 
 **Resume protocol (mandatory first action in the next session):**
-1. Read `progress.txt` — last 100 lines.
+1. Read `.mullet/progress.txt` — last 100 lines.
 2. Check `git status` + `git log --oneline -10`.
 3. Identify the `[resume-here]` marker.
 4. Resume at the step noted, NOT at the next cycle.
@@ -252,7 +252,7 @@ When `TODO.md` and `ROADMAP.md` are both empty:
 ## 11. Mullet project defaults (customisation point — swap for other projects)
 
 For THIS project:
-- Knowledge reindex command: `mullet reindex --pool mullet-dev` after code/test changes.
+- Knowledge reindex command: `mullet reindex --pool <your-project-pool>` after code/test changes.
 - Environment loader: `source scripts/_env_from_mcp.sh` before any `mullet --provider kimi|gemini` invocation.
 - Budget check: `python3 -c "from mullet.hud.guard import check_budget; r = check_budget(); print(r.status.value, r.message)"`.
 - After N cycles: `mullet review-session` for a loop retrospective; tie observations, decisions, and routing outcomes into a single report.

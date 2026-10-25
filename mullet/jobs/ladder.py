@@ -43,9 +43,14 @@ The policy (``plan_rungs`` and ``next_rung``):
   cheapest rung each kind may use;
 - one attempt per rung (Claude gets the rest of the job's attempts, or one
   when its week is tight); a model that failed a step's gates is never tried
-  again on another provider; after ``max_below_claude`` attempts below
-  Claude, Claude takes its turn; risky steps (``is_risky``: deletes, kills or
-  sends data) always get G7. Every skip is recorded with its reason.
+  again on another provider; a step gets at most ``max_below_claude``
+  counted attempts below Claude, before or after Claude's own, and then only
+  Claude; risky steps (``is_risky``: deletes, kills or sends data) always get
+  G7. Every skip is recorded with its reason;
+- every rung whose requests go to OpenRouter gets ``data_collection: deny``
+  and the quantisation filter (``request_fields``), by where it sends, not by
+  its name; the free rung on its ``:free`` model is the one exception, since
+  it only ever sees code that is public already.
 
 The config is the ``ladder:`` key of the user's own Mullet config
 (``config_file("config.yaml")``); never a file in the repo or the working
@@ -81,6 +86,8 @@ logger = logging.getLogger(__name__)
 
 RUNG_ORDER: tuple[str, ...] = ("free", "local", "kimi", "openrouter", "claude")
 PAID_RUNGS = frozenset({"kimi", "openrouter"})
+# opencode providers that run on this machine, so their models cost nothing.
+LOCAL_PROVIDERS = frozenset({"lmstudio", "ollama"})
 
 DEFAULT_KIMI_MODEL = "moonshotai/kimi-k2.7-code"
 DEFAULT_OPENROUTER_MODELS: tuple[str, ...] = ("openrouter/qwen/qwen3-coder", "openrouter/moonshotai/kimi-k2.7-code")
@@ -99,14 +106,19 @@ DEFAULT_FALLBACK_PRICE: dict[str, float] = {"input": 2.0, "output": 8.0}
 # (ORDERS) applies on top. Analysis steps never go to free or local models.
 DEFAULT_START: dict[str, str] = {"mechanical": "free", "design": "free", "analysis": "kimi"}
 DEFAULT_NARROW_GLOBS = 4
-# OpenRouter host routing for the paid OpenRouter rungs. Hosts that keep or
-# train on prompts are always left out, since private code goes there. By
-# default so are hosts serving a 4-bit or 6-bit copy, which code noticeably
-# worse; ``routing:`` in the config sets other fields per model.
+# OpenRouter host routing for every rung whose requests go to OpenRouter,
+# whatever the rung is called, except the free rung (see
+# ``LadderConfig.request_fields``). Hosts that keep or train on prompts are
+# always left out, since private code goes there. By default so are hosts
+# serving a 4-bit, 6-bit or int8 copy, which code noticeably worse, and hosts
+# that don't say which copy they serve ("unknown"). ``routing:`` in the config
+# sets other fields per model; a ``quantizations`` list there replaces this one,
+# so a user who accepts unknown hosts lists "unknown" in it.
 DEFAULT_OPENROUTER_ROUTING: dict[str, Any] = {
     "data_collection": "deny",
-    "quantizations": ["fp8", "fp16", "bf16", "fp32", "unknown"],
+    "quantizations": ["fp8", "fp16", "bf16", "fp32"],
 }
+OPENROUTER_PROVIDER = "openrouter"  # the opencode provider id of models served through OpenRouter
 _ROUTING_LISTS = ("order", "only", "ignore", "quantizations")
 DEFAULT_MAX_BELOW_CLAUDE = 3  # attempts below Claude before Claude gets its turn
 DEFAULT_CHEAP_MINUTES = 10.0  # wall clock per free or local attempt
@@ -180,6 +192,21 @@ class Rung:
         return f"{self.name} ({self.model})" if self.model else self.name
 
 
+def model_rung(model: str) -> Rung:
+    """The rung a single opencode worker's model counts as, for spending and the free-model check.
+
+    A ``:free`` model is the free rung and an LM Studio or ollama model the local
+    rung, neither paid; an OpenRouter model is the openrouter rung, and any other
+    provider's model the kimi rung (a provider billed directly).
+    """
+    if model.endswith(":free"):
+        return Rung("free", model)
+    provider = model.split("/", 1)[0]
+    if provider in LOCAL_PROVIDERS:
+        return Rung("local", model)
+    return Rung("openrouter" if provider == "openrouter" else "kimi", model)
+
+
 @dataclass
 class LadderConfig:
     """The ``ladder:`` section of the user's config, with defaults filled in."""
@@ -219,16 +246,33 @@ class LadderConfig:
         return out
 
     def request_fields(self, rung: Rung) -> dict[str, Any] | None:
-        """Fields the key proxy sets on the rung's requests: OpenRouter host routing, for paid OpenRouter rungs."""
-        if rung.name != "openrouter" or not rung.model:
+        """Fields the key proxy sets on the rung's requests: OpenRouter host routing, by where the requests go.
+
+        Every rung whose model is served through OpenRouter gets it, whatever
+        the rung is called (a ``kimi:`` set to an ``openrouter/...`` model
+        included). The one exception is the free rung on its ``:free`` model:
+        it only runs on code the public check found public already, which is
+        what makes a free host that may keep prompts acceptable, so it carries
+        no host filter that could leave a free model with no host at all. A
+        ``:free`` model on any other rung is filtered like a paid one.
+        """
+        if not rung.model or rung.upstream is not None or not is_openrouter_model(rung.model):
+            return None
+        if rung.name == "free" and rung.model.endswith(":free"):
             return None
         provider = {**DEFAULT_OPENROUTER_ROUTING, **self.routing.get(rung.model, {})}
         provider["data_collection"] = "deny"
-        return {"provider": provider}
+        # `usage.include` makes OpenRouter state each request's real cost in the response.
+        return {"provider": provider, "usage": {"include": True}}
 
     def price(self, model: str | None) -> dict[str, float]:
         """Dollars per million tokens for `model`: configured, else the fallback."""
         return self.prices.get(model or "") or self.fallback_price
+
+
+def is_openrouter_model(model: str | None) -> bool:
+    """True when an opencode model id is served through OpenRouter (``openrouter/<vendor>/<model>``)."""
+    return bool(model) and str(model).split("/", 1)[0] == OPENROUTER_PROVIDER
 
 
 def config_path() -> Path:
@@ -329,11 +373,13 @@ def parse_config(data: Any, source: str | None = None) -> LadderConfig:
             analysis: kimi
           narrow_globs: 4                          # most scope globs a checkable design step may have
           risky_words: [delete, kill, send, ...]   # mark steps that always get the G7 review
-          max_below_claude: 3                      # attempts below Claude before Claude's turn
+          max_below_claude: 3                      # most counted attempts below Claude per step
           cheap_minutes: 10                        # wall clock per free or local attempt
           local_by_day: true                       # false: the local rung only runs in night mode
           routing:                                 # OpenRouter host choice per model (data_collection is always deny)
             openrouter/z-ai/glm-5.3: {only: [z-ai]}  # also order, ignore, quantizations, allow_fallbacks, sort
+            openrouter/qwen/qwen3-coder:             # a quantizations list replaces the default
+              quantizations: [fp8, fp16, bf16, fp32, unknown]  # the default leaves out unknown, fp4, int4, int8
 
     A value it can't use is dropped with a note in ``problems``, never guessed.
     """
@@ -605,6 +651,11 @@ class SpendState:
     spent: float = 0.0
     by_rung: dict[str, float] = field(default_factory=dict)
     estimated: bool = False  # some of it is tokens times a price, not a reported cost
+    # Why `cap` is what it is when a shared limit (budget.envelope) lowered it below the job's own.
+    reason: str = ""
+    # Dollars left under budget.per_rung for a paid rung, and the reason it runs out; unlisted rungs are unlimited.
+    rung_left: dict[str, float] = field(default_factory=dict)
+    rung_reasons: dict[str, str] = field(default_factory=dict)
 
     @property
     def capped(self) -> bool:
@@ -930,6 +981,7 @@ def plan_rungs(node: NodeSpec, profile: Profile, budget: BudgetState, machine: M
     configured = {name: [r for r in config.rungs() if r.name == name] for name in RUNG_ORDER}
     rungs: list[Rung] = []
     capped = False
+    rung_limited = False  # a paid rung skipped for its own limit: only a cap when no paid rung is left
     for name in RUNG_ORDER:
         if name not in order:
             for rung in configured[name]:
@@ -948,14 +1000,18 @@ def plan_rungs(node: NodeSpec, profile: Profile, budget: BudgetState, machine: M
             elif rung.name == "local" and not machine.local_ok:
                 reason = machine.reason or "the machine has no room for local work"
             elif rung.paid and spend.capped:
-                reason = f"the job's spending cap is reached (${spend.spent:.2f} of ${spend.cap:.2f})"
+                reason = spend.reason or f"the job's spending cap is reached (${spend.spent:.2f} of ${spend.cap:.2f})"
                 capped = True
+            elif rung.paid and spend.rung_left.get(rung.name, 1.0) <= 0:
+                reason = spend.rung_reasons.get(rung.name) or f"the {rung.name} spending limit is reached"
+                rung_limited = True
             elif not has_key(rung):
                 reason = "no API key for its provider"
             if reason:
                 skipped.append((rung.label(), reason))
             else:
                 rungs.append(rung)
+    capped = capped or (rung_limited and not any(r.paid for r in rungs))
     return RungChoice(rungs, skipped, group, capped)
 
 
@@ -1015,8 +1071,13 @@ def next_rung(choice: RungChoice, tried: list[Tried], budget: BudgetState, *, ma
 
     A rung whose model already failed this step's gates elsewhere is never
     tried (only a provider error lets the same model run again on another
-    provider), and after ``config.max_below_claude`` counted attempts below
-    Claude, Claude gets its turn before any other rung ahead of it.
+    provider). ``config.max_below_claude`` caps the counted attempts on every
+    rung but Claude, before and after Claude's own attempts alike: once that
+    many have run, only Claude may take the step, and without Claude (or with
+    its tries used) the step has run out of rungs. Counted means passed,
+    unverified or failed (``Tried.counted``); a provider error, a moved-up or
+    an aborted attempt never uses up the allowance. Night mode raises the cap
+    through ``apply_night``.
     """
     counted: dict[str, int] = {}
     used: set[str] = set()
@@ -1033,11 +1094,10 @@ def next_rung(choice: RungChoice, tried: list[Tried], budget: BudgetState, *, ma
     claude_done = counted.get("claude:", 0)
     below = sum(n for k, n in counted.items() if k != "claude:")
     tries = claude_tries(budget, max_attempts, below) + extra_claude_tries
-    claude_at = choice.rungs.index(claude) if claude else len(choice.rungs)
-    claude_turn_due = claude is not None and claude_done == 0 and below >= config.max_below_claude
+    cap = config.max_below_claude
     skipped: list[tuple[str, str]] = []
 
-    def usable(i: int, rung: Rung, note: bool) -> bool:
+    def usable(rung: Rung, note: bool, below_now: int) -> bool:
         if rung.name == "claude":
             return claude_done < tries
         if rung.key in used:
@@ -1046,17 +1106,20 @@ def next_rung(choice: RungChoice, tried: list[Tried], budget: BudgetState, *, ma
             if note:
                 skipped.append((rung.label(), "its model already failed this step's checks"))
             return False
-        if claude_turn_due and i < claude_at:
+        if below_now >= cap:
             if note:
-                skipped.append((rung.label(), f"{config.max_below_claude} attempts below Claude already; "
-                                              "Claude's turn"))
+                turn = "Claude's turn" if claude is not None and claude_done < tries else "no more below Claude"
+                skipped.append((rung.label(), f"{cap} attempts below Claude already (ladder.max_below_claude); "
+                                              f"{turn}"))
             return False
         return True
 
     for i, rung in enumerate(choice.rungs):
-        if not usable(i, rung, True):
+        if not usable(rung, True, below):
             continue
-        later = [r for j, r in enumerate(choice.rungs) if j > i and r.name != "claude" and usable(j, r, False)]
+        below_after = below + (0 if rung.name == "claude" else 1)
+        later = [r for j, r in enumerate(choice.rungs)
+                 if j > i and r.name != "claude" and usable(r, False, below_after)]
         claude_left = claude is not None and claude_done + (1 if rung.name == "claude" else 0) < tries
         return NextRung(rung, final=not later and not claude_left, skipped=skipped)
     total = sum(counted.values())

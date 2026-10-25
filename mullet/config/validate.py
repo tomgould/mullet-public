@@ -100,6 +100,20 @@ def validate_config(data: dict) -> ValidationResult:
                     val = budget[key]
                     if not isinstance(val, (int, float)) or val <= 0:
                         result.add_error(f"budget.{key}", f"Must be a positive number (got {val!r})")
+            from mullet.jobs.budget import parse_budget
+
+            for problem in parse_budget(budget, "budget").problems:
+                result.add_error("budget", problem)
+
+    delegation = data.get("delegation")
+    if delegation is not None:
+        if not isinstance(delegation, dict):
+            result.add_error("delegation", "Must be a mapping")
+        else:
+            from mullet.core.toolset_policy import parse_policy
+
+            for problem in parse_policy(delegation.get("toolsets"), "delegation.toolsets").problems:
+                result.add_error("delegation.toolsets", problem)
 
     # Validate max_iterations
     max_iter = data.get("max_iterations")
@@ -126,7 +140,7 @@ def validate_config(data: dict) -> ValidationResult:
     # Warn about unknown top-level keys
     known_keys = {
         "providers", "routing", "budget", "max_iterations", "server",
-        "knowledge", "toolsets", "plugins", "skills", "default_toolsets", "ladder",
+        "knowledge", "toolsets", "plugins", "skills", "default_toolsets", "ladder", "delegation",
     }
     for key in data:
         if key not in known_keys and not key.startswith("#"):

@@ -8,7 +8,7 @@
 
 - [1. Before You Start](#1-before-you-start)
 - [2. Install Homebrew](#2-install-homebrew)
-- [3. Install Python 3.10+](#3-install-python-310)
+- [3. Install Python 3.10 to 3.12](#3-install-python-310-to-312)
 - [4. Install Git](#4-install-git)
 - [5. Install Claude Code](#5-install-claude-code)
 - [6. Get Your API Keys (Optional)](#6-get-your-api-keys-optional)
@@ -52,7 +52,7 @@ First, let's check if it's already on your Mac. Open **Terminal** (press `Cmd + 
 brew --version
 ```
 
-If you see something like `Homebrew 4.x.x`, you're all set. Skip to [Section 3](#3-install-python-310).
+If you see something like `Homebrew 4.x.x`, you're all set. Skip to [Section 3](#3-install-python-310-to-312).
 
 If you see `command not found`, paste this one line into Terminal and press `Return`:
 
@@ -73,7 +73,7 @@ Run 'brew help' to get started
 
 ---
 
-## 3. Install Python 3.10+
+## 3. Install Python 3.10 to 3.12
 
 Mullet is written in **Python**, a popular programming language. macOS comes with an older version, so let's make sure you have a fresh one.
 
@@ -83,9 +83,9 @@ In Terminal, type:
 python3 --version
 ```
 
-**If you see `Python 3.10.x` or higher** (for example, `Python 3.12.4`), you're good. Skip to [Section 4](#4-install-git).
+**If you see `Python 3.10.x`, `3.11.x` or `3.12.x`** (for example, `Python 3.12.4`), you're good. Skip to [Section 4](#4-install-git).
 
-**If you see `command not found` or a version below 3.10**, run:
+**If you see `command not found` or a version outside 3.10 to 3.12**, run:
 
 ```bash
 brew install python@3.12
@@ -228,7 +228,7 @@ Gemini also needs a small extra Python package. [Section 7](#7-install-mullet) s
 
 Now for the main event. One command downloads Mullet from GitHub and installs it as its own tool, so it can't clash with other Python projects on your Mac.
 
-The installer needs **git** and **Python 3.10+** (you have both from the earlier sections), plus **uv** or **pipx**. If you have neither, install uv:
+The installer needs **git** and **Python 3.10 to 3.12** (you have both from the earlier sections), plus **uv** or **pipx**. If you have neither, install uv:
 
 ```bash
 brew install uv

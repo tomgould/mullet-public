@@ -8,7 +8,15 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+
+from mullet.server.guard import get_or_create_token
+
+
+def _auth():
+    """The server's token: same throwaway HOME as the subprocess, so the same file."""
+    return {"Authorization": f"Bearer {get_or_create_token()}"}
 
 
 def _wait_for_server(port, timeout=30):
@@ -63,7 +71,7 @@ def test_serve_info():
     try:
         assert _wait_for_server(port), "Server did not start"
 
-        req = urllib.request.Request(f"http://localhost:{port}/api/v1/info")
+        req = urllib.request.Request(f"http://localhost:{port}/api/v1/info", headers=_auth())
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
             assert data["tool_count"] >= 13
@@ -84,11 +92,31 @@ def test_serve_models():
     try:
         assert _wait_for_server(port), "Server did not start"
 
-        req = urllib.request.Request(f"http://localhost:{port}/v1/models")
+        req = urllib.request.Request(f"http://localhost:{port}/v1/models", headers=_auth())
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
             assert data["object"] == "list"
             assert len(data["data"]) >= 1
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_serve_refuses_a_request_without_the_token():
+    """The real server needs this install's token for everything but /health."""
+    port = 19879
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mullet.cli.main", "serve", "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert _wait_for_server(port), "Server did not start"
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/v1/models", timeout=15)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+        else:
+            raise AssertionError("an unauthenticated request was served")
     finally:
         proc.terminate()
         proc.wait(timeout=5)

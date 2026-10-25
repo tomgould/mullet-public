@@ -175,7 +175,12 @@ def _build_server_agent(user_message: str, opts: dict, on_token=None, on_tool_ca
 
     # Load knowledge if client specified
     client = opts.get("client")
-    toolsets = ["terminal", "file", "web", "code", "browser", "delegation", "session", "git", "testing", "vision", "docker", "lsp"]
+    from mullet.core.toolset_policy import apply_policy
+
+    toolsets = apply_policy(
+        ["terminal", "file", "web", "code", "browser", "delegation", "session", "git", "testing", "vision", "docker", "lsp"],
+        getattr(provider, "name", None),
+    )
     if client:
         try:
             from mullet.core.knowledge.manager import build_knowledge_environment

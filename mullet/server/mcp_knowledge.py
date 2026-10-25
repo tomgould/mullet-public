@@ -29,25 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 def _is_safe_url(url: str) -> bool:
-    """Block file://, private/loopback IPs, and localhost URLs."""
-    try:
-        parsed = _urlparse(url)
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    hostname = parsed.hostname or ""
-    if hostname.lower() in ("localhost", ""):
-        return False
-    try:
-        addr = ipaddress.ip_address(hostname)
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-            return False
-    except ValueError:
-        # Not an IP literal — check for localhost variants
-        if hostname.lower().endswith(".localhost"):
-            return False
-    return True
+    """True only for an http(s) URL whose host resolves to public addresses."""
+    from mullet.core.tools.url_safety import is_safe_url
+    return is_safe_url(url)
 
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_.\-]+$")
@@ -1650,7 +1634,8 @@ def handle_ingest_url(args: dict) -> str:
         MAX_SIZE = 50 * 1024 * 1024  # 50MB
         req = urllib.request.Request(url, headers={"User-Agent": "Mullet/1.0"})
         start = time.time()
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        from mullet.core.tools.url_safety import safe_urlopen
+        with safe_urlopen(req, timeout=30) as resp:
             content_length = resp.headers.get("Content-Length")
             if content_length and int(content_length) > MAX_SIZE:
                 return f"Error: Content too large ({int(content_length) // 1024 // 1024}MB > 50MB limit)"

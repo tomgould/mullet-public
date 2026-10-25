@@ -112,10 +112,12 @@ class WebSocketHandler:
                                 await ws.send_json({"type": "authenticated", "data": user})
                             else:
                                 await ws.send_json({"type": "error", "data": {"code": "auth_failed", "message": "Invalid token"}})
-                        else:
+                        elif MulletMode.is_solo():
                             from mullet.server.auth import get_solo_user
                             current_user = get_solo_user()
                             await ws.send_json({"type": "authenticated", "data": get_solo_user()})
+                        else:
+                            await ws.send_json({"type": "error", "data": {"code": "auth_failed", "message": "Token required"}})
 
                     elif msg_type == "list_projects":
                         if current_user is None and not MulletMode.is_solo():
