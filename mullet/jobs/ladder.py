@@ -17,7 +17,7 @@ The policy (``plan_rungs`` and ``next_rung``):
   says ``ladder: claude-only`` are Claude only;
 - each step is mechanical, checkable (a design step with acceptance
   commands, a narrow scope and nothing risky) or claude-first (analysis, any
-  other design step, a parent's integration fix). The order of rungs comes
+  other design step, a one-way step, a parent's integration fix). The order of rungs comes
   from Claude's budget level (``ORDERS``):
 
   - low (Claude's week has room): mechanical ``free, local, claude, kimi,
@@ -45,8 +45,8 @@ The policy (``plan_rungs`` and ``next_rung``):
   when its week is tight); a model that failed a step's gates is never tried
   again on another provider; a step gets at most ``max_below_claude``
   counted attempts below Claude, before or after Claude's own, and then only
-  Claude; risky steps (``is_risky``: deletes, kills or sends data) always get
-  G7. Every skip is recorded with its reason;
+  Claude; risky steps (``is_risky``: one-way, or deletes, kills or sends
+  data) always get G7. Every skip is recorded with its reason;
 - every rung whose requests go to OpenRouter gets ``data_collection: deny``
   and the quantisation filter (``request_fields``), by where it sends, not by
   its name; the free rung on its ``:free`` model is the one exception, since
@@ -915,7 +915,13 @@ _WORD = re.compile(r"[a-z0-9]+")
 
 
 def is_risky(node: NodeSpec, config: LadderConfig) -> bool:
-    """True when the step's goal, acceptance or scope mentions code that deletes, kills or sends data."""
+    """True for a one-way step, or when its goal, acceptance or scope mentions code that deletes, kills or sends data.
+
+    The planner can mark a step one-way to raise its risk; it can't lower it,
+    since the risky words are checked whatever the plan says.
+    """
+    if node.door == "one-way":
+        return True
     text = " ".join([node.goal, *node.acceptance, *node.scope]).lower()
     words = set(_WORD.findall(text))
     return any(w in words for w in config.risky_words)
@@ -931,6 +937,8 @@ def step_group(node: NodeSpec, config: LadderConfig, *, integration: bool = Fals
     """(group, why): mechanical, checkable (a design step its checks can judge) or claude-first."""
     if integration:
         return CLAUDE_FIRST, "a parent's integration fix"
+    if node.door == "one-way":
+        return CLAUDE_FIRST, "a one-way step (hard to walk back)"
     if node.kind == "mechanical":
         return MECHANICAL, "a mechanical step"
     if node.kind == "design" and is_checkable(node, config) and not is_risky(node, config):

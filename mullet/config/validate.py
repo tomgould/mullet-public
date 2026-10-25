@@ -128,6 +128,29 @@ def validate_config(data: dict) -> ValidationResult:
                 else:
                     result.add_error("session", problem)
 
+    jobs = data.get("jobs")
+    if jobs is not None:
+        if not isinstance(jobs, dict):
+            result.add_error("jobs", "Must be a mapping")
+        else:
+            from mullet.jobs.settings import parse_settings as parse_jobs
+
+            for problem in parse_jobs(jobs, "jobs").problems:
+                if "unknown setting" in problem:
+                    result.add_warning(problem.split(":", 1)[0], "Unknown jobs setting (ignored)")
+                else:
+                    result.add_error("jobs", problem)
+
+    sandbox = data.get("sandbox")
+    if sandbox is not None:
+        from mullet.jobs.sandbox_backends.settings import parse_settings as parse_sandbox
+
+        for problem in parse_sandbox(sandbox, "sandbox").problems:
+            if "unknown setting" in problem:
+                result.add_warning(problem.split(":", 1)[0], "Unknown sandbox setting (ignored)")
+            else:
+                result.add_error(problem.split(":", 1)[0], problem)
+
     # Validate max_iterations
     max_iter = data.get("max_iterations")
     if max_iter is not None:
@@ -154,6 +177,7 @@ def validate_config(data: dict) -> ValidationResult:
     known_keys = {
         "providers", "routing", "budget", "max_iterations", "server",
         "knowledge", "toolsets", "plugins", "skills", "default_toolsets", "ladder", "delegation", "session",
+        "sandbox", "jobs",
     }
     for key in data:
         if key not in known_keys and not key.startswith("#"):

@@ -1,6 +1,12 @@
 # Mullet
 
-Mullet runs a large coding job in a repo while you are away, and checks every step itself before it counts. You approve a plan, leave it running, and come back to a branch and an evidence report. Your own checkout is not touched until you merge.
+Mullet runs a large coding job in your repo unattended: you approve a task tree, then each step runs in a sandboxed private clone with no network, and provider keys stay outside the sandbox.
+
+A step counts only when Mullet's own gates pass, never on a model's word. You get back a branch and an evidence report, and your checkout is untouched until you merge.
+
+A ladder tries free and local workers before paid ones, under the daily and weekly spending limits you set.
+
+Install and first job: [Install](#install) and [Quick start](#quick-start). Design decisions: [docs/adr/](docs/adr/README.md).
 
 Each step is done by a worker in a sandboxed private clone. A step passes only when Mullet's own gates pass: real changes in the diff, files within scope, no secrets, a clean build, tests no worse than before, and a fresh review. Nothing is marked done because a model said so.
 

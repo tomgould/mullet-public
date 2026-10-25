@@ -134,7 +134,7 @@ def test_full_output_goes_to_the_log(work, tmp_path):
 def test_mount_order(work):
     deps = work / "deps"
     deps.mkdir()
-    argv = sandbox.build_argv(["true"], SandboxSpec(cwd=work, writable=[work], readonly_overlays=[deps]))
+    argv = sandbox.backend().build_argv(["true"], SandboxSpec(cwd=work, writable=[work], readonly_overlays=[deps]))
     tmpfs_home = argv.index(str(Path.home()))
     bind_work = argv.index("--bind")
     overlay = len(argv) - 1 - argv[::-1].index("--ro-bind")
@@ -146,7 +146,7 @@ def test_mount_order(work):
 @needs_bwrap
 def test_writable_must_be_a_directory(tmp_path):
     with pytest.raises(ValueError):
-        sandbox.build_argv(["true"], SandboxSpec(cwd=tmp_path, writable=[tmp_path / "missing"]))
+        sandbox.backend().build_argv(["true"], SandboxSpec(cwd=tmp_path, writable=[tmp_path / "missing"]))
 
 
 def test_no_new_commands_start_after_a_stop(tmp_path):
@@ -177,7 +177,7 @@ def test_kill_in_dir_leaves_older_processes_alone(tmp_path):
 def test_unavailable_sandbox_refuses(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox, "check", lambda: SandboxCheck(False, "bwrap", "no userns"))
     with pytest.raises(SandboxUnavailable, match="no userns"):
-        sandbox.build_argv(["true"], SandboxSpec(cwd=tmp_path, writable=[tmp_path]))
+        sandbox.spawn(["true"], SandboxSpec(cwd=tmp_path, writable=[tmp_path]), stdout=None, stderr=None)
 
 
 def test_build_env_never_inherits_secrets(monkeypatch, tmp_path):
@@ -201,11 +201,11 @@ def test_read_tail_handles_missing_file(tmp_path):
 
 
 def test_check_reports_platform(monkeypatch):
-    sandbox.check.cache_clear()
+    sandbox.clear_cache()
     monkeypatch.setattr(sandbox.sys, "platform", "darwin")
     try:
         status = sandbox.check()
         assert not status.ok and "darwin" in status.reason
     finally:
-        sandbox.check.cache_clear()
+        sandbox.clear_cache()
     assert os.environ.get("PATH")

@@ -63,3 +63,4 @@ Tests for `mullet/jobs/` use a fake executor (`executors/fake.py`) and no real m
 3. Syntax check: `python3 -m py_compile <file>`
 4. Run relevant tests
 5. Report what changed and test results
+- Design decisions are recorded in `docs/adr/` (start at `docs/adr/README.md`).

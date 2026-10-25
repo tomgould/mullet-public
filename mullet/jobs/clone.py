@@ -20,14 +20,20 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from mullet.jobs.paths import ensure_inside, jobs_home
+from mullet.jobs.settings import load_settings
 
 _FALLBACK_IDENTITY = ("Mullet", "mullet@localhost")
+# How long a timed-out git gets, after SIGTERM, to remove its *.lock files and
+# exit before its process group is killed. A few seconds is enough for git's
+# own signal cleanup, and short enough that a stuck one doesn't hold up the job.
+GIT_TERM_GRACE_SECONDS = 5.0
 
 
 class GitError(RuntimeError):
@@ -74,6 +80,7 @@ def _git_env(extra: dict[str, str] | None = None, *, isolated: bool = True) -> d
     """
     env = {k: os.environ[k] for k in _ENV_KEEP if k in os.environ}
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["LC_ALL"] = "C"  # output is parsed, so it must not depend on the user's language
     if isolated:
         env["GIT_CONFIG_NOSYSTEM"] = "1"
         env["GIT_CONFIG_GLOBAL"] = os.devnull
@@ -82,12 +89,71 @@ def _git_env(extra: dict[str, str] | None = None, *, isolated: bool = True) -> d
     return env
 
 
+def _kill_group(child: subprocess.Popen) -> None:
+    """Kill git and anything it started (a transport helper, a filter) together."""
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        child.kill()
+
+
+def _stop_group(child: subprocess.Popen) -> None:
+    """Stop a timed-out git: SIGTERM to its group, `GIT_TERM_GRACE_SECONDS` to exit, then SIGKILL.
+
+    git removes its own *.lock files when it gets SIGTERM; SIGKILL at once
+    would leave them behind and break every later git command on the clone.
+    Whatever is left of the group after the grace (or after git exits) is
+    killed, and the pipes are drained throughout so a chatty git can't block.
+    """
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        child.terminate()
+    try:
+        child.communicate(timeout=GIT_TERM_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        if child.poll() is None:
+            child.kill()
+    child.communicate()
+
+
+def _subcommand(cmd: list[str]) -> str:
+    """The git subcommand and its first words, without the -c and -C options before it."""
+    words = iter(cmd[1:])
+    kept: list[str] = []
+    for word in words:
+        if word in ("-c", "-C"):
+            next(words, None)
+        elif not kept and word.startswith("-"):
+            continue
+        else:
+            kept.append(word)
+    return " ".join(kept[:3])
+
+
 def _run(cmd: list[str], *, cwd: Path, env: dict[str, str], check: bool = True,
          stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(
-        cmd, cwd=cwd, env=env, input=stdin, capture_output=True, text=True,
-        errors="replace",
-    )
+    limit = load_settings().git_timeout_seconds
+    with subprocess.Popen(
+        cmd, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, errors="replace", start_new_session=True,
+    ) as child:
+        try:
+            stdout, stderr = child.communicate(input=stdin, timeout=limit)
+        except subprocess.TimeoutExpired:
+            _stop_group(child)
+            raise GitError(
+                f"`git {_subcommand(cmd)}` did not finish within {limit:g} seconds and was stopped; "
+                "raise jobs.git_timeout_seconds in the Mullet config if the repository is that large"
+            ) from None
+        except BaseException:
+            _kill_group(child)
+            raise
+    proc = subprocess.CompletedProcess(cmd, child.returncode, stdout, stderr)
     if check and proc.returncode != 0:
         raise GitError(f"{' '.join(cmd[:6])}... failed ({proc.returncode}): {proc.stderr.strip()[:500]}")
     return proc
@@ -268,17 +334,36 @@ class JobClone:
             args += ["-e", "/" + path.strip("/")]
         self.git(*args)
 
-    def fetch_into(self, repo: Path, target_branch: str) -> str:
-        """Copy the job branch into the user's repo as `target_branch`.
+    def has_tree(self, tree: str) -> bool:
+        """True when this clone still holds the tree object `tree`."""
+        return self.git("cat-file", "-e", f"{tree}^{{tree}}", check=False).returncode == 0
+
+    def keep_tree(self, tree: str, parent: str, ref: str, message: str) -> str:
+        """Commit `tree` on top of `parent` under the clone-only ref `ref` and return the SHA.
+
+        The job branch is not moved; the commit is reachable only through `ref`,
+        so `fetch_into(..., ref=ref)` can hand it back.
+        """
+        if not ref.startswith("refs/mullet/"):
+            raise GitError(f"{ref!r} is not a Mullet-private ref")
+        sha = self.git("commit-tree", tree, "-p", parent, stdin=message).stdout.strip()
+        self.git("update-ref", ref, sha)
+        return sha
+
+    def fetch_into(self, repo: Path, target_branch: str, *, ref: str | None = None,
+                   force: bool = False) -> str:
+        """Copy the job branch (or `ref` in this clone) into the user's repo as `target_branch`.
 
         This is the only operation that writes to the user's repository, and
-        it only adds or fast-forwards that one branch ref.
+        it only adds or fast-forwards that one branch ref; `force` also lets it
+        replace the branch. Git itself refuses to touch the branch checked out
+        in the user's work tree.
         """
-        branch = self.branch()
+        source = ref or f"refs/heads/{self.branch()}"
         repo = Path(repo).resolve()
         _run(
             ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", "fetch", "--quiet",
-             "--no-tags", str(self.git_dir), f"refs/heads/{branch}:refs/heads/{target_branch}"],
+             "--no-tags", str(self.git_dir), f"{'+' if force else ''}{source}:refs/heads/{target_branch}"],
             cwd=repo, env=_git_env(isolated=False),
         )
         return resolve_commit(repo, f"refs/heads/{target_branch}")

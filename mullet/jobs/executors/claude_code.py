@@ -17,8 +17,8 @@ Each attempt's prompt is Mullet's task brief (`mullet.jobs.context`): the
 goals, the planner's notes, what earlier nodes changed, the checks, a symbol
 outline and a repo map. Claude explores well on its own, so file contents
 are only pre-loaded when `preload_files` is set. Worker sessions are kept so
-the runner can `resume` one with gate feedback; planner and reviewer
-sessions (`ask`) are not.
+the runner can `resume` one with gate feedback; planner and reviewer sessions
+(`ask`) are kept only while `jobs.reask_attempts` is above 0.
 
 What the run says about its own work is returned as a claim. The gates
 decide whether it did the work.
@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from mullet.jobs import children, context
-from mullet.jobs.executors.base import Budget, ExecResult, ExecutorUnavailable, Task
+from mullet.jobs.executors.base import Budget, ExecResult, ExecutorUnavailable, Task, Watch, idle_text
 
 __all__ = ["ClaudeCodeExecutor", "ExecutorUnavailable", "build_prompt", "build_resume_prompt"]
 
@@ -89,7 +89,13 @@ Rules:
 - Your current directory is a private copy of the repository. Work only there.
 - Change only files that match the scope above. Leave lockfiles, CI config,
   .claude/, CLAUDE.md, .mcp.json and .env files alone unless this step says otherwise.
+- Any new test file must match the scope too. If the step needs one outside it,
+  answer "blocked" and say so rather than writing it elsewhere.
 - Don't commit or run git commands that change anything. Mullet records your work.
+- Make the smallest change that meets the goal. Write one test, then the code
+  for it, one behaviour at a time.
+- Don't invent new test helpers or seams just to make code testable. Leave no
+  commented-out code and no TODO comments.
 - Don't weaken, skip or delete tests to get them passing.
 - Run the project's checks before you finish if you can.
 - Mullet checks your work itself after you stop, so report honestly.
@@ -194,6 +200,7 @@ class _StreamState:
     rate_limit: dict[str, Any] = field(default_factory=dict)
     rejected: dict[str, Any] | None = None  # kept even if a later event says "allowed"
     result: dict[str, Any] | None = None
+    watch: Watch | None = None
 
 
 def _consume(stream, transcript_path: Path, state: _StreamState) -> None:
@@ -201,6 +208,8 @@ def _consume(stream, transcript_path: Path, state: _StreamState) -> None:
         for line in stream:
             transcript.write(line)
             state.lines += 1
+            if state.watch is not None:
+                state.watch.output()
             try:
                 event = json.loads(line)
             except ValueError:
@@ -218,6 +227,8 @@ def _consume(stream, transcript_path: Path, state: _StreamState) -> None:
                     state.rejected = info
             elif kind == "result":
                 state.result = event
+                if state.watch is not None:
+                    state.watch.finished()
 
 
 class ClaudeCodeExecutor:
@@ -246,8 +257,9 @@ class ClaudeCodeExecutor:
                 persist: bool = False, resume: str | None = None) -> list[str]:
         """The full CLI invocation. The prompt goes on stdin, not the command line.
 
-        Only worker sessions are kept (`persist`), so a failed attempt can be
-        resumed; planner and reviewer sessions leave nothing behind.
+        Worker sessions are kept (`persist`), so a failed attempt can be
+        resumed, and so are planner and reviewer sessions that may be asked
+        again for a reply they couldn't use; other sessions leave nothing behind.
         """
         if not self.binary:
             raise ExecutorUnavailable("the claude CLI is not on PATH")
@@ -286,13 +298,18 @@ class ClaudeCodeExecutor:
                             persist=True, resume=session_id)
 
     def ask(self, prompt: str, cwd: Path, schema: dict[str, Any], budget: Budget, *,
-            model: str | None = None, label: str = "ask") -> ExecResult:
+            model: str | None = None, label: str = "ask", persist: bool = False,
+            resume: str | None = None) -> ExecResult:
         """A read-only session (Read, Glob, Grep) that answers `prompt` as JSON matching `schema`.
 
-        Used by the planner and the reviewer. The answer is in `claim`.
+        Used by the planner and the reviewer. The answer is in `claim`. With
+        `persist` the session is kept (its id in `session_id`) so `resume` can
+        continue it: the planner and reviewer ask again that way for a reply
+        they couldn't use.
         """
         return self._launch(prompt, cwd, build_readonly_settings(cwd, self.read_paths), budget,
-                            tools=READ_ONLY_TOOLS, schema=schema, model=model, label=label)
+                            tools=READ_ONLY_TOOLS, schema=schema, model=model, label=label,
+                            persist=persist, resume=resume)
 
     def _launch(self, prompt: str, cwd: Path, settings: dict[str, Any], budget: Budget, *,
                 tools: str, schema: dict[str, Any], model: str | None, label: str,
@@ -322,12 +339,13 @@ class ClaudeCodeExecutor:
         private_tmp = Path(tempfile.mkdtemp(prefix="mullet-", dir="/tmp" if os.path.isdir("/tmp") else None))
         env["TMPDIR"] = str(private_tmp)
 
-        state = _StreamState()
+        state = _StreamState(watch=Watch(budget.idle_s, budget.grace_s))
         started = time.monotonic()
         started_wall = time.time()
-        timed_out = False
+        stop: _Stop = None
         children.check_not_stopping()
-        with open(attempt_dir / "stderr.log", "wb") as stderr:
+        stderr_path = attempt_dir / "stderr.log"
+        with open(stderr_path, "wb") as stderr:
             proc = subprocess.Popen(
                 argv, cwd=work, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=stderr, text=True, encoding="utf-8", errors="replace", start_new_session=True,
@@ -341,10 +359,9 @@ class ClaudeCodeExecutor:
                 except BrokenPipeError:
                     pass
                 try:
-                    proc.wait(timeout=budget.wall_clock_s)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    _kill_group(proc)
+                    stop = _wait(proc, started, budget, state.watch, stderr_path)
+                    if stop is not None:
+                        _kill_group(proc)
                 except BaseException:  # Ctrl-C or a stop: take the CLI and its children with us
                     _kill_group(proc)
                     shutil.rmtree(private_tmp, ignore_errors=True)
@@ -352,13 +369,17 @@ class ClaudeCodeExecutor:
             reader.join(timeout=30)
         children.kill_in_dir(private_tmp, since=started_wall)
         shutil.rmtree(private_tmp, ignore_errors=True)
-        result = self._result(proc.returncode, timed_out, state, transcript, time.monotonic() - started)
+        result = self._result(proc.returncode, stop, state, transcript, time.monotonic() - started, budget)
         if persist:
             result.session_id = state.session_id
         return result
 
-    def _result(self, code: int | None, timed_out: bool, state: _StreamState, transcript: Path,
-                duration: float) -> ExecResult:
+    def _result(self, code: int | None, stop: _Stop, state: _StreamState, transcript: Path,
+                duration: float, budget: Budget) -> ExecResult:
+        timed_out = stop == "timeout"
+        if stop == "grace":
+            # It gave its final reply and then didn't exit: killed, and judged like any finished run.
+            code = None
         res = state.result or {}
         usage = {
             "duration_s": round(duration, 1),
@@ -379,11 +400,17 @@ class ClaudeCodeExecutor:
             except (TypeError, ValueError):
                 paused_until = time.time() + 3600
         error = None
-        aborted = False
+        aborted = provider_error = idle_stopped = False
+        if stop == "grace":
+            usage["exited_after_grace"] = True
         if timed_out:
             error = "timed out"
         elif paused_until is not None:
             error = "usage limit reached"
+        elif stop == "idle":
+            # Like a provider stop: the CLI hung, so it doesn't use up an attempt.
+            error, aborted, provider_error, idle_stopped = f"stopped: {idle_text(budget.idle_s or 0)}", True, True, True
+            usage["idle_stopped"] = True
         elif not res:
             # A crash, a lost login or a killed process: not the worker's
             # doing, so it shouldn't use up an attempt.
@@ -393,9 +420,31 @@ class ClaudeCodeExecutor:
             reasons = res.get("errors") or [res.get("subtype") or f"exit {code}"]
             error = "; ".join(str(r) for r in reasons)
         return ExecResult(
-            exit_code=None if timed_out else code, transcript_path=str(transcript), usage=usage,
+            exit_code=None if timed_out or idle_stopped else code, transcript_path=str(transcript), usage=usage,
             claim=claim, split_request=split, paused_until=paused_until, aborted=aborted, error=error,
+            provider_error=provider_error, idle_stopped=idle_stopped,
         )
+
+
+_Stop = Literal["timeout", "idle", "grace"] | None
+
+
+def _wait(proc: subprocess.Popen, started: float, budget: Budget, watch: Watch, stderr_path: Path,
+          poll_s: float = 0.25) -> _Stop:
+    """Wait for the CLI to exit; say why it must be stopped instead, if it must."""
+    while True:
+        try:
+            proc.wait(timeout=poll_s)
+            return None
+        except subprocess.TimeoutExpired:
+            pass
+        now = time.monotonic()
+        if now - started > budget.wall_clock_s:
+            return "timeout"
+        watch.poll_file(stderr_path, now)
+        verdict = watch.verdict(now)
+        if verdict is not None:
+            return verdict
 
 
 def _kill_group(proc: subprocess.Popen, grace: float = 10.0) -> None:

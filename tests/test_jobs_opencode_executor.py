@@ -687,6 +687,54 @@ def test_wall_clock_limit_kills_the_run(fake, work):
 
 
 @needs_sandbox
+def test_a_silent_worker_is_stopped_without_counting_against_it(fake, work):
+    fake["scenario"](sleep=60)
+    started = time.monotonic()
+    result = make(fake).run(task(), work, Budget(wall_clock_s=120, idle_s=1.5))
+    assert time.monotonic() - started < 30
+    assert result.aborted and result.provider_error and result.idle_stopped
+    assert result.error == "stopped: no output for 1.5 seconds"
+    assert result.usage["idle_stopped"] is True
+
+
+@needs_sandbox
+@pytest.mark.parametrize("reason", [None, "stop"])
+def test_a_worker_that_hangs_after_its_final_reply_is_killed_and_judged_normally(fake, work, reason):
+    fake["scenario"](text="DONE: added sub()", sleep_after=60, reason=reason)
+    started = time.monotonic()
+    result = make(fake).run(task(), work, Budget(wall_clock_s=120, idle_s=30.0, grace_s=0.5))
+    assert time.monotonic() - started < 30
+    assert not result.aborted and not result.provider_error and result.error is None
+    assert result.claim == {"status": "done", "summary": "DONE: added sub()"}
+    assert result.exit_code is None and result.usage["exited_after_grace"] is True
+
+
+@needs_sandbox
+def test_a_step_that_ends_in_tool_calls_is_not_the_end(fake, work):
+    fake["scenario"](text="DONE: added sub()", sleep_after=3, reason="tool-calls")
+    result = make(fake).run(task(), work, Budget(wall_clock_s=120, idle_s=30.0, grace_s=0.5))
+    assert result.exit_code == 0 and "exited_after_grace" not in result.usage
+
+
+@needs_sandbox
+@pytest.mark.parametrize("tick_to", ["stdout", "stderr"])
+def test_a_worker_that_keeps_printing_is_never_idle(fake, work, tick_to):
+    fake["scenario"](text="DONE: slow", ticks=8, tick_s=0.4, tick_to=tick_to)
+    result = make(fake).run(task(), work, Budget(wall_clock_s=120, idle_s=1.5, grace_s=5.0))
+    assert result.error is None and not result.aborted and result.exit_code == 0
+    assert result.claim["summary"] == "DONE: slow"
+
+
+def test_worker_rules_ask_for_small_test_first_changes_inside_scope():
+    rules = oc.build_rules([])
+    assert "smallest change" in rules
+    assert "one test" in rules and "one behaviour at a time" in rules
+    assert "test helpers" in rules
+    assert "commented-out code" in rules and "TODO" in rules
+    assert "new test file" in rules and "BLOCKED" in rules
+
+
+@needs_sandbox
 def test_agents_md_wins_over_claude_md(fake, work):
     (work / "AGENTS.md").write_text("Agents rules.\n")
     make(fake).run(task(), work, Budget())

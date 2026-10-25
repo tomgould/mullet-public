@@ -1,4 +1,4 @@
-"""Run commands in a sandbox: bubblewrap on Linux.
+"""Run commands in a sandbox, through the backend the `sandbox.backend` setting picks.
 
 Mullet runs code a model has just written: the repo's setup, its tests and
 its build. Every such process gets:
@@ -12,7 +12,7 @@ its build. Every such process gets:
   holds API keys loaded from .env.
 
 Setup commands share the host's network. `GateRunner.setup` passes
-`network=True`, so those commands run without `--unshare-net` and can reach
+`network=True`, so those commands keep the host's network and can reach
 anything the host can, loopback services and the local network included: the
 package managers in them (`pip`, `npm`, `composer`, `cargo`) need the
 internet, and there is no per-host filter here. Setup is still sandboxed in
@@ -25,218 +25,181 @@ arbitrary network-capable commands during setup.
 
 There is no unsandboxed fallback. If the sandbox can't start,
 `SandboxUnavailable` is raised and the caller must refuse the work.
+
+The backends live in `mullet.jobs.sandbox_backends`: bubblewrap is the default
+and the only one so far. This module keeps the names every caller uses,
+selects one backend per process and refuses all work when it can't run, so
+no caller needs to know which backend that is.
 """
 
 from __future__ import annotations
 
-import os
-import shutil
-import signal
 import subprocess
 import sys
-import time
-from dataclasses import dataclass, field
-from functools import lru_cache
+import threading
+from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 from mullet.jobs import children
+from mullet.jobs.sandbox_backends import get_backend
+from mullet.jobs.sandbox_backends.base import (
+    RunResult,
+    SandboxBackend,
+    SandboxCheck,
+    SandboxSpec,
+    SandboxUnavailable,
+    build_env,
+    read_tail,
+)
+from mullet.jobs.sandbox_backends.settings import AUTO, SandboxSettings, load_settings
 
-_PASSTHROUGH_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
-_TAIL_CHARS = 4000
+# Which backends `auto` tries on each platform, best first.
+AUTO_ORDER: dict[str, tuple[str, ...]] = {"linux": ("bubblewrap",)}
 
-
-class SandboxUnavailable(RuntimeError):
-    """The sandbox can't run on this machine, so nothing may run."""
+__all__ = [
+    "AUTO_ORDER", "RunResult", "SandboxBackend", "SandboxCheck", "SandboxSpec", "SandboxUnavailable",
+    "Selection", "backend", "build_env", "check", "clear_cache", "nested_argv", "nested_check",
+    "read_tail", "run", "run_shell", "select", "selection", "spawn",
+]
 
 
 @dataclass(frozen=True)
-class SandboxCheck:
-    """Whether the sandbox works here, and why not if it doesn't."""
+class Selection:
+    """The backend the setting picked and why, or why none can be used."""
 
-    ok: bool
-    backend: str
-    reason: str = ""
-
-
-@dataclass
-class SandboxSpec:
-    """What a sandboxed process may see and touch."""
-
-    cwd: Path
-    writable: list[Path]
-    readonly_overlays: list[Path] = field(default_factory=list)
-    expose_ro: list[Path] = field(default_factory=list)
-    # Hidden: home, temp dirs, and every usual home of a privileged socket
-    # (Docker, LXD/Incus, Podman, systemd). /var/run is usually a symlink to
-    # /run; build_argv skips symlinks and directories that don't exist.
-    hide: list[Path] = field(
-        default_factory=lambda: [
-            Path.home(), Path("/tmp"), Path("/run"), Path("/var/run"), Path("/var/snap/lxd"),
-            Path("/var/lib/lxd"), Path("/var/lib/incus"),
-        ]
-    )
-    network: bool = False
-    env: dict[str, str] = field(default_factory=dict)
+    name: str
+    reason: str
+    backend: SandboxBackend | None
+    error: str = ""
+    probe: SandboxCheck | None = None
+    problems: tuple[str, ...] = ()
 
 
-@dataclass
-class RunResult:
-    """How a sandboxed command ended. The full output is in `log_path`."""
+def select(settings: SandboxSettings, platform: str | None = None) -> Selection:
+    """Pick the backend `settings` asks for. Never an unsandboxed one: on failure `backend` is None."""
+    problems = tuple(settings.problems)
+    requested = settings.backend
+    if requested != AUTO:
+        why = "set in the config file" if settings.from_config else "the default"
+        try:
+            return Selection(requested, why, get_backend(requested), problems=problems)
+        except SandboxUnavailable as exc:
+            return Selection(requested, why, None, error=str(exc), problems=problems)
+    platform = platform or sys.platform
+    tried = []
+    for name in AUTO_ORDER.get(platform, ()):
+        candidate = get_backend(name)
+        probe = candidate.check()
+        if probe.ok:
+            return Selection(name, "sandbox.backend is auto, and it works here", candidate, probe=probe,
+                             problems=problems)
+        tried.append(f"{name}: {probe.reason}")
+    detail = "; ".join(tried) if tried else f"no sandbox backend for {platform} yet"
+    return Selection(AUTO, "sandbox.backend is auto", None,
+                     error=f"sandbox.backend is auto, and no backend works here ({detail})", problems=problems)
 
-    exit_code: int | None
-    timed_out: bool
-    duration_s: float
-    log_path: Path
-    tail: str
+
+@dataclass(frozen=True)
+class _Resolved:
+    """The selection and its probe, cached together so they can never disagree."""
+
+    selection: Selection
+    probe: SandboxCheck
 
 
-@lru_cache(maxsize=1)
+_lock = threading.Lock()
+_resolved: _Resolved | None = None
+
+
+def _probe(chosen: Selection) -> SandboxCheck:
+    if chosen.backend is None:
+        return SandboxCheck(False, chosen.name, chosen.error)
+    return chosen.probe or chosen.backend.check()
+
+
+def _resolve() -> _Resolved:
+    global _resolved
+    with _lock:
+        if _resolved is None:
+            chosen = select(load_settings())
+            _resolved = _Resolved(chosen, _probe(chosen))
+        return _resolved
+
+
+def clear_cache() -> None:
+    """Forget the selection and its probe together; the next call reads the config file again."""
+    global _resolved
+    with _lock:
+        _resolved = None
+
+
+def selection() -> Selection:
+    """The backend for this process, from the user's config file. Read once."""
+    return _resolve().selection
+
+
+def backend() -> SandboxBackend:
+    """The selected backend, without probing it; `SandboxUnavailable` when none can be used."""
+    chosen = selection()
+    if chosen.backend is None:
+        raise SandboxUnavailable(chosen.error)
+    return chosen.backend
+
+
 def check() -> SandboxCheck:
-    """Probe once per process whether bubblewrap can create a sandbox."""
-    if sys.platform != "linux":
-        return SandboxCheck(False, "none", f"no sandbox backend for {sys.platform} yet")
-    bwrap = shutil.which("bwrap")
-    if not bwrap:
-        return SandboxCheck(False, "bwrap", "bubblewrap (bwrap) is not installed")
-    probe = [
-        bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-        "--unshare-net", "--unshare-pid", "--die-with-parent", "true",
-    ]
-    try:
-        proc = subprocess.run(probe, capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return SandboxCheck(False, "bwrap", f"bubblewrap probe failed: {exc}")
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout).strip() or f"exit {proc.returncode}"
-        return SandboxCheck(False, "bwrap", f"bubblewrap can't create a sandbox: {detail}")
-    return SandboxCheck(True, "bwrap")
+    """Probe once per process whether the selected backend can create a sandbox."""
+    chosen = selection()
+    resolved = _resolve()
+    if resolved.selection is chosen:
+        return resolved.probe
+    return _probe(chosen)
 
 
-def _require() -> str:
+selection.cache_clear = clear_cache  # type: ignore[attr-defined]
+check.cache_clear = clear_cache  # type: ignore[attr-defined]
+
+
+def _require() -> SandboxBackend:
     status = check()
     if not status.ok:
         raise SandboxUnavailable(status.reason)
-    return shutil.which("bwrap") or "bwrap"
+    return backend()
 
 
-def build_env(spec: SandboxSpec) -> dict[str, str]:
-    """The complete environment a sandboxed process starts with. Mullet's own values are set last."""
-    env = {k: os.environ[k] for k in _PASSTHROUGH_ENV if k in os.environ}
-    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
-    env.update(spec.env)
-    env.update({"HOME": str(Path.home()), "TMPDIR": "/tmp", "TERM": "dumb"})
-    return env
-
-
-def build_argv(command: list[str], spec: SandboxSpec) -> list[str]:
-    """The bwrap command line that runs `command` under `spec`.
-
-    Mount order matters: hidden directories become empty tmpfs first, then
-    toolchains are exposed read-only, then writable paths are bound, and
-    last the read-only overlays go on top of the writable ones.
-    """
-    bwrap = _require()
-    argv = [
-        bwrap, "--die-with-parent", "--new-session",
-        "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
-    ]
-    if not spec.network:
-        argv.append("--unshare-net")
-    argv += ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
-    for hidden in spec.hide:
-        if hidden.is_dir() and not hidden.is_symlink():
-            argv += ["--tmpfs", str(hidden)]
-    if spec.network:
-        # /etc/resolv.conf often points into /run, which is hidden above.
-        resolver = Path("/run/systemd/resolve")
-        if resolver.is_dir():
-            argv += ["--ro-bind", str(resolver), str(resolver)]
-    # A symlinked bind source would mount its target instead, which could be
-    # anywhere, including a directory hidden above. Writable paths and
-    # overlays can come from the work tree, so a symlink there is refused.
-    # Toolchain paths come from the user's own profile and are followed.
-    for path in [*spec.writable, *spec.readonly_overlays]:
-        if path.is_symlink():
-            raise ValueError(f"refusing to mount {path}: it is a symlink")
-    for path in spec.expose_ro:
-        if path.exists():
-            argv += ["--ro-bind", str(path.resolve()), str(path)]
-    for path in spec.writable:
-        if not path.is_dir():
-            raise ValueError(f"writable path {path} is not a directory")
-        argv += ["--bind", str(path), str(path)]
-    for path in spec.readonly_overlays:
-        if path.exists():
-            argv += ["--ro-bind", str(path), str(path)]
-    argv.append("--clearenv")
-    for key, value in build_env(spec).items():
-        argv += ["--setenv", key, value]
-    argv += ["--chdir", str(spec.cwd), "--"]
-    return argv + command
+def spawn(command: list[str], spec: SandboxSpec, *, stdout: int | IO[bytes] | None,
+          stderr: int | IO[bytes] | None, cwd: Path | None = None, text: bool = False) -> subprocess.Popen:
+    """Start `command` under `spec` in its own process group, for a long-lived worker."""
+    return _require().spawn(command, spec, stdout=stdout, stderr=stderr, cwd=cwd, text=text)
 
 
 def run(command: list[str], spec: SandboxSpec, *, timeout: float, log_path: Path) -> RunResult:
     """Run `command` in the sandbox, writing all output to `log_path`.
 
     On timeout the whole process group is killed: TERM, then KILL after a
-    grace period. bwrap's own PID namespace takes the children with it.
+    grace period.
     """
     children.check_not_stopping()
-    argv = build_argv(command, spec)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    started = time.monotonic()
-    timed_out = False
-    with open(log_path, "wb") as log:
-        proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
-        )
-        with children.track(proc):
-            try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                _kill_group(proc)
-    duration = time.monotonic() - started
-    return RunResult(
-        exit_code=None if timed_out else proc.returncode,
-        timed_out=timed_out,
-        duration_s=duration,
-        log_path=log_path,
-        tail=read_tail(log_path),
-    )
+    return _require().run(command, spec, timeout=timeout, log_path=log_path)
 
 
 def run_shell(script: str, spec: SandboxSpec, *, timeout: float, log_path: Path) -> RunResult:
     """Run a shell command string (a profile command) in the sandbox."""
-    return run(["/bin/sh", "-c", script], spec, timeout=timeout, log_path=log_path)
+    children.check_not_stopping()
+    return _require().run_shell(script, spec, timeout=timeout, log_path=log_path)
 
 
-def _kill_group(proc: subprocess.Popen, grace: float = 5.0) -> None:
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=grace)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+def nested_argv(readonly: list[Path], hidden: list[Path]) -> list[str]:
+    """The selected backend's prefix for a network-less sandbox inside its own.
+
+    Raises `SandboxUnavailable` when no backend can be used, which `shell_wrapper`
+    (opencode executor) passes on. That is safe there: the executor's
+    `check_runnable` runs `check()` before any wrapper is built, and refuses the
+    node when the sandbox is unavailable, so the exception is never the first sign.
+    """
+    return backend().nested_argv(readonly, hidden)
 
 
-def read_tail(path: Path, chars: int = _TAIL_CHARS) -> str:
-    """The last `chars` characters of a log, for summaries and retry feedback."""
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - chars * 4))
-            data = fh.read()
-    except OSError:
-        return ""
-    return data.decode("utf-8", errors="replace")[-chars:]
+def nested_check() -> bool:
+    """Whether the selected backend works and can start a nested sandbox inside its own."""
+    return check().ok and backend().nested_check()

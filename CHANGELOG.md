@@ -6,6 +6,54 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-25
+
+### Added
+- **Planner.** A plan step can say what it comes `after`, mark itself a one-way `door`
+  (public API, removal, stored format; treated as risky and Claude-first), and the plan can
+  carry `open_questions` that are shown before you approve. Plans with unknown, forward or
+  circular `after` ids are rejected. The planner is asked once more, in the same session,
+  when its reply is unusable (`jobs.reask_attempts`).
+- **Reviewer.** G7 also checks tests for new behaviour, named edge cases and secrets or
+  injection, and returns findings (path, line, problem) that are fed to the next attempt.
+  A repo profile's `review_standards` file is read from the base commit and given to the
+  reviewer only. A missing verdict is asked for once more.
+- **Workers.** A worker that goes silent is stopped (`jobs.idle_minutes`, derived from the
+  profile when unset) and one that has finished is given `jobs.grace_seconds` to exit. The
+  commit body names the step, the gates passed and the worker's claim, fenced and marked
+  unverified; each reply is recorded as a `worker_claim` ledger event.
+- **Sandbox backends.** `sandbox.backend` (`bubblewrap`, the default, or `auto`) selects the
+  sandbox behind one interface with a shared contract test suite. `docker`, `podman` and
+  `seatbelt` are reserved and refuse to run rather than run unsandboxed.
+- **Python API.** `mullet.api` plans, runs, stops and merges jobs without the CLI
+  (`docs/API_PYTHON.md`).
+- **Decision records.** `docs/adr/` explains the main choices (0001 to 0010).
+- `mullet job show <job> --attempt N [--diff]` and `mullet job export <job> --attempt N --branch NAME` to inspect a failed attempt and copy its work out as a branch; `mullet ladder report` gains a "Why attempts failed" section; git commands on a job clone stop after `jobs.git_timeout_seconds`.
+- `jobs.commit_body`: `full` (default) or `minimal`, which commits each step with its subject
+  alone, for repos whose rules forbid tool lines in commit messages.
+
+### Fixed
+- The reviewer is asked again for a verdict only when its session finished without one. A
+  review cut off by its turn limit or clock pauses the job instead of approving on partial
+  reading.
+- A `door: one-way` step gets the forced independent review in every job, not only ladder
+  jobs, even with `--no-review`. On a forced safety review an approval given only when asked
+  again pauses the job; a block still fails the attempt.
+- The reviewer's reasons reach the next attempt even when it also gave findings, and findings
+  on unchanged files are passed on as "(file not changed)" reasons. Findings naming a file by
+  its absolute path in the clone, or with `./`, are no longer dropped; paths outside the clone
+  never count.
+- A git command on a job clone that times out gets SIGTERM and 5 seconds to remove its lock
+  files before SIGKILL.
+- `.inf` or `.nan` in a `jobs:` setting no longer breaks every git command on a job clone; the
+  jobs settings never raise. `jobs.grace_seconds` is at least 5, so the CLI can save its session.
+- Planner, worker and reviewer text is stripped of escape sequences and control characters
+  before it reaches the terminal or a commit, and single-line fields are flattened so a plan
+  can't fake a section of the approval view. `job show --attempt --diff` strips escapes on a
+  terminal and stays exact when piped.
+- `mullet job export --branch` takes only a plain branch name, not `refs/...`, `heads/...`,
+  `HEAD` or `@{-1}`.
+
 ## [2.2.0] - 2026-10-25
 
 ### Fixed

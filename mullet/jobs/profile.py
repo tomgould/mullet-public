@@ -214,6 +214,14 @@ class Profile(BaseModel):
     # go to cheaper workers the profile allows; `claude-only` keeps every step
     # on Claude. A repo's own file can only choose claude-only.
     ladder: Literal["auto", "claude-only"] = "auto"
+    # A repo-relative Markdown file of coding standards, shown to the G7
+    # reviewer only (never the worker), read from the job's base commit.
+    review_standards: str | None = None
+
+    @field_validator("review_standards")
+    @classmethod
+    def _standards_path(cls, value: str | None) -> str | None:
+        return None if value is None else _repo_relative(value)
 
     @field_validator("allowed_executors")
     @classmethod
@@ -337,7 +345,7 @@ def load_profile(repo: Path, base_sha: str | None = None) -> Profile:
     With `base_sha` the in-repo file is read from that commit, so only committed
     content counts and working-tree edits change nothing; without it the
     working-tree file is read. The in-repo file may change commands, setup,
-    timeouts, deps_paths and env, but it can only add protected paths, move
+    timeouts, deps_paths, env and review_standards, but it can only add protected paths, move
     data_class to private, remove allowed executors and set `ladder: claude-only`, and its expose_ro,
     setup_writable, copy_in and opencode_lsp are ignored. Raises `ProfileError` when a file
     is unreadable or invalid.

@@ -239,7 +239,7 @@ def test_plan_asks_the_planner_and_the_plan_round_trips_through_yaml(repo, capsy
     from mullet.jobs.executors.base import ExecResult
     seen = {}
 
-    def ask(prompt, cwd, schema, budget, model=None, label="ask"):
+    def ask(prompt, cwd, schema, budget, model=None, label="ask", **_session):
         seen.update(cwd=cwd, label=label, prompt=prompt)
         return ExecResult(exit_code=0, claim={"notes": "two steps", "nodes": [
             {"id": "api", "parent": None, "goal": "add the api", "kind": "design", "scope": ["app.py", "tests/**"]},
@@ -273,7 +273,7 @@ def test_a_failed_plan_marks_the_job_failed(repo, capsys, monkeypatch):
 
     from mullet.jobs.executors.base import ExecResult
 
-    def ask(prompt, cwd, schema, budget, model=None, label="ask"):
+    def ask(prompt, cwd, schema, budget, model=None, label="ask", **_session):
         return ExecResult(exit_code=1, error="Reached maximum number of turns (40)")
 
     monkeypatch.setattr(job_cli, "claude_executor", lambda job, profile, logs: SimpleNamespace(ask=ask))
@@ -359,7 +359,7 @@ def test_planner_notes_reach_the_ledger_and_survive_a_plan_file(repo, capsys, mo
 
     from mullet.jobs.executors.base import ExecResult
 
-    def ask(prompt, cwd, schema, budget, model=None, label="ask"):
+    def ask(prompt, cwd, schema, budget, model=None, label="ask", **_session):
         return ExecResult(exit_code=0, claim={"notes": "watch the rounding", "nodes": [
             {"id": "n1", "parent": None, "goal": "do it", "kind": "design", "scope": ["app.py"]}]})
 

@@ -13,6 +13,7 @@ from typing import Any
 from mullet.jobs import ladder
 from mullet.jobs.ladder import LadderConfig, attempt_cost
 from mullet.jobs.ledger import Ledger
+from mullet.jobs.text import one_line
 from mullet.jobs.types import AttemptOutcome, GateStatus, NodeStatus
 
 # The Claude model whose API prices value the Claude work avoided, and the
@@ -119,7 +120,18 @@ class LadderReport:
     per_model: dict[str, ModelStats] = field(default_factory=dict)
     claude_avoided: ClaudeAvoided = field(default_factory=ClaudeAvoided)
     changes: list[str] = field(default_factory=list)  # "what to change", each naming its evidence
+    failed_attempts: int = 0
+    failures_by_gate: dict[str, int] = field(default_factory=dict)  # first failing gate -> attempts
+    failure_reasons: dict[str, str] = field(default_factory=dict)  # gate -> its most common summary
     since: float | None = None  # the earliest job creation time counted, if any
+
+
+REASON_LIMIT = 120
+
+
+def _short(text: str) -> str:
+    """A gate's own summary on one line, sanitised (it can quote a model) and cut to REASON_LIMIT characters."""
+    return one_line(text, REASON_LIMIT)
 
 
 def _rung_of(attempt) -> str:
@@ -231,6 +243,7 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
     by_rung_model: dict[tuple[str, str | None], _Tally] = {}
     kind_steps: dict[str, list[int]] = {}  # kind -> [steps tried, steps that reached Claude]
     gate_runs: dict[str, list[int]] = {}  # gate -> [cheap attempts where it ran, of those failed]
+    reasons: dict[str, dict[str, int]] = {}  # first failing gate -> summary -> attempts
 
     for job in ledger.list_jobs(limit=1_000_000):
         if not (job.budget or {}).get("ladder"):
@@ -325,6 +338,15 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
                 if attempt.outcome is AttemptOutcome.PASSED:
                     tally.passes += 1
 
+                if attempt.outcome is AttemptOutcome.FAILED:
+                    first = next((r for r in ledger.gate_results(attempt.id) if r.status is GateStatus.FAIL), None)
+                    if first is not None:
+                        report.failed_attempts += 1
+                        report.failures_by_gate[first.gate] = report.failures_by_gate.get(first.gate, 0) + 1
+                        seen_reasons = reasons.setdefault(first.gate, {})
+                        key = _short(first.summary)
+                        seen_reasons[key] = seen_reasons.get(key, 0) + 1
+
                 if rung in CHEAP_RUNGS:
                     statuses: dict[str, set[GateStatus]] = {}
                     for result in ledger.gate_results(attempt.id):
@@ -414,6 +436,9 @@ def build(ledger: Ledger, *, since: float | None = None, config: LadderConfig | 
                                  + avoided.tokens_out * price["output"]) / 1_000
     avoided.note = AVOIDED_NOTE
 
+    report.failures_by_gate = dict(sorted(report.failures_by_gate.items(), key=lambda kv: (-kv[1], kv[0])))
+    report.failure_reasons = {gate: min(seen.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+                              for gate, seen in reasons.items()}
     report.changes = _changes(
         by_rung_model,
         {kind: (c[0], c[1]) for kind, c in kind_steps.items()},
@@ -477,6 +502,15 @@ def _step_row(name: str, s: RungStats | KindStats) -> tuple[str, ...]:
             _duration(s.wall_seconds))
 
 
+def _failure_lines(report: LadderReport) -> list[str]:
+    if not report.failed_attempts:
+        return ["Why attempts failed", "  no failed attempts"]
+    lines = [f"Why attempts failed (first failing gate, {report.failed_attempts} failed attempts)"]
+    for gate, count in report.failures_by_gate.items():
+        lines.append(f"  {gate}: {count} of {report.failed_attempts}, most often: {report.failure_reasons.get(gate, '')}")
+    return lines
+
+
 def render_text(report: LadderReport) -> str:
     """The report as plain aligned tables and the "what to change" list."""
     period = f"since {_date(report.since)}" if report.since is not None else "across all jobs"
@@ -507,6 +541,8 @@ def render_text(report: LadderReport) -> str:
     providers = [(name, _money(d)) for name, d in sorted(report.dollars_by_provider.items())]
     providers.append(("all providers", _money(sum(report.dollars_by_provider.values()))))
     lines += _table("Dollars by provider", ("provider", "dollars"), providers)
+    lines.append("")
+    lines += _failure_lines(report)
     lines.append("")
     lines += _table("Claude sessions", ("session", "count"), [
         ("worker attempts", _count(report.claude_worker_attempts)),
@@ -573,6 +609,11 @@ def render_json(report: LadderReport) -> dict[str, Any]:
             "input_per_1k": avoided.input_per_1k,
             "output_per_1k": avoided.output_per_1k,
             "note": avoided.note,
+        },
+        "why_attempts_failed": {
+            "failed_attempts": report.failed_attempts,
+            "gates": [{"gate": gate, "attempts": count, "reason": report.failure_reasons.get(gate, "")}
+                      for gate, count in report.failures_by_gate.items()],
         },
         "changes": list(report.changes),
     }

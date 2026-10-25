@@ -52,7 +52,7 @@ import time
 import traceback
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +61,9 @@ import psutil
 from mullet.jobs import children, context, reconcile
 from mullet.jobs.budget import earliest_start, headroom as budget_headroom, load_budget
 from mullet.jobs.clone import JobClone, Snapshot
-from mullet.jobs.executors.base import Budget, ExecResult, Executor, ExecutorUnavailable, NodeContext, Task
+from mullet.jobs.executors.base import (
+    Budget, ExecResult, Executor, ExecutorUnavailable, NodeContext, Task, with_worker_limits,
+)
 from mullet.jobs.gates import (
     Baseline, GateContext, GateFn, GatePaused, GateRunner, gate_build, gate_scope, gate_static,
     gate_test_weakening, gate_tests, run_check_gate, run_gates,
@@ -75,6 +77,8 @@ from mullet.jobs.ledger import AttemptRecord, JobRecord, Ledger, NodeRecord
 from mullet.jobs.notify import notify_job, status_line
 from mullet.jobs.paths import job_dir, jobs_home
 from mullet.jobs.profile import Profile, expand_home, safe_env, whole_check_commands
+from mullet.jobs.settings import load_settings as load_job_settings
+from mullet.jobs.text import strip_control
 from mullet.jobs.types import (
     AttemptOutcome, GateResult, GateStatus, JobStatus, NodeSpec, NodeStatus,
 )
@@ -347,9 +351,46 @@ def claude_usage(role: str, usage: dict) -> dict:
             "tokens": {k: tokens[k] for k in keep if isinstance(tokens.get(k), (int, float))}}
 
 
-def _commit_message(spec: NodeSpec) -> str:
+CLAIM_CHARS = 1500
+CLAIM_STATUSES = ("done", "blocked", "split")
+
+
+def claim_status(claim: Any) -> str:
+    """What a worker said about its step: done, blocked, split, or unknown."""
+    status = str((claim if isinstance(claim, dict) else {}).get("status") or "").strip().lower()
+    return status if status in CLAIM_STATUSES else "unknown"
+
+
+def _quoted_claim(summary: str) -> list[str]:
+    """The worker's summary as quoted lines: no control characters, capped, and never a trailer.
+
+    Every line starts with "> ", so none can parse as a git trailer such as
+    `Signed-off-by:` or `Co-Authored-By:`.
+    """
+    text = strip_control(summary.replace("\t", " ")).strip()
+    if len(text) > CLAIM_CHARS:
+        text = text[:CLAIM_CHARS].rstrip() + " ... (cut)"
+    return [f"> {line}".rstrip() for line in text.splitlines()] or ["> (no summary)"]
+
+
+def _commit_message(spec: NodeSpec, results: list[GateResult] | None = None, claim: Any = None,
+                    body: str = "full") -> str:
+    """A passed step's commit message: the subject, and with `body` "full" the gates and the worker's claim.
+
+    `body` is the `jobs.commit_body` setting; "minimal" gives the subject alone.
+    """
     first = " ".join(spec.goal.split())
-    return (first[:69] + "...") if len(first) > 72 else first
+    subject = (first[:69] + "...") if len(first) > 72 else first
+    if body == "minimal":
+        return subject + "\n"
+    passed = [r.gate for r in results or [] if r.status is GateStatus.PASS]
+    lines = [subject, "", f"Mullet step {spec.id} ({spec.kind}) passed gates {', '.join(passed) or 'none'}."]
+    if isinstance(claim, dict):
+        summary = claim.get("summary")
+        lines += ["", f"----- worker's claim, not verified (status: {claim_status(claim)}) -----",
+                  *_quoted_claim(summary if isinstance(summary, str) else ""),
+                  "----- end of worker's claim -----"]
+    return "\n".join(lines) + "\n"
 
 
 def feedback_for(results: list[GateResult], exec_result: ExecResult | None = None,
@@ -373,9 +414,20 @@ def _feedback_text(results: list[GateResult], exec_result: ExecResult | None) ->
         if r.status is not GateStatus.FAIL:
             continue
         lines.append(f"{r.gate} failed: {r.summary}")
+        if r.gate == "G7" and ("reason_lines" in r.details or "finding_lines" in r.details):
+            # Reasons first, so the length cap below can't cut them off behind 20 findings.
+            if r.details.get("reason_lines"):
+                lines.append("  The reviewer's reasons, in its words:")
+                lines += [f"  - {item}" for item in r.details["reason_lines"][:20]]
+            if r.details.get("finding_lines"):
+                lines.append("  The reviewer's findings on the changed files (path:line: problem), in its words:")
+                lines += [f"  - {item}" for item in r.details["finding_lines"][:20]]
+            continue
         for key in ("problems", "regressions"):
             items = r.details.get(key)
             if items:
+                if key == "problems" and r.gate == "G7" and r.details.get("findings"):
+                    lines.append("  The reviewer's findings on the changed files (path:line: problem), in its words:")
                 lines += [f"  - {item}" for item in items[:20]]
         tail = r.details.get("tail") or next((f.get("tail") for f in r.details.get("failed", []) if f.get("tail")), "")
         if tail:
@@ -607,23 +659,32 @@ class JobRunner:
                 return JobStatus.BLOCKED
         return self._final_check(job, clone, gates, baseline)
 
-    def _risk_reviewer(self, job: JobRecord, profile: Profile, executor: Executor) -> GateFn:
-        """G7 for a risky step in a job with review off: it must pass, or the attempt fails.
+    def _risk_reviewer(self, job: JobRecord, profile: Profile, executor: Executor,
+                       reviewer: GateFn | None = None) -> GateFn:
+        """G7 for a step that must be reviewed whatever the job says: it must pass, or the attempt doesn't.
 
-        A step that deletes, kills or sends data is reviewed whoever did it. A
-        block is a failure; a review with no verdict pauses the job, as any
-        required review's does (`run_gates`).
+        A one-way step (in any job) and, in a ladder job, a step that deletes,
+        kills or sends data are reviewed whoever did the work: by the job's
+        `reviewer` when review is on, by a forced one when it is off. A block
+        is a failure. A review with no verdict pauses the job, as any required
+        review's does (`run_gates`), and so does an approval the reviewer only
+        gave when asked again for its verdict: a step this hard to undo needs a
+        review that answered in full, so a person decides instead.
         """
         if self._forced_review is None:
-            base = self._make_reviewer(job, profile, executor, force=True)
+            base = reviewer or self._make_reviewer(job, profile, executor, force=True)
             assert base is not None
 
             def strict(ctx: GateContext) -> GateResult:
                 result = base(ctx)
+                if result.status is GateStatus.PASS and (result.details or {}).get("reasked"):
+                    return GateResult("G7", GateStatus.NOT_RUN, "the safety review of a risky or one-way step "
+                                      "approved it only when asked again for its verdict; check the step and "
+                                      "resume", result.details, result.log_path, result.duration_s)
                 if result.status is not GateStatus.FAIL:
                     return result
-                return GateResult("G7", GateStatus.FAIL, "the safety review of a step that deletes, kills or "
-                                  f"sends data didn't pass: {result.summary}", result.details, result.log_path,
+                return GateResult("G7", GateStatus.FAIL, "the safety review of a risky or one-way step "
+                                  f"didn't pass: {result.summary}", result.details, result.log_path,
                                   result.duration_s)
             self._forced_review = strict
         return self._forced_review
@@ -632,13 +693,28 @@ class JobRunner:
                        force: bool = False) -> GateFn | None:
         if self._reviewer is not None or not (force or (job.budget or {}).get("review")):
             return self._reviewer
+        import inspect
+
         from mullet.jobs.review import make_reviewer
+        from mullet.jobs.settings import load_settings
         if self._executor is None:
             # The reviewer is always Claude, on the job's model, whoever does the work.
             executor = claude_executor(job, profile, self.logs / "review")
         if not hasattr(executor, "ask"):
             raise RuntimeError("review is on for this job, but its executor can't run a reviewer")
         model = (job.budget or {}).get("review_model")
+        try:
+            params = inspect.signature(executor.ask).parameters
+        except (TypeError, ValueError):
+            params = {}
+        # A review with no verdict is asked again in its own session, so the
+        # session is kept only when the executor can resume it and asking again is on.
+        reask_attempts = load_settings().reask_attempts if {"persist", "resume"} <= set(params) else 0
+        keep = {"persist": True} if reask_attempts else {}
+
+        def reask(prompt: str, session_id: str, cwd: Path, schema: dict, budget: Budget) -> ExecResult:
+            return executor.ask(prompt, cwd, schema, budget, model=model, label="review", persist=True,
+                                resume=session_id)
 
         def note_usage(usage: dict) -> None:
             self._rate_limit = usage.get("rate_limit") or self._rate_limit
@@ -647,8 +723,11 @@ class JobRunner:
 
         return make_reviewer(
             job.goal,
-            lambda prompt, cwd, schema, budget: executor.ask(prompt, cwd, schema, budget, model=model, label="review"),
+            lambda prompt, cwd, schema, budget: executor.ask(prompt, cwd, schema, budget, model=model,
+                                                             label="review", **keep),
             slot=lambda: self._worker_slot(executor), on_usage=note_usage,
+            standards_path=profile.review_standards, base_sha=job.base_sha,
+            reask=reask if reask_attempts else None, reask_attempts=reask_attempts,
         )
 
     def _open_parent(self, node: NodeRecord, clone: JobClone) -> str:
@@ -1147,12 +1226,13 @@ class JobRunner:
         gate_base = integration_base or start_sha
         redact = gates.copy_in_values(Path(job.repo_path))
         feedback = self._past_feedback(node, redact)
-        budget = job_budget(job)
+        timeouts = gates.profile.timeouts
+        budget = with_worker_limits(job_budget(job), load_job_settings(), (timeouts.check, timeouts.test_full))
         node_context = self._node_context(job, node, gates.profile, clone)
         ladder = ladder_on(job)
-        if reviewer is None and ladder and self._ladder is not None and is_risky(spec, self._ladder.config):
-            # Code that deletes, kills or sends data is reviewed, whoever writes it.
-            reviewer = self._risk_reviewer(job, gates.profile, executor)
+        if spec.door == "one-way" or (ladder and self._ladder is not None and is_risky(spec, self._ladder.config)):
+            # A one-way step, and code that deletes, kills or sends data, is reviewed whoever writes it.
+            reviewer = self._risk_reviewer(job, gates.profile, executor, reviewer)
         resume_from = self._resumable(spec.id) if ladder or hasattr(executor, "resume") else None
         solo = None if ladder else solo_rung(job)
         pending = self._pending_check(spec.id, start_sha, clone)
@@ -1243,6 +1323,8 @@ class JobRunner:
                         usage.update(rung=solo.name, rung_key=solo.key, model=result.usage.get("model") or solo.model)
                     self.ledger.record_executor_result(attempt_id, result.exit_code, usage,
                                                        result.claim, result.transcript_path)
+                    if unusable is None:
+                        self._record_claim(attempt_id, spec.id, result)
                 self._check_stop()
                 if result.paused_until is not None:
                     self.ledger.pause_attempt(attempt_id, result.error or "usage limit")
@@ -1310,7 +1392,9 @@ class JobRunner:
                         clone.reset_to(start_sha, keep=gates.keep)
                         sha = start_sha
                     else:
-                        sha = clone.commit_snapshot(delta, _commit_message(spec), keep=gates.keep)
+                        message = _commit_message(spec, results, result.claim,
+                                                  body=load_job_settings().commit_body)
+                        sha = clone.commit_snapshot(delta, message, keep=gates.keep)
                     self.ledger.finish_attempt(attempt_id, end_sha=sha)
                     finished = True
                     return NodeStatus(outcome.value)
@@ -1340,8 +1424,16 @@ class JobRunner:
         if rung is None or rung.name not in ("free", "local") or self._ladder is None:
             return budget
         cheap = (self._night_config or self._ladder.config).cheap_minutes
-        return Budget(max_turns=budget.max_turns,
-                      wall_clock_s=min(budget.wall_clock_s, cheap * 60))
+        return replace(budget, wall_clock_s=min(budget.wall_clock_s, cheap * 60))
+
+    def _record_claim(self, attempt_id: int, node_id: str, result: ExecResult) -> None:
+        """Keep what the worker said it did (done, blocked, split, unknown), so it can be counted.
+
+        It is a record only: the gates still judge the attempt.
+        """
+        self.ledger.add_event(self.job_id, "worker_claim", {
+            "attempt_id": attempt_id, "node_id": node_id, "status": claim_status(result.claim),
+            "aborted": result.aborted, "idle_stopped": result.idle_stopped})
 
     def _arm(self, worker: Executor, rung: Rung, attempt_id: int) -> None:
         """Before an opencode attempt: its share of the job's spend, its price, and live usage recording.

@@ -240,11 +240,44 @@ def test_a_worker_run_reports_its_session_and_resume_continues_it(tmp_path, fake
     assert second.session_id == "sess-1"
 
 
-def test_planner_and_reviewer_sessions_are_not_kept(tmp_path, fake, work):
+def test_an_ask_session_is_kept_only_when_asked_to_be(tmp_path, fake, work):
     fake["scenario"](structured={"verdict": "approve", "reasons": []})
     result = make(tmp_path, fake).ask("review this", work, {"type": "object"}, Budget())
     assert "--no-session-persistence" in fake["call"]()["argv"]
     assert result.session_id is None
+    result = make(tmp_path, fake).ask("review this", work, {"type": "object"}, Budget(), persist=True)
+    assert "--no-session-persistence" not in fake["call"]()["argv"]
+    assert result.session_id is not None
+
+
+@pytest.mark.parametrize("reask_attempts, kept", [(0, False), (1, True), (None, True)],
+                         ids=["off", "on", "default"])
+def test_the_runners_reviewer_keeps_its_session_only_while_reasking_is_on(tmp_path, fake, work, monkeypatch,
+                                                                          reask_attempts, kept):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from mullet.jobs.clone import ChangedFile, Snapshot
+    from mullet.jobs.runner import JobRunner
+
+    config = tmp_path / "config"
+    config.mkdir()
+    if reask_attempts is not None:
+        (config / "config.yaml").write_text(f"jobs:\n  reask_attempts: {reask_attempts}\n")
+    monkeypatch.setenv("MULLET_CONFIG_DIR", str(config))
+    fake["scenario"](structured={"verdict": "approve", "findings": [], "reasons": []})
+    executor = make(tmp_path, fake)
+    runner = SimpleNamespace(_reviewer=None, _executor=executor, _rate_limit=None, job_id="j",
+                             _worker_slot=lambda e: nullcontext(), _record_limits=lambda usage: None,
+                             ledger=SimpleNamespace(add_event=lambda *a: None))
+    job = SimpleNamespace(goal="Goal", budget={}, base_sha=None)
+    reviewer = JobRunner._make_reviewer(runner, job, SimpleNamespace(review_standards=None), executor, force=True)
+    snap = Snapshot(tree="t", base="b", diff="diff --git a/app.py b/app.py\n+y\n",
+                    files=[ChangedFile("app.py", "M", "100644", "100644")])
+    ctx = SimpleNamespace(node=NodeSpec(id="n1", goal="g", scope=["app.py"]), snapshot=snap,
+                          clone=SimpleNamespace(work=work))
+    assert reviewer(ctx).status.value == "pass"
+    assert ("--no-session-persistence" not in fake["call"]()["argv"]) is kept
 
 
 def test_prompt_is_the_brief_and_files_are_preloaded_only_when_asked(tmp_path, fake, work):
@@ -274,3 +307,48 @@ def test_prompt_carries_scope_acceptance_feedback_and_rules():
     assert "Don't weaken, skip or delete tests" in prompt
     assert "one command per call" in prompt
     assert "one command per call" not in build_prompt(task)
+
+
+def test_prompt_rules_ask_for_small_test_first_changes_inside_scope():
+    prompt = build_prompt(TASK)
+    assert "smallest change" in prompt
+    assert "one test" in prompt and "one behaviour at a time" in prompt
+    assert "test helpers" in prompt
+    assert "commented-out code" in prompt and "TODO" in prompt
+    assert "new test file" in prompt and '"blocked"' in prompt
+
+
+# Idle limit and grace window: short limits, never real minutes.
+
+
+def test_a_silent_worker_is_stopped_as_a_provider_style_abort(tmp_path, fake, work):
+    fake["scenario"](sleep=60)
+    started = time.monotonic()
+    result = make(tmp_path, fake).run(TASK, work, Budget(wall_clock_s=120, idle_s=1.0))
+    assert time.monotonic() - started < 20
+    assert result.aborted and result.provider_error and result.idle_stopped
+    assert result.error == "stopped: no output for 1 second"
+    assert result.usage["idle_stopped"] is True
+
+
+def test_a_worker_that_hangs_after_its_result_is_killed_and_judged_normally(tmp_path, fake, work):
+    fake["scenario"](structured={"status": "done", "summary": "did it"}, sleep_after=60)
+    started = time.monotonic()
+    result = make(tmp_path, fake).run(TASK, work, Budget(wall_clock_s=120, idle_s=30.0, grace_s=0.5))
+    assert time.monotonic() - started < 20
+    assert not result.aborted and not result.provider_error and result.error is None
+    assert result.claim == {"status": "done", "summary": "did it"}
+    assert result.exit_code is None and result.usage["exited_after_grace"] is True
+
+
+def test_a_worker_that_keeps_printing_is_never_idle(tmp_path, fake, work):
+    fake["scenario"](structured={"status": "done", "summary": "slow"}, ticks=8, tick_s=0.3)
+    result = make(tmp_path, fake).run(TASK, work, Budget(wall_clock_s=120, idle_s=1.0, grace_s=5.0))
+    assert result.error is None and not result.aborted and result.exit_code == 0
+    assert result.claim["summary"] == "slow" and "idle_stopped" not in result.usage
+
+
+def test_stderr_output_counts_as_output(tmp_path, fake, work):
+    fake["scenario"](structured={"status": "done", "summary": "noisy"}, ticks=8, tick_s=0.3, tick_to="stderr")
+    result = make(tmp_path, fake).run(TASK, work, Budget(wall_clock_s=120, idle_s=1.0))
+    assert result.error is None and not result.aborted and result.claim["summary"] == "noisy"

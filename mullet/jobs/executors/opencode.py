@@ -90,7 +90,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from mullet.jobs import children, context, sandbox
-from mullet.jobs.executors.base import Budget, ExecResult, ExecutorUnavailable, Task
+from mullet.jobs.executors.base import Budget, ExecResult, ExecutorUnavailable, Task, Watch, idle_text
 from mullet.jobs.executors.claude_code import READ_ONLY_BASH
 from mullet.jobs.executors import keyproxy
 from mullet.jobs.executors.keyproxy import KeyProxy, ProxyError
@@ -191,7 +191,13 @@ _RULES = """\
 - Change only files that match the scope above. Leave lockfiles, CI config,
   CLAUDE.md, AGENTS.md, opencode.json, .claude/, .mcp.json and .env files alone
   unless this step says otherwise.
+- Any new test file must match the scope too. If the step needs one outside it,
+  answer BLOCKED and say so rather than writing it elsewhere.
 - Don't commit or run git commands that change anything. Mullet records your work.
+- Make the smallest change that meets the goal. Write one test, then the code
+  for it, one behaviour at a time.
+- Don't invent new test helpers or seams just to make code testable. Leave no
+  commented-out code and no TODO comments.
 - Don't weaken, skip or delete tests to get them passing.
 - Run the project's checks before you finish if you can. Shell commands run
   without network access.
@@ -532,31 +538,7 @@ def nearest_models(model: str, known: list[str], n: int = 5) -> list[str]:
 @lru_cache(maxsize=1)
 def nested_sandbox_ok() -> bool:
     """Whether a sandbox can start another, network-less one inside it (for the worker's shell)."""
-    bwrap = shutil.which("bwrap")
-    if not bwrap or not sandbox.check().ok:
-        return False
-    probe = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid",
-             "--", *_nested_argv(bwrap, [], []), "true"]
-    try:
-        return subprocess.run(probe, capture_output=True, timeout=15).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def _nested_argv(bwrap: str, readonly: list[Path], hidden: list[Path]) -> list[str]:
-    # bwrap must start from a cleared environment (see shell_wrapper): its own
-    # init process keeps whatever it was started with, and would show it in
-    # /proc. Its own session, pid, IPC and UTS namespaces and /proc as well,
-    # so opencode's processes aren't even listed. --bind / / keeps the outer
-    # view, clone writable included; the opencode home goes read-only on top,
-    # and `hidden` (the proxy's socket) is covered by an empty tmpfs.
-    argv = [bwrap, "--die-with-parent", "--new-session", "--unshare-net", "--unshare-pid",
-            "--unshare-ipc", "--unshare-uts", "--bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
-    for path in readonly:
-        argv += ["--ro-bind", str(path), str(path)]
-    for path in hidden:
-        argv += ["--tmpfs", str(path)]
-    return argv + ["--"]
+    return sandbox.nested_check()
 
 
 def shell_wrapper(env: dict[str, str], readonly: list[Path], hidden: list[Path] | None = None,
@@ -570,10 +552,12 @@ def shell_wrapper(env: dict[str, str], readonly: list[Path], hidden: list[Path] 
     covered, and an environment built from scratch (PATH-like basics plus
     `env`).
     """
-    bwrap = shutil.which("bwrap") or "bwrap"
     bash = "/bin/bash" if os.path.exists("/bin/bash") else "/bin/sh"
     assignments = " ".join(shlex.quote(f"{k}={v}") for k, v in env.items())
-    nested = " ".join(shlex.quote(a) for a in _nested_argv(bwrap, readonly, hidden or []))
+    # The nested sandbox must start from a cleared environment (env -i below):
+    # its own init process keeps whatever it was started with, and would show
+    # it in /proc. The opencode home goes read-only, the proxy's socket is covered.
+    nested = " ".join(shlex.quote(a) for a in sandbox.nested_argv(readonly, hidden or []))
     exact = exact_rules(exact_commands)
     # A quoted word in a case pattern is literal, so each one matches only itself.
     exact_check = ""
@@ -733,6 +717,13 @@ class _Stream:
     error: str | None = None
     error_at: float | None = None
     spend_stopped: bool = False
+    step_tools: int = 0  # tool calls since the last step started
+    watch: Watch | None = None
+
+
+# A step that ends for one of these reasons, or with text and no tool calls when
+# opencode gives no reason, is the worker's final reply.
+_FINAL_REASONS = frozenset({"stop", "end_turn"})
 
 
 def _add_tokens(total: dict[str, int], tokens: dict[str, Any], prefix: str = "") -> None:
@@ -756,6 +747,8 @@ def consume(stream, transcript_path: Path, state: _Stream) -> None:
             transcript.write(line)
             transcript.flush()
             state.lines += 1
+            if state.watch is not None:
+                state.watch.output()
             try:
                 event = json.loads(line)
             except ValueError:
@@ -767,6 +760,9 @@ def consume(stream, transcript_path: Path, state: _Stream) -> None:
             part = event.get("part") or {}
             if kind == "step_start":
                 state.texts = []
+                state.step_tools = 0
+                if state.watch is not None:
+                    state.watch.resumed()
             elif kind == "text":
                 if part.get("text"):
                     state.texts.append(str(part["text"]))
@@ -774,8 +770,13 @@ def consume(stream, transcript_path: Path, state: _Stream) -> None:
             elif kind == "tool_use":
                 name = str(part.get("tool") or "?")
                 state.tools[name] = state.tools.get(name, 0) + 1
+                state.step_tools += 1
             elif kind == "step_finish":
                 state.steps += 1
+                reason = part.get("reason")
+                final = reason in _FINAL_REASONS if reason else bool(state.texts) and not state.step_tools
+                if final and state.watch is not None:
+                    state.watch.finished()
                 _add_tokens(state.tokens, part.get("tokens") or {})
                 if part.get("cost") is not None:
                     try:
@@ -1216,27 +1217,30 @@ class OpencodeExecutor:
     def _launch(self, argv: list[str], work: Path, attempt_dir: Path, env: dict[str, str],
                 budget: Budget, proxy_dir: Path) -> ExecResult:
         transcript = attempt_dir / "transcript.jsonl"
-        state = _Stream()
+        stderr_path = attempt_dir / "stderr.log"
+        state = _Stream(watch=Watch(budget.idle_s, budget.grace_s))
         started = time.monotonic()
         timed_out = False
+        stop: str | None = None
         seen_steps = 0
         children.check_not_stopping()
-        with open(attempt_dir / "stderr.log", "wb") as stderr:
-            full = sandbox.build_argv(argv, self.spec(work, attempt_dir, env, proxy_dir))
-            proc = subprocess.Popen(
-                full, cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr,
-                text=True, encoding="utf-8", errors="replace", start_new_session=True,
-                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
-            )
+        with open(stderr_path, "wb") as stderr:
+            proc = sandbox.spawn(argv, self.spec(work, attempt_dir, env, proxy_dir),
+                                 stdout=subprocess.PIPE, stderr=stderr, cwd=work, text=True)
         reader = threading.Thread(target=consume, args=(proc.stdout, transcript, state), daemon=True)
         reader.start()
         with children.track(proc):
             try:
                 while proc.poll() is None:
-                    elapsed = time.monotonic() - started
-                    if elapsed > budget.wall_clock_s:
+                    now = time.monotonic()
+                    if now - started > budget.wall_clock_s:
                         timed_out = True
                         _kill_group(proc)
+                        break
+                    state.watch.poll_file(stderr_path, now)
+                    stop = state.watch.verdict(now)
+                    if stop is not None:
+                        _kill_group(proc)  # silent past the idle limit, or done but not exiting
                         break
                     if state.error_at is not None and time.monotonic() - state.error_at > ERROR_GRACE_S:
                         _kill_group(proc)  # opencode reported a fatal error but hasn't exited
@@ -1255,7 +1259,7 @@ class OpencodeExecutor:
                 raise
         reader.join(timeout=30)
         return self._result(proc.returncode, timed_out, state, transcript, attempt_dir,
-                            time.monotonic() - started)
+                            time.monotonic() - started, stop=stop, idle_s=budget.idle_s)
 
     def _usage(self, state: _Stream, duration: float) -> dict[str, Any]:
         # The proxy has seen every response, so its running cost goes into each progress record:
@@ -1312,7 +1316,8 @@ class OpencodeExecutor:
         return False
 
     def _result(self, code: int | None, timed_out: bool, state: _Stream, transcript: Path,
-                attempt_dir: Path, duration: float) -> ExecResult:
+                attempt_dir: Path, duration: float, *, stop: str | None = None,
+                idle_s: float | None = None) -> ExecResult:
         usage = self._usage(state, duration)
         text = state.final_text.strip()
         claim = None
@@ -1320,7 +1325,11 @@ class OpencodeExecutor:
             first = text.split(None, 1)[0].strip(":.").upper() if text.split() else ""
             status = {"DONE": "done", "BLOCKED": "blocked"}.get(first, "unknown")
             claim = {"status": status, "summary": text[-2000:]}
-        error, aborted, provider_error = None, False, False
+        if stop == "grace":
+            # It gave its final reply and then didn't exit: killed, and judged like any finished run.
+            code = None
+            usage["exited_after_grace"] = True
+        error, aborted, provider_error, idle_stopped = None, False, False, False
         if state.spend_stopped:
             # Not the worker's failure: the job ran out of money for this rung.
             error, aborted, provider_error = (f"stopped: this attempt's cost (${self.running_cost(state):.2f}) passed "
@@ -1331,13 +1340,17 @@ class OpencodeExecutor:
             # The provider or opencode refused (a bad key, an unknown model, an outage):
             # not the worker's doing, so it doesn't use up an attempt.
             error, aborted, provider_error = f"opencode reported an error: {state.error[:500]}", True, True
+        elif stop == "idle":
+            # Like a provider stop: opencode hung, so it doesn't use up an attempt.
+            error, aborted, provider_error, idle_stopped = f"stopped: {idle_text(idle_s or 0)}", True, True, True
+            usage["idle_stopped"] = True
         elif code not in (0, None):
             error, aborted = f"opencode exited {code}: {_tail(attempt_dir / 'stderr.log')}", True
         elif state.steps == 0 and not text:
             error, aborted = f"opencode ended without a result (exit {code})", True
-        return ExecResult(exit_code=None if timed_out else code, transcript_path=str(transcript), usage=usage,
-                          claim=claim, aborted=aborted, error=error, session_id=state.session_id,
-                          provider_error=provider_error)
+        return ExecResult(exit_code=None if timed_out or idle_stopped else code, transcript_path=str(transcript),
+                          usage=usage, claim=claim, aborted=aborted, error=error, session_id=state.session_id,
+                          provider_error=provider_error, idle_stopped=idle_stopped)
 
 
 def project_rules(work: Path) -> list[str]:

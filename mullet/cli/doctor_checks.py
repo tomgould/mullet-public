@@ -87,15 +87,27 @@ def git_check() -> Row:
     return ("Git", version.replace("git version ", ""), "ok")
 
 
+def sandbox_backend_row() -> Row:
+    """Which sandbox backend jobs use and why: the `sandbox.backend` setting, or the default."""
+    from mullet.jobs import sandbox
+
+    chosen = sandbox.selection()
+    notes = "".join(f"\n      Config: {problem}" for problem in chosen.problems)
+    if chosen.backend is None:
+        return ("Sandbox backend", f"None: {chosen.error}{notes}", "warn")
+    status = "ok" if sandbox.check().ok and not chosen.problems else "warn"
+    return ("Sandbox backend", f"{chosen.name} ({chosen.reason}){notes}", status)
+
+
 def sandbox_checks() -> list[Row]:
-    """Linux: bubblewrap and Mullet's sandbox self-test, plus socat for Claude Code's own sandbox."""
+    """Linux: the backend, bubblewrap and Mullet's sandbox self-test, plus socat for Claude Code's own sandbox."""
     from mullet.jobs import sandbox
 
     if not sys.platform.startswith("linux"):
         status = sandbox.check()
         return [("Job sandbox", "ok" if status.ok else f"Unavailable: {status.reason}",
                  "ok" if status.ok else "info")]
-    rows: list[Row] = []
+    rows: list[Row] = [sandbox_backend_row()]
     bwrap = shutil.which("bwrap")
     if bwrap:
         rows.append(("Bubblewrap", _version([bwrap, "--version"]) or bwrap, "ok"))

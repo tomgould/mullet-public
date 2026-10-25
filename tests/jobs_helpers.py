@@ -90,6 +90,12 @@ FAKE_CLAUDE = textwrap.dedent('''\
         path.write_text(content)
     if scenario.get("sleep"):
         time.sleep(scenario["sleep"])
+    for _ in range(scenario.get("ticks", 0)):
+        time.sleep(scenario.get("tick_s", 0.2))
+        if scenario.get("tick_to") == "stderr":
+            print("working", file=sys.stderr, flush=True)
+        else:
+            emit({"type": "assistant", "message": {"content": []}})
     for info in scenario.get("rate_limits") or ([scenario["rate_limit"]] if scenario.get("rate_limit") else []):
         emit({"type": "rate_limit_event", "rate_limit_info": info})
     emit({"type": "assistant", "message": {"content": []}})
@@ -99,6 +105,8 @@ FAKE_CLAUDE = textwrap.dedent('''\
     if "structured" in scenario:
         result["structured_output"] = scenario["structured"]
     emit(result)
+    if scenario.get("sleep_after"):
+        time.sleep(scenario["sleep_after"])
     sys.exit(scenario.get("exit", 0))
 ''')
 
@@ -215,9 +223,20 @@ FAKE_OPENCODE = textwrap.dedent('''\
              "cache": {"read": 5, "write": 0}}, "cost": costs[0]})
         if scenario.get("pause_after_first_step"):
             time.sleep(scenario["pause_after_first_step"])
+        for _ in range(scenario.get("ticks", 0)):
+            time.sleep(scenario.get("tick_s", 0.2))
+            if scenario.get("tick_to") == "stderr":
+                print("working", file=sys.stderr, flush=True)
+            else:
+                emit("tool_use", part={"type": "tool", "tool": "bash", "state": {"status": "completed"}})
         emit("step_start", part={"type": "step-start"})
         emit("text", part={"type": "text", "text": scenario.get("text", "DONE: did it")})
-        emit("step_finish", part={"type": "step-finish", "tokens": {"input": 50, "output": 10}, "cost": costs[1]})
+        final = {"type": "step-finish", "tokens": {"input": 50, "output": 10}, "cost": costs[1]}
+        if scenario.get("reason"):
+            final["reason"] = scenario["reason"]
+        emit("step_finish", part=final)
+        if scenario.get("sleep_after"):
+            time.sleep(scenario["sleep_after"])
     sys.exit(scenario.get("exit", 0))
 ''')
 

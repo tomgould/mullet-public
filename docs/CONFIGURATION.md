@@ -1,6 +1,6 @@
 # Settings
 
-Mullet reads one YAML file, `config.yaml` in the config directory (`~/.config/mullet` by default; `mullet paths` prints it). `mullet config show [--json] [section]` lists every active setting with its default and where its value came from. The sections are `ladder`, `budget`, `delegation`, `session`, `routing`, `providers`, `skills`, `other` and `unrecognised`. A setting whose name contains `key`, `token`, `secret` or `password` shows as `***`, and a provider's API key shows only `set` or `unset`. Keys in the file that Mullet does not recognise are listed under `unrecognised`.
+Mullet reads one YAML file, `config.yaml` in the config directory (`~/.config/mullet` by default; `mullet paths` prints it). `mullet config show [--json] [section]` lists every active setting with its default and where its value came from. The sections are `ladder`, `budget`, `delegation`, `session`, `sandbox`, `routing`, `providers`, `skills`, `other` and `unrecognised`. A setting whose name contains `key`, `token`, `secret` or `password` shows as `***`, and a provider's API key shows only `set` or `unset`. Keys in the file that Mullet does not recognise are listed under `unrecognised`.
 
 Job commands (`mullet job ...`, `mullet ladder report`) read job data from the jobs directory and profiles from the profiles directory. If your jobs live elsewhere, set `MULLET_JOBS_DIR` and `MULLET_PROFILES_DIR` for those commands too.
 
@@ -64,6 +64,8 @@ session:
   strategy_ttl_hours: 12      # how long a strategy stays in force (default 12)
 ```
 
+Scripts and CI can drive jobs through the Python API, which applies the same strategy and budget envelope: see [API_PYTHON.md](API_PYTHON.md).
+
 ## Notifications
 
 Every job notification (blocked, paused, spend cap reached, finished) ends with a line such as `Credit: openrouter $12.40 left; Claude week 62% used`, when Mullet can read those figures. It holds only provider names and numbers, so it is also sent to Slack.
@@ -118,15 +120,53 @@ server:
 
 In enterprise mode (`MULLET_MODE=enterprise`) the shared token is not used. REST requests carry a personal access token as `Authorization: Bearer <token>`, and a WebSocket client sends it in an `authenticate` message.
 
+## Sandbox
+
+Every command a job runs on your machine (setup, checks, gates and the opencode worker) runs in a sandbox: the filesystem read-only except the clone and the paths the job names, no network except for setup commands, an environment built from an allowlist with no provider keys, and a timeout that kills the whole process tree. If the sandbox can't start, the job is refused; nothing ever runs unsandboxed instead. `mullet doctor` shows which backend is active and why. The guarantees every backend keeps are in `docs/adr/0007-sandbox-backends.md`.
+
+```yaml
+sandbox:
+  backend: bubblewrap         # bubblewrap or auto (default bubblewrap)
+```
+
+- `bubblewrap` uses Linux user namespaces through `bwrap`, with no daemon and no root.
+- `auto` takes the first backend that works on this machine, and refuses all work when none does. Today that is bubblewrap on Linux.
+- `docker`, `podman` and `seatbelt` are reserved for backends still to come. Choosing one refuses all work with a message that says so.
+- A value Mullet doesn't recognise is reported by `mullet config show` and `mullet doctor`, and bubblewrap is used.
+
 ## Job protections
 
 - **Protected paths.** A step may not change `.git`, `.gitmodules`, `.gitattributes`, `.lfsconfig`, CI workflows (`.github/workflows`, `.github/actions`, `.gitlab-ci.yml`), `.husky`, `.pre-commit-config.yaml`, files your own tools run when you open the repo (`.envrc`, `.vscode`, `.devcontainer`, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pypirc`), `AGENTS.md`, `CLAUDE.md`, `.claude`, `.mcp.json`, `opencode.json`, `.mullet`, `.env` files, lockfiles, or test runner configuration, unless the approved plan allows it for that step. A repo's stored profile can set its own `protected_paths`.
+- **Review standards.** `review_standards` in a profile (stored, or the repo's `.mullet/project.yaml`) names a repo-relative Markdown file of your coding standards; default none. Only the G7 reviewer sees it, fenced as data and capped at 20,000 characters, and it is read from the job's base commit, so a step can't edit the standards its own review applies. A missing file is ignored with a note in the gate details. A review that finished but gave no verdict is asked again in the same session, only for the verdict, `jobs.reask_attempts` times (default 1; 0 pauses at once); one cut off by its turn limit or clock pauses the job instead. A one-way step is always reviewed, even with `--no-review`, and an approval it only got when asked again pauses the job for you to check.
 - **Crashed gates pause, they do not judge.** If a gate crashes, or a required review gives no verdict, the checks run again on the same work up to three times. Then the job pauses, nothing is committed, and `mullet job resume` runs the checks again without asking the worker to redo the work.
 - **Flaky tests.** A failing test is rerun up to twice. It is excused only if it passed in one of the runs.
 - **Attempts below Claude.** `ladder.max_below_claude` (default 3) caps the counted attempts per step on the rungs below Claude, before or after Claude's own. It never goes over the cap.
 - **OpenRouter privacy.** Every request that goes to OpenRouter asks for hosts that do not keep or train on prompts and, by default, only for hosts serving fp8, fp16, bf16 or fp32 copies. Hosts that do not say which copy they serve (`unknown`) are left out unless you list `unknown` under `ladder.routing.<model>.quantizations`.
 - **Single-worker opencode jobs and `:free` models.** A job planned with `--executor opencode --no-ladder` has the same spending cap and shared limits when its model is paid. A `:free` model runs only on a repo that passes the free rung's public check.
+- **Looking at a failed attempt.** `mullet job show <job> --attempt N` prints the attempt's outcome, reason and gate results; add `--diff` for the work it left. `mullet job export <job> --attempt N --branch NAME` copies that work into your repo as a new branch, takes only a plain branch name (`rescue`, `rescue/attempt-1`; not `refs/heads/...`, `heads/...` or `@{-1}`), refuses an existing branch unless you pass `--force`, and never touches the branch you have checked out. If the work was not kept, both say so.
+
+## Jobs
+
+How a job run treats slow or silent steps, under `jobs:` in the config file. A bad value, including `.inf` and `.nan`, is reported by `mullet config show` and its default kept; it never stops a job.
+
+```yaml
+jobs:
+  reask_attempts: 1          # times to ask again, in the same session, for a reply without its structured part (0 turns it off)
+  idle_minutes: null         # minutes of silence before a worker is stopped; null derives it
+  grace_seconds: 60          # seconds a worker may take to exit after its final reply (5 to 3600)
+  git_timeout_seconds: 600   # longest a single git command on a job clone may run
+  commit_body: full          # full or minimal: what goes under each step commit's subject
+```
+
+- `idle_minutes`: any line on the worker's output or stderr resets the clock. A stopped worker's attempt does not count against it. Unset, it is the larger of 15 minutes and 1.5 times the profile's longest check or test timeout.
+- `grace_seconds`: after that, the worker is killed and its work is judged by the gates as a finished run. It is at least 5 (at most 3600): Claude Code saves its session file after its final reply, and killing it sooner could leave a failed attempt with no session to resume.
+- `git_timeout_seconds`: a git command that runs longer gets SIGTERM, then 5 seconds to remove its lock files and exit, then SIGKILL.
+- `commit_body`: `full` (the default) puts a "Mullet step n1 (kind) passed gates ..." line and the worker's own summary, quoted and marked unverified, under each step commit's subject. `minimal` commits the subject alone. If your repo's rules forbid tool or AI lines in commit messages, set `minimal`; the gate results stay in the job's evidence report either way.
+
+The design is in `docs/adr/0010-worker-idle-timeout-and-grace.md`.
 
 ## Doctor checks
 
-`mullet doctor` is read-only and offline. It checks Python, the `claude` command, git, the job sandbox, the GPU, the Claude Code setup that `mullet setup-claude` recorded, and whether `ANTHROPIC_API_KEY` is set. It warns when no spending limit is set, and when the toolset policy lets a non-Claude provider run commands or touch files (`delegation.toolsets`). `--full` adds the network checks, including each paid provider's credit, which it flags under `budget.warn_below_usd`.
+`mullet doctor` is read-only and offline. It checks Python, the `claude` command, git, the job sandbox and its backend (`sandbox.backend`), the GPU, the Claude Code setup that `mullet setup-claude` recorded, and whether `ANTHROPIC_API_KEY` is set. It warns when no spending limit is set, and when the toolset policy lets a non-Claude provider run commands or touch files (`delegation.toolsets`). `--full` adds the network checks, including each paid provider's credit, which it flags under `budget.warn_below_usd`.
+
+Design decisions behind these settings are recorded in [adr/](adr/README.md).

@@ -93,14 +93,23 @@ def judge(results: list[GateResult], required: tuple[str, ...] = REQUIRED_GATES)
 
 
 NodeKind = Literal["mechanical", "design", "analysis"]
+# "one-way": hard to walk back once merged (a public API, a default users build
+# on, a removal, a persisted format). Such a step is always treated as risky.
+NodeDoor = Literal["two-way", "one-way"]
 
 
 class NodeSpec(BaseModel):
-    """One unit of work in a job plan, and the limits its gates enforce."""
+    """One unit of work in a job plan, and the limits its gates enforce.
+
+    `after` names nodes that must be finished first; the plan lists nodes so
+    that they are (`validate_plan` checks it), so the runner's order holds.
+    """
 
     id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     goal: str = Field(min_length=1)
     kind: NodeKind = "design"
+    door: NodeDoor = "two-way"
+    after: list[str] = Field(default_factory=list)
     scope: list[str] = Field(default_factory=lambda: ["**"])
     acceptance: list[str] = Field(default_factory=list)
     allow_protected: list[str] = Field(default_factory=list)

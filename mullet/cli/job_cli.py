@@ -18,19 +18,25 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import psutil
 import yaml
 
+from mullet.errors import (
+    JobError, MulletError, NotApproved, NotRunnable, PlanFailed, RunnerBusy, SpendLimit, StrategyOff,
+    Unavailable, Unverified,
+)
 from mullet.jobs import sandbox
 from mullet.jobs.clone import GitError, JobClone, resolve_commit
 from mullet.jobs.executors.base import ExecutorUnavailable
 from mullet.jobs.ladder import ORDERS, Ladder, MachineState, RungChoice, plan_rungs, spend_state
 from mullet.jobs.ledger import JobRecord, Ledger
 from mullet.jobs.paths import job_dir
-from mullet.jobs.planner import PLAN_KEYS, PlanError, plan_job, validate_plan
+from mullet.jobs.planner import PLAN_KEYS, PlanError, plan_job, plan_questions, validate_plan
 from mullet.jobs.profile import (
     Profile, load_profile, profile_path, repo_id, save_profile, user_profile, whole_check_commands,
 )
@@ -39,6 +45,9 @@ from mullet.jobs.runner import (
     ExecutorNotAllowed, JobRunner, check_executor_allowed, claude_executor, claude_usage, default_executor,
     executor_name, job_max_spend, solo_rung,
 )
+from mullet.jobs.settings import load_settings as load_job_settings
+from mullet.jobs.text import one_line as _line
+from mullet.jobs.text import strip_control
 from mullet.jobs.types import JobStatus, NodeSpec
 
 _EXECUTOR_NAMES = {"claude": "claude-code", "claude-code": "claude-code", "opencode": "opencode"}
@@ -46,8 +55,12 @@ _EXECUTOR_NAMES = {"claude": "claude-code", "claude-code": "claude-code", "openc
 _RUNNABLE = (JobStatus.APPROVED, JobStatus.PAUSED, JobStatus.BLOCKED)
 
 
-class CliError(RuntimeError):
-    """A problem to report to the user and exit 1."""
+CliError = JobError
+"""A problem to report to the user and exit 1 (the API raises the same classes)."""
+
+
+def _say(text: str) -> None:
+    print(text, flush=True)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -92,8 +105,8 @@ def _runner_pid(job_id: str) -> int | None:
     return pid
 
 
-def _load_nodes(path: str) -> tuple[list[tuple[NodeSpec, str | None]], str]:
-    """A hand-written or edited plan, held to the same rules as the planner's, and its notes."""
+def _load_nodes(path: str) -> tuple[list[tuple[NodeSpec, str | None]], str, list[str]]:
+    """A hand-written or edited plan, held to the same rules as the planner's, its notes and open questions."""
     try:
         data = yaml.safe_load(Path(path).read_text())
     except (OSError, yaml.YAMLError) as exc:
@@ -102,11 +115,14 @@ def _load_nodes(path: str) -> tuple[list[tuple[NodeSpec, str | None]], str]:
     notes = data.get("notes") if isinstance(data, dict) else None
     if not isinstance(items, list) or not items:
         raise CliError(f"{path}: expected a list of nodes (or a mapping with a 'nodes' list)")
+    raw = {"nodes": [dict(i) if isinstance(i, dict) else i for i in items]}
+    if isinstance(data, dict) and "open_questions" in data:
+        raw["open_questions"] = data["open_questions"]
     try:
-        nodes = validate_plan({"nodes": [dict(i) if isinstance(i, dict) else i for i in items]})
+        nodes = validate_plan(raw)
     except PlanError as exc:
         raise CliError(f"{path}: {exc}") from exc
-    return nodes, str(notes).strip() if notes else ""
+    return nodes, str(notes).strip() if notes else "", plan_questions(raw)
 
 
 def check_opencode_model(model: str | None) -> None:
@@ -177,6 +193,12 @@ def ladder_preview(job: JobRecord, ladder: Ladder, attempts_usage: list | None =
     return plan(probe), {spec.id: plan(spec) for spec in specs or []}
 
 
+def _open_questions(ledger: Ledger, job_id: str) -> list[str]:
+    """The open questions stored with the job's latest plan notes."""
+    stored = [e.data for e in ledger.events(job_id) if e.kind == "plan_notes"]
+    return [str(q) for q in (stored[-1].get("open_questions") or [])] if stored else []
+
+
 def show(ledger: Ledger, job_id: str, ladder: Ladder | None = None) -> str:
     """A job's plan, budget and checks, for review before approval."""
     job = ledger.get_job(job_id)
@@ -193,8 +215,8 @@ def show(ledger: Ledger, job_id: str, ladder: Ladder | None = None) -> str:
                        + ("; files pre-loaded" if worker == "opencode" or budget.get("preload_files") else "")
                        + (f"; spending cap ${job_max_spend(ledger, job, 0.0):.2f}" if solo and solo.paid else ""))
     lines = [
-        f"Job {job.id}  [{_state_label(job, ledger.nodes(job.id))}]" + (f"  {job.error}" if job.error else ""),
-        f"Goal: {job.goal}",
+        f"Job {job.id}  [{_state_label(job, ledger.nodes(job.id))}]" + (f"  {_line(job.error)}" if job.error else ""),
+        f"Goal: {_line(job.goal)}",
         f"Repo: {job.repo_path} at {job.base_ref} ({job.base_sha[:12]})",
         f"Attempts per node: {job.max_attempts}; per attempt: {budget.get('max_turns', 60)} turns, "
         f"{int(float(budget.get('wall_clock_s', 3600)) // 60)} minutes; "
@@ -217,21 +239,29 @@ def show(ledger: Ledger, job_id: str, ladder: Ladder | None = None) -> str:
     for node in nodes:
         spec = node.spec
         indent = "    " if node.parent_id else "  "
-        lines.append(f"{indent}{spec.id} [{node.status.value}] ({spec.kind}): {spec.goal}")
+        lines.append(f"{indent}{_line(spec.id)} [{node.status.value}] ({spec.kind}): {_line(spec.goal)}")
         mine = starts.get(spec.id)
         if mine is not None and mine.rungs:
             lines.append(f"{indent}  starts on: {mine.rungs[0].label()} ({mine.group}; then "
                          + (" > ".join(r.name for r in mine.rungs[1:]) or "nothing") + ")")
-        lines.append(f"{indent}  scope: {', '.join(spec.scope)}")
+        lines.append(f"{indent}  scope: {_line(', '.join(spec.scope))}")
+        if spec.after:
+            lines.append(f"{indent}  after: {_line(', '.join(spec.after))}")
         if spec.acceptance:
-            lines.append(f"{indent}  must pass: {'; '.join(spec.acceptance)}")
+            lines.append(f"{indent}  must pass: {_line('; '.join(spec.acceptance))}")
         if spec.allow_protected:
-            lines.append(f"{indent}  may change protected: {', '.join(spec.allow_protected)}")
+            lines.append(f"{indent}  may change protected: {_line(', '.join(spec.allow_protected))}")
         if spec.allow_test_weakening:
             lines.append(f"{indent}  may remove or skip tests")
         defaults = NodeSpec(id="x", goal="x")
         if (spec.max_files, spec.max_lines) != (defaults.max_files, defaults.max_lines):
             lines.append(f"{indent}  limits: {spec.max_files} files, {spec.max_lines} lines")
+    one_way = [n.spec for n in nodes if n.spec.door == "one-way"]
+    if one_way:
+        lines += ["", "One-way steps (hard to walk back):", *(f"  {_line(s.id)}: {_line(s.goal)}" for s in one_way)]
+    questions = _open_questions(ledger, job_id)
+    if questions:
+        lines += ["", "Open questions from the planner:", *(f"  - {_line(q)}" for q in questions)]
     lines += ["", "Checks Mullet will run (from the repo profile):", *_gates_line(job.profile)]
     if job.profile.get("setup"):
         lines.append("  setup: " + "; ".join(job.profile["setup"]))
@@ -239,7 +269,8 @@ def show(ledger: Ledger, job_id: str, ladder: Ladder | None = None) -> str:
     return "\n".join(lines)
 
 
-def decide_ladder(args: argparse.Namespace, profile: Profile, configured: bool, stored: Path) -> bool:
+def decide_ladder(args: argparse.Namespace | PlanOptions, profile: Profile, configured: bool, stored: Path,
+                  say: Callable[[str], None] = _say) -> bool:
     """Whether a new job uses the delegation ladder.
 
     On by default when the user's config has a `ladder:` key, the profile
@@ -253,11 +284,11 @@ def decide_ladder(args: argparse.Namespace, profile: Profile, configured: bool, 
     if args.executor == "opencode":
         raise CliError("--ladder chooses the worker for each step; drop --executor opencode, or use --no-ladder")
     if "opencode" not in profile.allowed_executors:
-        raise CliError("the ladder sends mechanical steps to opencode workers, which this repo's profile doesn't "
+        raise Unavailable("the ladder sends mechanical steps to opencode workers, which this repo's profile doesn't "
                        f"allow. Add 'opencode' to allowed_executors in your stored profile ({stored}) first; "
                        f"this repo's data class is {profile.data_class}.")
     if profile.ladder == "claude-only":
-        print("Note: this repo's profile says ladder: claude-only, so every step stays on Claude.")
+        say("Note: this repo's profile says ladder: claude-only, so every step stays on Claude.")
     return True
 
 
@@ -271,7 +302,7 @@ def session_strategy():
         return None
 
 
-def apply_strategy(args: argparse.Namespace) -> list[str]:
+def apply_strategy(args: argparse.Namespace | PlanOptions) -> list[str]:
     """Fold a fresh session strategy into `args` where the user gave no flag; say what changed.
 
     ``off`` refuses the job. ``claude-only`` plans one Claude Code worker with
@@ -283,7 +314,7 @@ def apply_strategy(args: argparse.Namespace) -> list[str]:
     if chosen is None:
         return []
     if chosen.delegation == "off":
-        raise CliError("the session strategy turns delegation off, so no job is planned. "
+        raise StrategyOff("the session strategy turns delegation off, so no job is planned. "
                        "Run `mullet strategy set --delegation ladder` (or claude-only) to change it.")
     applied = []
     if chosen.delegation == "claude-only" and args.ladder is None and args.executor is None:
@@ -295,32 +326,65 @@ def apply_strategy(args: argparse.Namespace) -> list[str]:
     return applied
 
 
-def cmd_plan(args: argparse.Namespace, ledger: Ledger) -> int:
-    applied = apply_strategy(args)
-    repo = _repo_root(args.repo)
-    base_sha = resolve_commit(repo, args.ref)
-    base_ref = args.ref
-    if args.ref == "HEAD":
+@dataclass
+class PlanOptions:
+    """Everything `mullet job plan` takes, with the CLI's defaults (also used by ``mullet.api``)."""
+
+    goal: str
+    repo: str = "."
+    ref: str = "HEAD"
+    plan_file: str | None = None
+    single: bool = False
+    scope: list[str] | None = None
+    no_review: bool = False
+    max_attempts: int = 3
+    max_turns: int = 60
+    minutes: int = 60
+    model: str | None = None
+    billing: str = "subscription"
+    executor: str | None = None
+    ladder: bool | None = None
+    max_spend: float | None = None
+    executor_model: str | None = None
+    preload: bool = False
+
+
+@dataclass(frozen=True)
+class PlanOutcome:
+    """A planned job: its id and the planner's notes and open questions for the approver."""
+
+    job_id: str
+    notes: str = ""
+    open_questions: tuple[str, ...] = ()
+
+
+def create_plan(ledger: Ledger, opts: PlanOptions, say: Callable[[str], None] = _say) -> PlanOutcome:
+    """Create a job, plan it and leave it awaiting approval. `say` receives the progress notes."""
+    applied = apply_strategy(opts)
+    repo = _repo_root(opts.repo)
+    base_sha = resolve_commit(repo, opts.ref)
+    base_ref = opts.ref
+    if opts.ref == "HEAD":
         base_ref = subprocess.run(["git", "-C", str(repo), "symbolic-ref", "--short", "-q", "HEAD"],
                                   capture_output=True, text=True).stdout.strip() or base_sha
     if _git(repo, "status", "--porcelain"):
-        print("Note: the repo has uncommitted changes. The job starts from the last commit and won't see them.")
+        say("Note: the repo has uncommitted changes. The job starts from the last commit and won't see them.")
     profile = load_profile(repo, base_sha)
     stored = profile_path(repo_id(repo))
     if not stored.exists():
         save_profile(profile)
-        print(f"Saved a detected profile to {stored}. Edit it to change setup or checks, then plan again.")
+        say(f"Saved a detected profile to {stored}. Edit it to change setup or checks, then plan again.")
     if applied:
-        print("Session strategy applied: " + "; ".join(applied) + " (explicit flags override it).")
-    executor = _EXECUTOR_NAMES[args.executor or "claude"]
+        say("Session strategy applied: " + "; ".join(applied) + " (explicit flags override it).")
+    executor = _EXECUTOR_NAMES[opts.executor or "claude"]
     ladder_config = make_ladder().config
-    use_ladder = decide_ladder(args, profile, ladder_config.configured, stored)
-    max_spend = ladder_config.max_spend if args.max_spend is None else args.max_spend
+    use_ladder = decide_ladder(opts, profile, ladder_config.configured, stored, say)
+    max_spend = ladder_config.max_spend if opts.max_spend is None else opts.max_spend
     if max_spend < 0:
-        raise CliError("--max-spend can't be negative")
-    budget = {"max_turns": args.max_turns, "wall_clock_s": args.minutes * 60,
-              "model": args.model, "billing": args.billing, "review": not args.no_review,
-              "executor": executor, "executor_model": args.executor_model, "preload_files": args.preload,
+        raise SpendLimit("--max-spend can't be negative")
+    budget = {"max_turns": opts.max_turns, "wall_clock_s": opts.minutes * 60,
+              "model": opts.model, "billing": opts.billing, "review": not opts.no_review,
+              "executor": executor, "executor_model": opts.executor_model, "preload_files": opts.preload,
               "ladder": use_ladder, "max_spend": max_spend,
               # Commands the worker may run as written even with `;`: only what the
               # user's stored profile (or detection) wrote, never the repo's own file.
@@ -331,39 +395,49 @@ def cmd_plan(args: argparse.Namespace, ledger: Ledger) -> int:
     try:
         check_executor_allowed(executor, profile)
     except ExecutorNotAllowed as exc:
-        raise CliError(f"{exc} (stored profile: {stored})") from exc
+        raise Unavailable(f"{exc} (stored profile: {stored})") from exc
     if executor == "opencode":
-        check_opencode_model(args.executor_model)
-    nodes, notes = _load_nodes(args.plan_file) if args.plan_file else (None, "")
-    job_id = ledger.create_job(str(repo), args.goal, base_ref, base_sha, profile.model_dump(),
-                               budget, max_attempts=args.max_attempts)
-    if nodes is None and args.single:
-        nodes = [(NodeSpec(id="n1", goal=args.goal, scope=args.scope or ["**"]), None)]
+        check_opencode_model(opts.executor_model)
+    nodes, notes, questions = _load_nodes(opts.plan_file) if opts.plan_file else (None, "", [])
+    job_id = ledger.create_job(str(repo), opts.goal, base_ref, base_sha, profile.model_dump(),
+                               budget, max_attempts=opts.max_attempts)
+    if nodes is None and opts.single:
+        nodes = [(NodeSpec(id="n1", goal=opts.goal, scope=opts.scope or ["**"]), None)]
     elif nodes is None:
         try:
-            nodes, notes = _run_planner(ledger, job_id, profile, args.model)
+            nodes, notes, questions = _run_planner(ledger, job_id, profile, opts.model, say)
         except (PlanError, ExecutorUnavailable, GitError) as exc:
             ledger.set_job_status(job_id, JobStatus.FAILED, f"planning failed: {exc}")
-            raise CliError(f"planning failed: {exc}") from exc
+            raise PlanFailed(f"planning failed: {exc}") from exc
         except KeyboardInterrupt:
             ledger.set_job_status(job_id, JobStatus.FAILED, "planning interrupted")
             raise
     ledger.set_plan(job_id, nodes)
-    if notes:
+    if notes or questions:
         # Kept for the workers too: each node's brief carries the planner's notes.
-        ledger.add_event(job_id, "plan_notes", {"notes": notes})
+        data: dict[str, Any] = {"notes": notes}
+        if questions:
+            data["open_questions"] = questions
+        ledger.add_event(job_id, "plan_notes", data)
     ledger.set_job_status(job_id, JobStatus.AWAITING_APPROVAL)
-    print(show(ledger, job_id))
-    if notes:
-        print(f"\nPlanner's notes: {notes}")
-    print(f"\nApprove with: mullet job approve {job_id}")
-    print(f"To change the plan: mullet job show {job_id} --yaml > plan.yaml, edit it, then "
+    return PlanOutcome(job_id, notes, tuple(questions))
+
+
+def cmd_plan(args: argparse.Namespace, ledger: Ledger) -> int:
+    opts = PlanOptions(**{name: getattr(args, name) for name in PlanOptions.__dataclass_fields__})
+    outcome = create_plan(ledger, opts)
+    print(show(ledger, outcome.job_id))
+    if outcome.notes:
+        print(f"\nPlanner's notes: {_line(outcome.notes)}")
+    print(f"\nApprove with: mullet job approve {outcome.job_id}")
+    print(f"To change the plan: mullet job show {outcome.job_id} --yaml > plan.yaml, edit it, then "
           f"mullet job plan \"<goal>\" --plan-file plan.yaml (repeat any --no-review, --model, "
           "--executor, --executor-model, --max-attempts, --no-ladder, --max-spend you used)")
     return 0
 
 
-def _run_planner(ledger: Ledger, job_id: str, profile, model: str | None):
+def _run_planner(ledger: Ledger, job_id: str, profile, model: str | None,
+                 say: Callable[[str], None] = _say):
     """Clone the repo for the job and ask a read-only session for a task tree. The planner is always Claude."""
     if not shutil.which("claude"):
         raise ExecutorUnavailable("the claude CLI is not on PATH; use --single or --plan-file instead")
@@ -373,20 +447,128 @@ def _run_planner(ledger: Ledger, job_id: str, profile, model: str | None):
     ledger.set_job_paths(job_id, clone.work, clone.git_dir, branch)
     files = [p for p in clone.git("ls-tree", "-r", "-z", "--name-only", "HEAD").stdout.split("\0") if p]
     executor = claude_executor(job, profile, job_dir(job_id) / "logs" / "planner")
-    print("Planning with Claude Code (read-only); this can take a few minutes...", flush=True)
+    say("Planning with Claude Code (read-only); this can take a few minutes...")
+    reask_attempts = load_job_settings().reask_attempts
+    # The session is kept only when it may be asked again for a plan it couldn't give.
+    keep = {"persist": True} if reask_attempts > 0 else {}
 
-    def ask(prompt, cwd, schema, budget):
-        result = executor.ask(prompt, cwd, schema, budget, model=model, label="plan")
+    def ask(prompt, cwd, schema, budget, resume=None):
+        again = {"resume": resume} if resume else {}
+        result = executor.ask(prompt, cwd, schema, budget, model=model, label="plan", **keep, **again)
         # The planner's Claude work goes in the ledger and keeps the budget figures fresh.
         ledger.add_event(job_id, "claude_usage", claude_usage("planner", result.usage))
         JobRunner._record_limits(result.usage)
         return result
 
-    nodes, notes, _ = plan_job(job.goal, clone.work, profile, files, ask)
-    return nodes, notes
+    nodes, notes, result = plan_job(job.goal, clone.work, profile, files, ask, reask_attempts=reask_attempts)
+    return nodes, notes, plan_questions(result.claim)
+
+
+def _find_attempt(ledger: Ledger, job_id: str, attempt_id: int):
+    ledger.get_job(job_id)
+    attempts = ledger.attempts(job_id)
+    for attempt in attempts:
+        if attempt.id == attempt_id:
+            return attempt
+    known = ", ".join(f"{a.id} ({a.node_id}, {a.outcome.value if a.outcome else 'in progress'})"
+                      for a in attempts) or "none yet"
+    raise CliError(f"no attempt {attempt_id} in job {job_id}. Its attempts: {known}")
+
+
+def _kept_tree(ledger: Ledger, job_id: str, attempt) -> tuple[JobClone | None, str | None]:
+    """The job's clone and the tree this attempt left, each None when it was not kept."""
+    g1 = next((r for r in ledger.gate_results(attempt.id) if r.gate == "G1"), None)
+    tree = g1.details.get("tree") if g1 else None
+    clone_root = job_dir(job_id) / "clone"
+    if not tree or not clone_root.exists():
+        return None, None
+    clone = JobClone(clone_root)
+    return (clone, str(tree)) if clone.has_tree(str(tree)) else (None, None)
+
+
+def _show_attempt(ledger: Ledger, job_id: str, attempt_id: int, diff: bool, *,
+                  terminal: bool | None = None) -> str:
+    """One attempt's outcome and gate results, and with `diff` the work it left.
+
+    Reasons and summaries can quote a model, so each is one sanitised line.
+    The diff is the worker's file contents: on a terminal (`terminal`, by
+    default whether stdout is one) its escape sequences and control
+    characters are stripped; piped to a file it stays exact, so it applies.
+    """
+    terminal = sys.stdout.isatty() if terminal is None else terminal
+    attempt = _find_attempt(ledger, job_id, attempt_id)
+    outcome = attempt.outcome.value if attempt.outcome else "in progress"
+    lines = [f"Attempt {attempt.id} of {attempt.node_id} ({attempt.executor}): {outcome}"]
+    if attempt.reason:
+        lines.append(f"Reason: {_line(attempt.reason)}")
+    for result in ledger.gate_results(attempt.id):
+        lines.append(f"  {result.gate} {result.status.value}: {_line(result.summary, 500)}")
+    clone, tree = _kept_tree(ledger, job_id, attempt)
+    if clone is None or tree is None:
+        lines.append("The work this attempt left is not kept (no tree was recorded, or the job's clone is gone).")
+    elif diff:
+        text = clone.git("diff", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
+                         attempt.start_sha, tree).stdout.rstrip()
+        lines += ["", strip_control(text) if terminal else text]
+    else:
+        lines.append(f"Its work is kept. See it with --diff, or copy it out: "
+                     f"mullet job export {job_id} --attempt {attempt.id} --branch NAME")
+    return "\n".join(lines)
+
+
+def _check_plain_branch(repo: Path, name: str) -> None:
+    """Refuse anything but a plain branch name such as `rescue` or `rescue/attempt-1`.
+
+    The name becomes `refs/heads/<name>`, so `refs/heads/x` or `heads/x` would
+    make a branch literally called that. `git check-ref-format --branch` must
+    accept it unchanged: it expands `@{-1}` to another branch's name, which is
+    not what was typed.
+    """
+    why = ("give a plain branch name such as rescue or rescue/attempt-1, not a ref path "
+           "(refs/..., heads/...), HEAD, @{...} or a name starting with -")
+    if (not name or name == "HEAD" or name.startswith(("-", "refs/", "heads/", "remotes/"))
+            or "@{" in name):
+        raise CliError(f"{name!r} is not a plain branch name; {why}")
+    check = subprocess.run(["git", "-C", str(repo), "check-ref-format", "--branch", name],
+                           capture_output=True, text=True)
+    if check.returncode != 0 or check.stdout.strip() != name:
+        raise CliError(f"{name!r} is not a valid plain branch name; {why}")
+
+
+def cmd_export(args: argparse.Namespace, ledger: Ledger) -> int:
+    """Copy one attempt's work into the user's repo as a new branch; the checked-out branch is never touched."""
+    job = ledger.get_job(args.job_id)
+    attempt = _find_attempt(ledger, args.job_id, args.attempt)
+    clone, tree = _kept_tree(ledger, args.job_id, attempt)
+    if clone is None or tree is None:
+        raise CliError(f"the work attempt {attempt.id} left is not kept (no tree was recorded, "
+                       "or the job's clone is gone), so there is nothing to export")
+    repo = Path(job.repo_path)
+    target = args.branch
+    _check_plain_branch(repo, target)
+    current = subprocess.run(["git", "-C", str(repo), "symbolic-ref", "--quiet", "--short", "HEAD"],
+                             capture_output=True, text=True).stdout.strip()
+    if target == current:
+        raise CliError(f"{target} is the branch checked out in {repo}; pick another name")
+    exists = subprocess.run(["git", "-C", str(repo), "show-ref", "--verify", "--quiet",
+                             f"refs/heads/{target}"]).returncode == 0
+    if exists and not args.force:
+        raise CliError(f"branch {target} already exists in {repo}; pick another name or pass --force to replace it")
+    ref = f"refs/mullet/attempt-{attempt.id}"
+    try:
+        clone.keep_tree(tree, attempt.start_sha, ref,
+                        f"mullet: attempt {attempt.id} of {attempt.node_id} (not accepted)\n")
+        sha = clone.fetch_into(repo, target, ref=ref, force=args.force)
+    except GitError as exc:
+        raise CliError(f"could not copy the work: {exc}") from exc
+    print(f"Branch {target} ({sha[:12]}) is now in your repo with attempt {attempt.id}'s work. Nothing else changed.")
+    return 0
 
 
 def cmd_show(args: argparse.Namespace, ledger: Ledger) -> int:
+    if args.attempt is not None:
+        print(_show_attempt(ledger, args.job_id, args.attempt, args.diff))
+        return 0
     if args.yaml:
         nodes = []
         for node in ledger.nodes(args.job_id):
@@ -399,6 +581,9 @@ def cmd_show(args: argparse.Namespace, ledger: Ledger) -> int:
             nodes.append(data)
         notes = [e.data.get("notes") for e in ledger.events(args.job_id) if e.kind == "plan_notes"]
         plan = {"nodes": nodes, **({"notes": notes[-1]} if notes and notes[-1] else {})}
+        questions = _open_questions(ledger, args.job_id)
+        if questions:
+            plan["open_questions"] = questions
         print(yaml.safe_dump(plan, sort_keys=False, width=100))
     else:
         print(show(ledger, args.job_id))
@@ -421,62 +606,77 @@ def preflight(job_status: JobStatus, job: JobRecord | None = None) -> None:
     Claude worker and for the G7 reviewer.
     """
     if job_status not in (*_RUNNABLE, JobStatus.RUNNING):
-        raise CliError(f"the job is {job_status.value}; only approved, paused or blocked jobs can run")
+        waiting = job_status in (JobStatus.PLANNING, JobStatus.AWAITING_APPROVAL)
+        raise (NotApproved if waiting else NotRunnable)(
+            f"the job is {job_status.value}; only approved, paused or blocked jobs can run")
     check = sandbox.check()
     if not check.ok:
-        raise CliError(f"Mullet's sandbox is unavailable: {check.reason}")
+        raise Unavailable(f"Mullet's sandbox is unavailable: {check.reason}")
     worker = executor_name(job) if job else "claude-code"
     if job is not None:
         profile = Profile.model_validate(job.profile)
         try:
             check_executor_allowed(worker, profile)
         except ExecutorNotAllowed as exc:
-            raise CliError(str(exc)) from exc
+            raise Unavailable(str(exc)) from exc
         if worker == "opencode":
             from mullet.jobs.executors.opencode import nested_sandbox_ok
 
             if not shutil.which("opencode"):
-                raise CliError("opencode is not on PATH; install it first (npm i -g opencode-ai)")
+                raise Unavailable("opencode is not on PATH; install it first (npm i -g opencode-ai)")
             if not nested_sandbox_ok():
-                raise CliError("opencode needs a nested sandbox for the worker's shell, and bubblewrap "
+                raise Unavailable("opencode needs a nested sandbox for the worker's shell, and bubblewrap "
                                "can't start one inside another here")
             if not shutil.which("socat"):
-                raise CliError("opencode reaches its provider through socat (for example: sudo apt install socat)")
+                raise Unavailable("opencode reaches its provider through socat (for example: sudo apt install socat)")
             try:
                 default_executor(job, profile, job_dir(job.id) / "logs" / "executor").validate_model()
             except ExecutorUnavailable as exc:
-                raise CliError(str(exc)) from exc
+                raise Unavailable(str(exc)) from exc
     if worker == "claude-code" or job is None or (job.budget or {}).get("review"):
         if not shutil.which("claude"):
-            raise CliError("the claude CLI is not on PATH; install Claude Code and log in first")
+            raise Unavailable("the claude CLI is not on PATH; install Claude Code and log in first")
         if sys.platform == "linux" and not shutil.which("socat"):
-            raise CliError("Claude Code's own sandbox needs socat on Linux (for example: sudo apt install socat)")
+            raise Unavailable("Claude Code's own sandbox needs socat on Linux (for example: sudo apt install socat)")
 
 
-def cmd_run(args: argparse.Namespace, ledger: Ledger) -> int:
-    job = ledger.get_job(args.job_id)
-    if _runner_alive(args.job_id):
-        raise CliError("a runner is already working on this job")
+def prepare_run(ledger: Ledger, job_id: str, max_spend: float | None = None,
+                say: Callable[[str], None] = _say) -> JobRecord:
+    """Check a job can be started now and record a new spending cap; raises a `JobError` if not."""
+    job = ledger.get_job(job_id)
+    if _runner_alive(job_id):
+        raise RunnerBusy("a runner is already working on this job")
     preflight(job.status, job)
-    if args.max_spend is not None:
+    if max_spend is not None:
         if not (job.budget or {}).get("ladder") and executor_name(job) != "opencode":
-            raise CliError("--max-spend applies to jobs planned with the ladder or with --executor opencode")
-        if args.max_spend < 0:
-            raise CliError("--max-spend can't be negative")
-        ledger.add_event(args.job_id, "max_spend", {"value": float(args.max_spend)})
-        print(f"Spending cap for this job is now ${args.max_spend:.2f}.")
-    if args.foreground:
-        from mullet.jobs.runner import main as runner_main
-        return runner_main([args.job_id])
-    logs = job_dir(args.job_id) / "logs"
+            raise SpendLimit("--max-spend applies to jobs planned with the ladder or with --executor opencode")
+        if max_spend < 0:
+            raise SpendLimit("--max-spend can't be negative")
+        ledger.add_event(job_id, "max_spend", {"value": float(max_spend)})
+        say(f"Spending cap for this job is now ${max_spend:.2f}.")
+    return job
+
+
+def start_runner(job_id: str) -> tuple[int, Path]:
+    """Start the detached runner for a job; returns its pid and log file."""
+    logs = job_dir(job_id) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     with open(logs / "runner.log", "ab") as log:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "mullet.jobs.runner", args.job_id],
+            [sys.executable, "-m", "mullet.jobs.runner", job_id],
             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True, cwd=job_dir(args.job_id),
+            start_new_session=True, cwd=job_dir(job_id),
         )
-    print(f"Running in the background (pid {proc.pid}). Log: {logs / 'runner.log'}")
+    return proc.pid, logs / "runner.log"
+
+
+def cmd_run(args: argparse.Namespace, ledger: Ledger) -> int:
+    prepare_run(ledger, args.job_id, args.max_spend)
+    if args.foreground:
+        from mullet.jobs.runner import main as runner_main
+        return runner_main([args.job_id])
+    pid, log = start_runner(args.job_id)
+    print(f"Running in the background (pid {pid}). Log: {log}")
     print(f"Follow it with: mullet job tail {args.job_id} -f")
     return 0
 
@@ -505,7 +705,7 @@ def cmd_status(args: argparse.Namespace, ledger: Ledger) -> int:
     print(_status_line(ledger, args.job_id))
     job = ledger.get_job(args.job_id)
     if job.error:
-        print(f"  {job.error}")
+        print(f"  {_line(job.error)}")
     for node in ledger.nodes(args.job_id):
         tries = ledger.attempt_count(args.job_id, node.node_id)
         print(f"  {node.node_id:<20} {node.status.value:<11} attempts {tries}/{job.max_attempts}")
@@ -540,13 +740,18 @@ def cmd_tail(args: argparse.Namespace, ledger: Ledger) -> int:
     return 0
 
 
-def cmd_stop(args: argparse.Namespace, ledger: Ledger) -> int:
-    if not _runner_alive(args.job_id):
-        raise CliError("no runner is working on this job")
-    pid = _runner_pid(args.job_id)
+def stop_runner(job_id: str) -> None:
+    """Ask a job's live runner to stop (the job is paused, not lost); raises a `JobError` if none is confirmed."""
+    if not _runner_alive(job_id):
+        raise NotRunnable("no runner is working on this job")
+    pid = _runner_pid(job_id)
     if not pid:
-        raise CliError("a runner holds this job but its pid can't be confirmed; stop it with Ctrl-C where it runs")
+        raise NotRunnable("a runner holds this job but its pid can't be confirmed; stop it with Ctrl-C where it runs")
     os.kill(pid, signal.SIGTERM)
+
+
+def cmd_stop(args: argparse.Namespace, ledger: Ledger) -> int:
+    stop_runner(args.job_id)
     print("Asked the runner to stop. The job will be paused; resume it with: "
           f"mullet job resume {args.job_id}")
     return 0
@@ -571,37 +776,63 @@ def cmd_discard(args: argparse.Namespace, ledger: Ledger) -> int:
     return 0
 
 
-def cmd_merge(args: argparse.Namespace, ledger: Ledger) -> int:
-    job = ledger.get_job(args.job_id)
+@dataclass(frozen=True)
+class MergeOutcome:
+    """A branch handed back into the user's repo."""
+
+    branch: str
+    sha: str
+    unverified: tuple[str, ...]
+    diffstat: str
+
+
+def merge_job(ledger: Ledger, job_id: str, *, branch: str | None = None, allow_unverified: bool = False,
+              confirm: Callable[[str], bool] | None = None, say: Callable[[str], None] = _say) -> MergeOutcome | None:
+    """Copy a finished job's branch into its repo as a new branch; nothing else changes.
+
+    `confirm`, when given, is asked before copying and a False answer returns None.
+    """
+    job = ledger.get_job(job_id)
     if job.status is not JobStatus.DONE:
-        raise CliError(f"the job is {job.status.value}; only a finished job can be handed back")
-    unverified = [n.node_id for n in ledger.nodes(args.job_id) if n.status.value == "unverified"]
-    if unverified and not args.allow_unverified:
-        raise CliError(f"these nodes could not be fully checked: {', '.join(unverified)}. "
-                       "Review them, then hand the branch back with --allow-unverified")
-    clone = JobClone(job_dir(args.job_id) / "clone")
-    print(clone.git("diff", "--stat", job.base_sha, "HEAD").stdout)
+        raise NotRunnable(f"the job is {job.status.value}; only a finished job can be handed back")
+    unverified = [n.node_id for n in ledger.nodes(job_id) if n.status.value == "unverified"]
+    if unverified and not allow_unverified:
+        raise Unverified(f"these nodes could not be fully checked: {', '.join(unverified)}. "
+                         "Review them, then hand the branch back with --allow-unverified")
+    clone = JobClone(job_dir(job_id) / "clone")
+    diffstat = clone.git("diff", "--stat", job.base_sha, "HEAD").stdout
+    say(diffstat)
     if unverified:
-        print(f"Warning: these nodes could not be fully checked: {', '.join(unverified)}")
-    target = args.branch or job.branch or f"mullet/{job.id}"
+        say(f"Warning: these nodes could not be fully checked: {', '.join(unverified)}")
+    target = branch or job.branch or f"mullet/{job.id}"
     repo = Path(job.repo_path)
     if subprocess.run(["git", "-C", str(repo), "check-ref-format", "--branch", target],
                       capture_output=True).returncode != 0:
         raise CliError(f"{target!r} is not a valid branch name")
     if subprocess.run(["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{target}"]).returncode == 0:
         raise CliError(f"branch {target} already exists in {repo}; pick another with --branch")
-    if not args.yes:
-        answer = input(f"Copy this as branch {target} into {job.repo_path}? [y/N] ").strip().lower()
-        if answer not in ("y", "yes"):
-            print("Nothing changed.")
-            return 1
+    if confirm is not None and not confirm(f"Copy this as branch {target} into {job.repo_path}? [y/N] "):
+        return None
     try:
         sha = clone.fetch_into(repo, target)
     except GitError as exc:
         raise CliError(f"could not copy the branch: {exc}") from exc
-    ledger.set_job_status(args.job_id, JobStatus.MERGED)
-    print(f"Branch {target} ({sha[:12]}) is now in your repo. Nothing else changed.")
-    print(f"Review and merge it yourself, for example: git merge --no-ff {target}")
+    ledger.set_job_status(job_id, JobStatus.MERGED)
+    return MergeOutcome(target, sha, tuple(unverified), diffstat)
+
+
+def _ask_yes(question: str) -> bool:
+    return input(question).strip().lower() in ("y", "yes")
+
+
+def cmd_merge(args: argparse.Namespace, ledger: Ledger) -> int:
+    outcome = merge_job(ledger, args.job_id, branch=args.branch, allow_unverified=args.allow_unverified,
+                        confirm=None if args.yes else _ask_yes)
+    if outcome is None:
+        print("Nothing changed.")
+        return 1
+    print(f"Branch {outcome.branch} ({outcome.sha[:12]}) is now in your repo. Nothing else changed.")
+    print(f"Review and merge it yourself, for example: git merge --no-ff {outcome.branch}")
     return 0
 
 
@@ -818,7 +1049,17 @@ def build_parser() -> argparse.ArgumentParser:
     show_p = sub.add_parser("show", help="show a job's plan and checks")
     show_p.add_argument("job_id")
     show_p.add_argument("--yaml", action="store_true", help="print the plan as an editable plan file")
+    show_p.add_argument("--attempt", type=int, metavar="N",
+                        help="show one attempt: its outcome, reason and gate results")
+    show_p.add_argument("--diff", action="store_true", help="with --attempt, the diff of the work it left")
     show_p.set_defaults(fn=cmd_show)
+
+    export = sub.add_parser("export", help="copy one attempt's work into your repo as a new branch")
+    export.add_argument("job_id")
+    export.add_argument("--attempt", type=int, required=True, metavar="N", help="attempt number (see show --attempt)")
+    export.add_argument("--branch", required=True, help="name for the new branch in your repo")
+    export.add_argument("--force", action="store_true", help="replace the branch if it already exists")
+    export.set_defaults(fn=cmd_export)
 
     for name, fn, text in (
         ("approve", cmd_approve, "approve a planned job"),
@@ -882,6 +1123,6 @@ def cmd_job(argv: list[str]) -> int:
     try:
         with Ledger() as ledger:
             return args.fn(args, ledger)
-    except (CliError, KeyError, ValueError) as exc:
+    except (MulletError, KeyError, ValueError) as exc:
         print(f"mullet job: {exc}", file=sys.stderr)
         return 1

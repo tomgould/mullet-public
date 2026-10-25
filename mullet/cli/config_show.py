@@ -16,7 +16,8 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
-SECTIONS = ("ladder", "budget", "delegation", "session", "routing", "providers", "skills", "other", "unrecognised")
+SECTIONS = ("ladder", "budget", "delegation", "session", "sandbox", "jobs", "routing", "providers", "skills", "other",
+            "unrecognised")
 MASK = "***"
 _SECRET_WORDS = ("key", "token", "secret", "password")
 LEGACY_BUDGET_KEYS = ("per_task", "per_session", "daily")
@@ -26,6 +27,7 @@ LEGACY_NOTE = "legacy delegation path, not used by gated jobs"
 KNOWN_TOP_LEVEL = frozenset({
     "providers", "routing", "budget", "max_iterations", "server", "knowledge", "toolsets", "plugins",
     "skills", "default_toolsets", "ladder", "opencode_timeout_seconds", "delegation", "session",
+    "sandbox", "jobs",
 })
 _OTHER_SCALARS = ("max_iterations", "default_toolsets", "opencode_timeout_seconds")
 _OTHER_BLOCKS = ("server", "knowledge", "toolsets", "plugins")
@@ -169,6 +171,42 @@ def _session_rows(raw: dict[str, Any], path: Path, problems: list[str], unknown:
             for name, note in notes.items()]
 
 
+def _jobs_rows(raw: dict[str, Any], path: Path, problems: list[str], unknown: list[str]) -> list[Row]:
+    """The ``jobs:`` settings: how a job run treats slow, silent or malformed steps."""
+    from mullet.jobs.settings import KEYS, JobSettings, parse_settings
+
+    block = _block(raw, "jobs")
+    active = parse_settings(raw.get("jobs"), "jobs")
+    default = JobSettings()
+    problems.extend(p for p in active.problems if "unknown setting" not in p)
+    unknown += [f"jobs.{k}" for k in block if k not in KEYS]
+    notes = {"reask_attempts": "times to ask again for a reply that lacks its structured part (0 turns it off)",
+             "idle_minutes": "minutes of silence before a worker is stopped; none derives it from the profile",
+             "grace_seconds": "seconds a worker may take to exit after it says it is finished",
+             "git_timeout_seconds": "longest one git command on a job clone may run",
+             "commit_body": "full: a Mullet step line and the worker's claim under each commit subject; "
+                            "minimal: the subject alone"}
+    return [_row(f"jobs.{name}", getattr(active, name), getattr(default, name),
+                 str(path) if name in block else "default", note)
+            for name, note in notes.items()]
+
+
+def _sandbox_rows(raw: dict[str, Any], path: Path, problems: list[str], unknown: list[str]) -> list[Row]:
+    """The ``sandbox:`` settings: which backend confines job commands."""
+    from mullet.jobs.sandbox_backends.settings import (
+        AUTO, AVAILABLE, DEFAULT_BACKEND, KEYS, RESERVED, parse_settings,
+    )
+
+    block = _block(raw, "sandbox")
+    active = parse_settings(raw.get("sandbox"), "sandbox")
+    problems.extend(p for p in active.problems if "unknown setting" not in p)
+    unknown += [f"sandbox.{k}" for k in block if k not in KEYS]
+    return [_row("sandbox.backend", active.backend, DEFAULT_BACKEND,
+                 str(path) if active.from_config else "default",
+                 f"{' or '.join([*AVAILABLE, AUTO])} ({', '.join(RESERVED)} reserved); "
+                 "never falls back to running unsandboxed")]
+
+
 def _provider_rows(raw: dict[str, Any], config: Any, path: Path) -> list[Row]:
     block = _block(raw, "providers")
     rows = []
@@ -224,6 +262,8 @@ def collect(path: Path | None = None) -> dict[str, Any]:
         "budget": _budget_rows(raw, target),
         "delegation": _delegation_rows(raw, target),
         "session": _session_rows(raw, target, problems, unknown),
+        "jobs": _jobs_rows(raw, target, problems, unknown),
+        "sandbox": _sandbox_rows(raw, target, problems, unknown),
         "routing": _routing_rows(raw, config, target, unknown),
         "providers": _provider_rows(raw, config, target),
         "skills": _skills_rows(raw, config, target, unknown),
