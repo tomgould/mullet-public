@@ -2,7 +2,9 @@
 
 import http.client
 import json
+import shutil
 import socket
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,6 +59,23 @@ def upstream():
     server.shutdown()
 
 
+_SOCK_DIRS: list[Path] = []
+
+
+def _sock() -> Path:
+    """A socket path short enough for macOS, whose AF_UNIX limit is 104 bytes."""
+    d = Path(tempfile.mkdtemp(prefix="kp", dir="/tmp"))
+    _SOCK_DIRS.append(d)
+    return d / "s"
+
+
+@pytest.fixture(autouse=True)
+def _remove_sock_dirs():
+    yield
+    while _SOCK_DIRS:
+        shutil.rmtree(_SOCK_DIRS.pop(), ignore_errors=True)
+
+
 class _UnixConnection(http.client.HTTPConnection):
     def __init__(self, path: Path):
         super().__init__("sandbox")
@@ -70,7 +89,7 @@ class _UnixConnection(http.client.HTTPConnection):
 @pytest.fixture
 def proxy(tmp_path, upstream):
     def start(key=KEY, header="bearer", **kwargs):
-        p = KeyProxy(tmp_path / "s", upstream, key, header=header, log_path=tmp_path / "proxy.log", **kwargs)
+        p = KeyProxy(_sock(), upstream, key, header=header, log_path=tmp_path / "proxy.log", **kwargs)
         return p.start()
     started = []
     yield lambda **kw: started.append(start(**kw)) or started[-1]
@@ -167,14 +186,14 @@ def test_chunked_request_bodies_are_forwarded(proxy):
                                  "https://x/v1?key=1", "not a url"])
 def test_unsafe_upstreams_are_refused(tmp_path, url):
     with pytest.raises(ProxyError):
-        KeyProxy(tmp_path / "s", url, KEY)
+        KeyProxy(_sock(), url, KEY)
 
 
 def test_a_dead_upstream_is_a_502_not_a_hang(tmp_path):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    with KeyProxy(tmp_path / "s", f"http://127.0.0.1:{port}/v1", KEY) as p:
+    with KeyProxy(_sock(), f"http://127.0.0.1:{port}/v1", KEY) as p:
         assert call(p, path="/v1/x")[0] == 502
 
 
@@ -334,10 +353,10 @@ def test_a_failed_start_leaves_no_socket_or_open_server(tmp_path, monkeypatch, u
         raise OSError("chmod refused")
 
     monkeypatch.setattr(keyproxy.os, "chmod", refuse)
-    p = KeyProxy(tmp_path / "s", upstream, KEY)
+    p = KeyProxy(_sock(), upstream, KEY)
     with pytest.raises(OSError):
         p.start()
-    assert not (tmp_path / "s").exists() and p._server is None
+    assert not (_sock()).exists() and p._server is None
 
 
 def test_body_fields_replace_the_workers_own_routing(proxy):

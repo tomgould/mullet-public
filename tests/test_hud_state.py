@@ -1,7 +1,10 @@
 """Tests for mullet.hud.state — read_state_file and boot-time staleness detection."""
 import json
+import sys
 import time
 from unittest.mock import patch
+
+import pytest
 
 
 from mullet.hud.state import read_state_file, _boot_time
@@ -9,6 +12,7 @@ from mullet.hud.state import read_state_file, _boot_time
 
 # --- _boot_time ---
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/uptime; 0.0 elsewhere by design")
 def test_boot_time_returns_float():
     bt = _boot_time()
     assert isinstance(bt, float)

@@ -209,9 +209,6 @@ def _expand_file(ref: ContextReference, cwd: str) -> tuple[str | None, str | Non
         return None, f"File not found: {ref.target}"
     if not path.is_file():
         return None, f"Not a file: {ref.target}"
-    if _is_binary(path):
-        return None, f"Binary file skipped: {ref.target}"
-
     # Size limit: 500KB per file (prevents memory issues with large dumps)
     MAX_FILE_SIZE = 500_000
     try:
@@ -220,6 +217,8 @@ def _expand_file(ref: ContextReference, cwd: str) -> tuple[str | None, str | Non
             return None, f"File too large: {ref.target} ({file_size//1024}KB, max {MAX_FILE_SIZE//1024}KB)"
     except OSError:
         pass
+    if _is_binary(path):
+        return None, f"Binary file skipped: {ref.target}"
 
     try:
         text = path.read_text(encoding="utf-8", errors="replace")

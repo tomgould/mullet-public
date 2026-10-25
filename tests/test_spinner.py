@@ -125,7 +125,9 @@ def test_tool_spinner_update():
     ts.start()
     time.sleep(0.15)
     ts.update("Phase 2")
-    time.sleep(0.15)
+    deadline = time.monotonic() + 5  # a loaded CI runner can miss a frame or two
+    while "Phase 2" not in buf.getvalue() and time.monotonic() < deadline:
+        time.sleep(0.05)
     ts.stop()
     output = buf.getvalue()
     assert "Phase 2" in output

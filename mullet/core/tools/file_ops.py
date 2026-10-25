@@ -2,6 +2,7 @@
 import glob
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 def batch_rename(directory, pattern, replacement):
@@ -125,8 +126,9 @@ def file_ops_handler(**kwargs) -> str:
 
     path = Path(os.path.abspath(path_str)).resolve()
 
-    # Security: block path traversal outside home/cwd
-    allowed_roots = [Path.home(), Path.cwd(), Path("/tmp")]
+    # Security: block path traversal outside home, cwd and the temp directory
+    # (on macOS the user's temp directory is under /var/folders, not /tmp)
+    allowed_roots = [Path.home(), Path.cwd(), Path("/tmp"), Path(tempfile.gettempdir())]
     if not any(path.resolve().is_relative_to(r.resolve()) for r in allowed_roots):
         return json.dumps({"error": f"Path traversal blocked: {path} is outside allowed directories"})
 

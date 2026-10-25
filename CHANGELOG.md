@@ -6,6 +6,15 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The file tools accept paths in the user's temp directory, which on macOS is under
+  `/var/folders` rather than `/tmp`.
+- `@file:` references check a file's size before guessing whether it is binary, so an
+  oversized file is always reported as too large.
+- Tests that failed only on macOS or without bubblewrap: short key-proxy socket paths
+  (macOS allows 104 bytes), a mocked sandbox check, and a spinner test that waits for
+  its frame.
+
 ## [2.0.0] - 2026-10-25
 
 ### Added
