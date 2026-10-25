@@ -183,7 +183,10 @@ def test_registered_as_a_session_start_hook():
     spec = HOOKS["session-strategy"]
     assert spec.module == "session_strategy"
     assert spec.registrations == (("SessionStart", None),)
-    settings = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    settings_file = ROOT / ".claude" / "settings.json"
+    if not settings_file.exists():
+        pytest.skip("this repo's own Claude Code settings are not part of the public copy")
+    settings = json.loads(settings_file.read_text())
     commands = [h["command"] for group in settings["hooks"]["SessionStart"] for h in group["hooks"]]
     assert any(c.endswith("scripts/hooks/session_strategy.py") for c in commands)
 
