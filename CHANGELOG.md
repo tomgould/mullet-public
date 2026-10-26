@@ -4,10 +4,11 @@ All notable changes to Mullet are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.1] - 2026-10-26
 
 ### Fixed
 
+- The 2.3.0 notes said decision records ran 0001 to 0010 and that 2.3.0 containers lack the owner labels; both were wrong and are corrected. The sandbox image tag follows the version, so run `mullet sandbox build-image` again.
 - `api.plan()` returns the planner's open questions on the handle.
 
 ## [2.3.0] - 2026-10-26
@@ -1025,7 +1026,7 @@ The next-generation CLI shell is now feature-complete and daily-driver ready (29
 
 **Tests:** 991 harness tests passing across 111 test files.
 
-## [Unreleased] — Harness Layer
+## [2.3.1] - 2026-10-26 — Harness Layer
 
 ### Added — Engine
 - Tool execution wired (22 tools auto-discovered from `core/tools`)

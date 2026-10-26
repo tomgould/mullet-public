@@ -127,7 +127,7 @@ Every command a job runs on your machine (setup, checks, gates and the opencode 
 ```yaml
 sandbox:
   backend: bubblewrap         # bubblewrap, docker, podman or auto (default bubblewrap)
-  image: mullet-sandbox:2.3.0 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
+  image: mullet-sandbox:2.3.1 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
   memory: 8g                  # docker and podman: each container's memory limit, swap included (default 8g, at least 64m)
   pids_limit: 4096            # docker and podman: the most processes and threads per container (default 4096, 64 to 1000000)
 ```

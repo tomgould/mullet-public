@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mullet"
-version = "2.3.0"
+version = "2.3.1"
 description = "Cloud in the front, Local GPU in the back. AI coding orchestrator with intelligent compute routing."
 readme = "README.md"
 license = {text = "BUSL-1.1"}
