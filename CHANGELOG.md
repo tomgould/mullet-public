@@ -6,6 +6,10 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `api.plan()` returns the planner's open questions on the handle.
+
 ## [2.3.0] - 2026-10-26
 
 ### Fixed
@@ -54,7 +58,7 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
   worker still needs bubblewrap. Linux only; see `docs/adr/0011-container-sandbox-backend.md`.
 - **Python API.** `mullet.api` plans, runs, stops and merges jobs without the CLI
   (`docs/API_PYTHON.md`).
-- **Decision records.** `docs/adr/` explains the main choices (0001 to 0010).
+- **Decision records.** `docs/adr/` explains the main choices (0001 to 0011).
 - `mullet job show <job> --attempt N [--diff]` and `mullet job export <job> --attempt N --branch NAME` to inspect a failed attempt and copy its work out as a branch; `mullet ladder report` gains a "Why attempts failed" section; git commands on a job clone stop after `jobs.git_timeout_seconds`.
 - `jobs.commit_body`: `full` (default) or `minimal`, which commits each step with its subject
   alone, for repos whose rules forbid tool lines in commit messages.
@@ -92,8 +96,6 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
     not the spec's paths resolved again.
   - PID 1 refuses an environment execve can't take (exit 125, with the reason) and its child
     exits 126 or 127 whatever exec raises; a SIGCHLD flood can't make it block on stderr.
-  - Containers started by 2.3.0 lack the new labels and are never reaped; remove any left over
-    with `docker rm -f` once no job runs.
 
 ## [2.2.0] - 2026-10-25
 

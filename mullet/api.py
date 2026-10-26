@@ -54,6 +54,7 @@ class JobHandle:
 
     id: str
     notes: str = ""
+    open_questions: tuple[str, ...] = ()
 
     def __str__(self) -> str:
         return self.id
@@ -169,7 +170,7 @@ def plan(goal: str, repo: str | Path | None = None, *, ref: str | None = None, m
         ladder=ladder, executor=executor)
     with _ledger() as ledger:
         outcome = job_cli.create_plan(ledger, opts, say=lambda text: None)
-    return JobHandle(outcome.job_id, outcome.notes)
+    return JobHandle(outcome.job_id, outcome.notes, outcome.open_questions)
 
 
 @_translate

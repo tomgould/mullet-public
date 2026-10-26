@@ -208,3 +208,12 @@ def test_stop_asks_the_live_runner(repo, plan_file, monkeypatch):
     monkeypatch.setattr(job_cli.os, "kill", lambda pid, sig: killed.append(pid))
     api.stop(planned(repo, plan_file))
     assert killed == [99]
+
+
+def test_plan_handle_carries_the_planners_open_questions(repo, tmp_path):
+    plan_file = tmp_path / "q.yaml"
+    plan_file.write_text(yaml.safe_dump({
+        "nodes": [{"id": "n1", "goal": "add a sub function", "scope": ["app.py"]}],
+        "open_questions": ["Which rounding mode?"]}))
+    handle = api.plan("goal", repo, plan_file=plan_file)
+    assert handle.open_questions == ("Which rounding mode?",)

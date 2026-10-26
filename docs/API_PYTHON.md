@@ -17,7 +17,7 @@ Without `plan_file`, a read-only Claude Code session writes the task tree, as `m
 
 ## Functions
 
-- `plan(goal, repo=None, *, ref=None, max_spend=None, ladder=None, executor=None, plan_file=None) -> JobHandle`: create a job and leave it awaiting approval.
+- `plan(goal, repo=None, *, ref=None, max_spend=None, ladder=None, executor=None, plan_file=None) -> JobHandle`: create a job and leave it awaiting approval.  The handle has `id`, `notes` and `open_questions` (the planner's unanswered questions, to read before approving).
 - `approve(job)`: approve the plan.
 - `run(job, *, wait=True, detach=False) -> JobStatusInfo`: run in this process until done, blocked or paused; with `detach=True`, start the background runner and return at once.
 - `status(job) -> JobStatusInfo`: the job's state now.
