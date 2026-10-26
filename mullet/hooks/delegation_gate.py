@@ -40,7 +40,7 @@ CONFIRM_LINE = (
 
 
 def delegation_turned_off() -> bool:
-    """True when MULLET_DELEGATION=off (environment or Mullet's .env) or a fresh
+    """True unless MULLET_DELEGATION=on (environment or Mullet's .env), or when a fresh
     session strategy says ``delegation: off``.
 
     With delegation off, the MCP tools refuse to dispatch, so the hooks must
@@ -52,7 +52,7 @@ def delegation_turned_off() -> bool:
         return not delegation_enabled()
     except Exception:
         value = os.environ.get("MULLET_DELEGATION", "").strip().lower()
-        return value in {"0", "off", "false", "no", "disabled"}
+        return value not in {"1", "on", "true", "yes", "enabled"}
 
 
 def _off_reason() -> str:
@@ -65,7 +65,7 @@ def _off_reason() -> str:
                     "`mullet strategy set --delegation ladder` changes it)")
     except Exception:
         pass
-    return "delegation is turned off (MULLET_DELEGATION=off)"
+    return "delegation is turned off (the default, MULLET_DELEGATION=off; set it to on to enable)"
 
 
 def pressure_snapshot() -> dict | None:

@@ -36,7 +36,7 @@ def _set(budget: float | None, delegation: str, age_s: float = 0.0) -> None:
 @pytest.fixture(autouse=True)
 def switch_on(monkeypatch):
     """MULLET_DELEGATION is on, so only the strategy can turn delegation off."""
-    monkeypatch.delenv("MULLET_DELEGATION", raising=False)
+    monkeypatch.setenv("MULLET_DELEGATION", "on")
     monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [])
 
 

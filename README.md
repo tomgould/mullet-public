@@ -147,7 +147,7 @@ Mullet tells you when a job blocks, pauses or finishes. Desktop notifications ar
 
 Trawl indexes collections of documents and code, called pools. It searches them by keyword and by meaning together, re-ranks the results and can build a knowledge graph. `mullet mcp` serves it to Claude Code and other MCP clients, with `mullet search`, `mullet pool`, `mullet reindex` and `mullet graph` on the command line. [docs/REINDEX.md](docs/REINDEX.md) covers pools and crawling websites.
 
-The MCP server still has the older delegation tools, which send a task to another model provider. `MULLET_DELEGATION=off` in `~/.config/mullet/.env` switches them off. Trawl, status and budget keep working. Presets such as `local-only` limit which providers they may use:
+The MCP server still has the older delegation tools, which send a task to another model provider. They are off by default; `MULLET_DELEGATION=on` in `~/.config/mullet/.env` switches them on. Trawl, status and budget keep working. Presets such as `local-only` limit which providers they may use:
 
 | Preset | Providers | opencode model |
 | --- | --- | --- |

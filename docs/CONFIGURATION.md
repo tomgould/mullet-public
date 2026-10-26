@@ -54,7 +54,7 @@ mullet strategy clear
 | `claude-only` | Jobs run on Claude Code alone, no cheaper rungs |
 | `off` | Nothing is delegated |
 
-While the strategy is fresh, `mullet job plan` uses its budget as the job's cap when `--max-spend` is not given, plans a `claude-only` job with one Claude Code worker and no ladder, and refuses under `off`. Explicit flags always win, and `budget.envelope` still applies when the job runs. `off` also turns delegation off exactly as `MULLET_DELEGATION=off` does: the MCP delegation tools refuse and the delegation hooks stay quiet.
+While the strategy is fresh, `mullet job plan` uses its budget as the job's cap when `--max-spend` is not given, plans a `claude-only` job with one Claude Code worker and no ladder, and refuses under `off`. Explicit flags always win, and `budget.envelope` still applies when the job runs. `off` also turns delegation off exactly as the default `MULLET_DELEGATION=off` does: the MCP delegation tools refuse and the delegation hooks stay quiet.
 
 The recommendation follows simple rules (`mullet.hooks.session_strategy.recommend`): no room left under the envelope means `claude-only`, or `off` when Claude's paced weekly pressure is also above `ladder.claude_high`; otherwise `ladder`. The suggested budget is `ladder.max_spend`, capped at the envelope room left. With a fresh strategy the hook tells Claude not to ask again.
 
@@ -127,7 +127,7 @@ Every command a job runs on your machine (setup, checks, gates and the opencode 
 ```yaml
 sandbox:
   backend: bubblewrap         # bubblewrap, docker, podman or auto (default bubblewrap)
-  image: mullet-sandbox:2.3.1 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
+  image: mullet-sandbox:2.4.0 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
   memory: 8g                  # docker and podman: each container's memory limit, swap included (default 8g, at least 64m)
   pids_limit: 4096            # docker and podman: the most processes and threads per container (default 4096, 64 to 1000000)
 ```

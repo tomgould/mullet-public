@@ -125,7 +125,7 @@ GOOGLE_API_KEY=AIza...        # Google Gemini
 
 `.env.example` lists the rest. `ANTHROPIC_API_KEY` is optional and billed per token; see the warning in section 3.
 
-**Turning delegation off:** set `MULLET_DELEGATION=off` and Mullet sends no work to any model provider. The delegation tools, CLI task runs, the REPL and `mullet serve`'s chat endpoints then say that delegation is off. Trawl search, knowledge pools and the read-only tools work as normal.
+**Turning delegation on:** delegation is off by default, so Mullet sends no work to any model provider until you set `MULLET_DELEGATION=on` in `~/.config/mullet/.env`. While it is off, the delegation tools, CLI task runs, the REPL and `mullet serve`'s chat endpoints say that delegation is off. Trawl search, knowledge pools and the read-only tools work as normal.
 
 **A local model:** start [LM Studio](https://lmstudio.ai) (port `1234`) or [Ollama](https://ollama.com) (port `11434`) and load a model; Mullet finds it, and `mullet doctor` shows it. On a machine with 10GB of RAM or less, use a 2B to 3B model. On a Mac, don't install the `[gpu]` extra: it pulls NVIDIA-only `pynvml`.
 

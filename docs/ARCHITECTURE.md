@@ -6,7 +6,7 @@
 
 Mullet is a Python monolith (about 84K lines in about 370 modules, about 18,000 tests). Its main job is `mullet job`: large coding jobs that run unattended in a sandboxed clone, with every step checked by gates Mullet runs itself (see Jobs below). It also routes single tasks to the cheapest capable model, serves the Trawl knowledge engine over MCP, and keeps an OpenAI-compatible API. It installs from GitHub with `scripts/install.sh` (never `pip install mullet`: that PyPI package is someone else's).
 
-The diagram below is the legacy single-task path (`mullet "<task>"`, the API and the delegation tools). It runs unless `MULLET_DELEGATION=off` is set (the default is on), and jobs do not use it. Jobs have their own path, described under Jobs.
+The diagram below is the legacy single-task path (`mullet "<task>"`, the API and the delegation tools). It runs only when `MULLET_DELEGATION=on` is set (the default is off), and jobs do not use it. Jobs have their own path, described under Jobs.
 
 ```
 User → CLI/API/MCP → Router → Provider → Agent Loop → Tools → Response
@@ -101,7 +101,7 @@ Trawl knowledge engine. Over 40 MCP tools covering pools, search, graphs, ingest
 - **`mullet/core/knowledge/predigest.py`** — Local LLM pre-processes heavy content → stores summary → cloud reasons over it.
 
 ### Orchestration (`mullet/core/orchestration/`)
-- **swarm** (legacy single-task path; `mullet_swarm` refuses to run when `MULLET_DELEGATION=off`) — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. It returns text, can save a JSON report, and never edits project files. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
+- **swarm** (legacy single-task path; `mullet_swarm` refuses to run unless `MULLET_DELEGATION=on`) — Kimi Agent Swarm: decompose goal → dispatch N tasks in parallel → synthesize. It returns text, can save a JSON report, and never edits project files. Components: `swarm.py` (orchestrator), `swarm_dispatcher.py` (async fan-out with semaphore concurrency), `llm_decomposer.py` (LLM-based task split), `static_decomposer.py` (file/item enumeration), `synthesizer.py` (final merge call), `swarm_types.py` (shared dataclasses).
 - **shared_memory.py**: file-backed key/value store behind the `shared_mem` tool.
 - **scheduler.py**: recurring tasks for `mullet schedule`.
 - **autoresearch.py**: research pipeline object behind `mullet research`.

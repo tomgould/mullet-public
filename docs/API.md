@@ -15,7 +15,7 @@ Returns server status, provider availability.
 ```json
 {
   "status": "ok",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "active_tasks": 0,
   "providers": {"local": {"available": true, "model": "default"}}
 }
@@ -78,7 +78,7 @@ Current system state: providers, task count and `active_modes`, which is normall
 ```json
 {
   "status": "ok",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "active_tasks": 0,
   "providers": {"local": true, "anthropic": false, "openrouter": false},
   "active_modes": [],
@@ -210,7 +210,7 @@ ws://localhost:3000/ws
 
 ## MCP Tools
 
-Available when running `mullet mcp`. `mullet_run`, `mullet_delegate`, `mullet_swarm` and `mullet_opencode` send work to a model provider. They are the legacy single-task path and refuse to run when `MULLET_DELEGATION=off` (the default is on; set it in the environment or in Mullet's `.env`). The other tools, and the `trawl_*` knowledge tools, do not check it.
+Available when running `mullet mcp`. `mullet_run`, `mullet_delegate`, `mullet_swarm` and `mullet_opencode` send work to a model provider. They are the legacy single-task path and refuse to run unless `MULLET_DELEGATION=on` (the default is off; set it in the environment or in Mullet's `.env`). The other tools, and the `trawl_*` knowledge tools, do not check it.
 
 | Tool | Description |
 |---|---|

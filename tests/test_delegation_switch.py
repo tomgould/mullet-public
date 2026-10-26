@@ -1,4 +1,4 @@
-"""MULLET_DELEGATION: on (default) dispatches as before; off refuses every
+"""MULLET_DELEGATION: on dispatches as before; off (the default) refuses every
 tool and command that would send work to a model provider, without
 contacting one, and leaves Trawl, status and the other read-only tools alone.
 """
@@ -44,10 +44,10 @@ def _no_provider_calls():
 # ---------------------------------------------------------------------------
 
 class TestSetting:
-    def test_default_is_on(self, monkeypatch, tmp_path):
+    def test_default_is_off(self, monkeypatch, tmp_path):
         monkeypatch.delenv("MULLET_DELEGATION", raising=False)
         monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [])
-        assert delegation_enabled() is True
+        assert delegation_enabled() is False
 
     @pytest.mark.parametrize("value", ["off", "OFF", " off ", "0", "false", "no", "disabled"])
     def test_off_values(self, monkeypatch, value):
@@ -61,7 +61,7 @@ class TestSetting:
 
     def test_unrecognised_value_keeps_the_default(self, monkeypatch):
         monkeypatch.setenv("MULLET_DELEGATION", "maybe")
-        assert delegation_enabled() is True
+        assert delegation_enabled() is False
 
     def test_read_from_dotenv_when_not_in_environment(self, monkeypatch, tmp_path):
         """Hooks run in Claude Code's environment, where .env isn't loaded."""
@@ -70,6 +70,13 @@ class TestSetting:
         monkeypatch.delenv("MULLET_DELEGATION", raising=False)
         monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [dotenv])
         assert delegation_enabled() is False
+
+    def test_on_read_from_dotenv(self, monkeypatch, tmp_path):
+        dotenv = tmp_path / ".env"
+        dotenv.write_text("MULLET_DELEGATION=on\n")
+        monkeypatch.delenv("MULLET_DELEGATION", raising=False)
+        monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [dotenv])
+        assert delegation_enabled() is True
 
     def test_environment_wins_over_dotenv(self, monkeypatch, tmp_path):
         dotenv = tmp_path / ".env"
@@ -157,8 +164,7 @@ class TestMcpToolsWhenOn:
         assert result["completed"] is True
 
     def test_delegate_reaches_provider_resolution(self, monkeypatch):
-        monkeypatch.delenv("MULLET_DELEGATION", raising=False)
-        monkeypatch.setattr(mullet_env, "dotenv_files", lambda: [])
+        monkeypatch.setenv("MULLET_DELEGATION", "on")
         with patch.object(mcp_handlers, "_active_preset", return_value=None), \
              patch.object(mcp_handlers, "_resolve_provider", return_value=None) as resolve:
             result = json.loads(mcp_handlers.handle_mullet_delegate({"goal": "x"}))

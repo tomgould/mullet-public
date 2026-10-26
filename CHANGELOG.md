@@ -4,6 +4,14 @@ All notable changes to Mullet are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-10-26
+
+### Changed
+
+- Delegation is off by default. `mullet_run`, `mullet_delegate`, `mullet_swarm`, `mullet_opencode`, `mullet "<task>"`, the REPL and `mullet serve`'s chat endpoints send no work to a model provider until `MULLET_DELEGATION=on` is set in the environment or in `~/.config/mullet/.env`. An unrecognised value also means off. Before this, they ran unless `MULLET_DELEGATION=off` was set.
+- If you relied on the old default, add `MULLET_DELEGATION=on` to `~/.config/mullet/.env`. Trawl, status, budget and `mullet job` are not affected: jobs follow the session strategy and the ladder, not this switch.
+- The hooks treat an unset switch as off, so the delegation reminder stays quiet until you opt in.
+
 ## [2.3.1] - 2026-10-26
 
 ### Fixed

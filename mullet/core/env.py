@@ -20,8 +20,8 @@ _ON_VALUES = frozenset({"1", "on", "true", "yes", "enabled"})
 _OFF_VALUES = frozenset({"0", "off", "false", "no", "disabled"})
 
 DELEGATION_OFF_MESSAGE = (
-    "Delegation is turned off (MULLET_DELEGATION=off). "
-    "Set it to on in .env to use it."
+    "Delegation is turned off (the default, MULLET_DELEGATION=off). "
+    "Set MULLET_DELEGATION=on in .env to use it."
 )
 
 _PROJECT_NAME = re.compile(r"""^\s*name\s*=\s*["']mullet["']\s*$""", re.MULTILINE)
@@ -171,11 +171,11 @@ def _flag(value: str | None, default: bool) -> bool:
 
 
 def delegation_switch_on() -> bool:
-    """True unless ``MULLET_DELEGATION`` alone is off: the environment first, then Mullet's .env files."""
+    """True only when ``MULLET_DELEGATION`` is on: the environment first, then Mullet's .env files."""
     value = os.environ.get("MULLET_DELEGATION")
     if value is None:
         value = dotenv_value("MULLET_DELEGATION")
-    return _flag(value, default=True)
+    return _flag(value, default=False)
 
 
 def _strategy_off() -> bool:
@@ -189,12 +189,12 @@ def _strategy_off() -> bool:
 
 
 def delegation_enabled() -> bool:
-    """True unless ``MULLET_DELEGATION`` is ``off`` or the session strategy says off.
+    """True only when ``MULLET_DELEGATION`` is on and the session strategy doesn't say off.
 
     The switch is read from the environment first, then from Mullet's .env
     files, so the Claude Code hooks see the same switch as the MCP server.
     A fresh ``mullet strategy`` with ``delegation: off`` counts the same; a
-    strategy that can't be read changes nothing. Default: on.
+    strategy that can't be read changes nothing. Default: off; delegation is opt-in.
     """
     return delegation_switch_on() and not _strategy_off()
 

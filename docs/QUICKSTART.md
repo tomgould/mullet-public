@@ -64,7 +64,7 @@ Then, in Claude Code: "Use `trawl_search_code` to find where authentication is h
 
 ## 6. Optional: delegation to other models
 
-Mullet can also send work to cheaper models: `mullet "<task>"` on the command line, and `mullet_run`, `mullet_opencode` and `mullet_swarm` over MCP. Put the provider keys in `~/.config/mullet/.env` (`$MULLET_CONFIG_DIR/.env` if that is set):
+Mullet can also send work to cheaper models, but only after you opt in with `MULLET_DELEGATION=on` in `~/.config/mullet/.env`: `mullet "<task>"` on the command line, and `mullet_run`, `mullet_opencode` and `mullet_swarm` over MCP. Put the provider keys in `~/.config/mullet/.env` (`$MULLET_CONFIG_DIR/.env` if that is set):
 
 ```
 KIMI_API_KEY=sk-...
@@ -72,7 +72,7 @@ OPENROUTER_API_KEY=sk-or-...
 GOOGLE_API_KEY=AIza...
 ```
 
-or start LM Studio or Ollama for a free local model. `MULLET_DELEGATION=off` turns all of it off.
+or start LM Studio or Ollama for a free local model. Delegation stays off until `MULLET_DELEGATION=on` is set.
 
 ```bash
 mullet explain "refactor auth module for OAuth2"   # where a task would route, without running it
