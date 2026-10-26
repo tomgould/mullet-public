@@ -138,6 +138,7 @@ def test_a_malformed_stat_line_gives_no_start(stat):
     assert children.parse_start_ticks(stat) is None
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_a_live_process_whose_name_holds_parens_and_spaces_is_read_right():
     name = b"a) R 9 9 (b"
     script = (f"import ctypes, sys; ctypes.CDLL(None).prctl(15, {name!r}, 0, 0, 0); print('ready', flush=True); "
@@ -154,6 +155,7 @@ def test_a_live_process_whose_name_holds_parens_and_spaces_is_read_right():
     assert children.start_ticks(proc.pid) is None
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_the_identity_survives_a_clock_step(monkeypatch):
     me = os.getpid()
     identity = children.process_identity(me)
@@ -162,6 +164,7 @@ def test_the_identity_survives_a_clock_step(monkeypatch):
     assert children.same_process(me, identity)
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_a_recycled_pid_or_another_boot_is_not_the_same_process():
     me = os.getpid()
     ticks = children.start_ticks(me)
@@ -178,6 +181,7 @@ def test_a_start_time_from_an_older_mullet_is_still_understood():
     assert not children.same_process(me, 12345.0)
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_a_stop_after_a_clock_step_still_kills_the_tracked_group(spawn, monkeypatch):
     tracker = children.Tracker()
     proc = spawn()
@@ -187,6 +191,7 @@ def test_a_stop_after_a_clock_step_still_kills_the_tracked_group(spawn, monkeypa
         assert proc.wait(timeout=10) is not None
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_kill_stale_after_a_clock_step_kills_the_recorded_group(spawn, tmp_path, monkeypatch):
     record = tmp_path / "children.json"
     tracker = children.Tracker()
@@ -201,6 +206,7 @@ def test_kill_stale_after_a_clock_step_kills_the_recorded_group(spawn, tmp_path,
     assert proc.wait(timeout=10) is not None and not record.exists()
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_the_runner_pid_file_survives_a_clock_step(tmp_path, monkeypatch):
     from mullet.cli import job_cli
     from mullet.jobs import reaper

@@ -444,6 +444,7 @@ def _near_cap_env() -> dict[str, str]:
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_a_client_that_never_reads_its_stdin_is_killed_not_waited_on_forever(fixed, layout, monkeypatch):
     # A pipe smaller than the payload, and a client that never reads: the old
     # write-then-start blocked forever before the client even existed.
@@ -518,6 +519,7 @@ def test_boot_and_host_ids_are_stable_and_non_empty():
     assert ct.boot_id() and ct.boot_id() == ct.boot_id() and ct.host_id() and ct.host_id() == ct.host_id()
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc and Linux pipe and process features")
 def test_reap_removes_only_containers_whose_owner_is_gone():
     containers = {
         "dead": _labels(_dead_pid(), 1),
