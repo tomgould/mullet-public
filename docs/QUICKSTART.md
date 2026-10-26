@@ -33,9 +33,9 @@ mullet setup-claude
 |------|-------|
 | MCP server `mullet` | `claude mcp add --scope user mullet -- <mullet> mcp` |
 | Skills `mullet-job` and `pool-improve` | `~/.claude/skills/<name>/SKILL.md` |
-| Hooks, only with `--hooks <names>` | `~/.claude/settings.json`, as `<mullet> hook <name>` |
+| The `session-strategy` hook, plus any others named with `--hooks <names>` | `~/.claude/settings.json`, as `<mullet> hook <name>` |
 
-`mullet setup-claude --hooks list` describes the hooks; none are added by default. `mullet setup-claude --uninstall` removes exactly what setup-claude added. Restart Claude Code afterwards.
+`mullet setup-claude --hooks list` describes the hooks; only `session-strategy` is added by default (`--hooks none` skips it). `mullet setup-claude --uninstall` removes exactly what setup-claude added. Restart Claude Code afterwards.
 
 ## 4. Run a job
 

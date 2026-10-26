@@ -271,7 +271,7 @@ The private repo stays the only place code is written. The public repo is genera
 4. Run the sync, review the diff in the public clone, then commit, tag and push, with the owner's go-ahead.
 5. Install from the public repo on a fresh machine (a container, as a different user) and run a real job. This is also P6's fresh-install check.
 
-Branches: `mullet-2` is pushed to the private origin after each phase as a backup. `master` stays as it is until v1 is reviewed, then it merges locally and is pushed.
+Branches: work happens on `master`, which is pushed to the private origin after each phase. The `mullet-2` branch is merged into it and is no longer used.
 
 ### v1.1: the rest of the vision
 
@@ -322,5 +322,5 @@ The whole vision is about **60 to 95 hours of Claude Code time**.
 
 ## Working on it
 
-- Work happens on the `mullet-2` branch, with one or more commits per phase.
+- Work happens on `master`, with one or more commits per phase.
 - Phase status is tracked in `docs/TODO.md` under "Mullet 2".

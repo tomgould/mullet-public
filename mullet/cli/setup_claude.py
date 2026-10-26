@@ -4,8 +4,11 @@ What it changes:
 
 - registers the MCP server: `claude mcp add --scope user mullet -- <mullet> mcp`;
 - installs Mullet's Claude Code skills as `~/.claude/skills/<name>/SKILL.md`;
-- with `--hooks a,b`, adds those hooks to `~/.claude/settings.json` as
-  `<mullet> hook <name>` (none by default; `--hooks list` describes them);
+- adds the `session-strategy` hook to `~/.claude/settings.json` as
+  `<mullet> hook session-strategy`, so every Claude Code session in every
+  directory opens with the budget and delegation question; with `--hooks a,b`
+  it adds those hooks instead (`--hooks none` adds none, `--hooks list`
+  describes them);
 - with `--statusline`, sets Claude Code's status line to `mullet-hud` when
   none is set.
 
@@ -37,6 +40,9 @@ from mullet.hooks import HOOKS, HookSpec, describe
 MCP_NAME = "mullet"
 # Mullet's own skills for Claude Code, copied from the packaged built-ins.
 CLAUDE_SKILLS = ("mullet-job", "pool-improve")
+# Hooks registered when --hooks isn't given. The hook lives in the user-level
+# settings, so it covers every directory, new ones included.
+DEFAULT_HOOKS = ("session-strategy",)
 MANIFEST_VERSION = 1
 _BUILTIN_SKILLS = Path(__file__).resolve().parent.parent / "core" / "skills" / "builtin"
 _CLAUDE_TIMEOUT = 120
@@ -603,6 +609,8 @@ def _parse_hooks(value: str) -> list[HookSpec]:
 
     if value.strip().lower() == "all":
         return list(HOOKS.values())
+    if value.strip().lower() == "none":
+        return []
     specs, unknown = [], []
     for name in filter(None, (part.strip() for part in value.split(","))):
         spec = find(name)
@@ -620,8 +628,8 @@ def build_parser() -> argparse.ArgumentParser:
                     "remove exactly those changes.",
     )
     parser.add_argument("--hooks", metavar="NAMES",
-                        help="comma-separated hooks to add, 'all', or 'list' to describe them "
-                             "(default: none)")
+                        help="comma-separated hooks to add, 'all', 'none' or 'list' to describe "
+                             f"them (default: {', '.join(DEFAULT_HOOKS)})")
     parser.add_argument("--statusline", action="store_true",
                         help="set Claude Code's status line to mullet-hud if none is set")
     parser.add_argument("--dry-run", "--check", dest="dry_run", action="store_true",
@@ -638,7 +646,7 @@ def cmd_setup_claude(argv: list[str]) -> int:
     """`mullet setup-claude [options]`; returns the exit code."""
     args = build_parser().parse_args(argv)
     if args.hooks is not None and args.hooks.strip().lower() == "list":
-        print("Hooks for --hooks (none are added by default):")
+        print(f"Hooks for --hooks (added by default: {', '.join(DEFAULT_HOOKS)}):")
         print(describe())
         return 0
     if args.uninstall:
@@ -647,7 +655,7 @@ def cmd_setup_claude(argv: list[str]) -> int:
             return 2
         return run_uninstall(dry_run=args.dry_run)
     try:
-        specs = _parse_hooks(args.hooks) if args.hooks else []
+        specs = _parse_hooks(args.hooks) if args.hooks else _parse_hooks(",".join(DEFAULT_HOOKS))
     except SetupError as exc:
         print(f"mullet setup-claude: {exc}", file=sys.stderr)
         return 2

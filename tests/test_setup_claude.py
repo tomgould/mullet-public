@@ -384,4 +384,16 @@ def test_mullet_setup_claude_previews_with_dry_run_or_check(argv, monkeypatch):
             pytest.raises(SystemExit) as exit_info:
         cli_main._main_inner()
     assert exit_info.value.code == 0
-    run.assert_called_once_with([], statusline=False, dry_run=True, force=False)
+    run.assert_called_once_with([HOOKS["session-strategy"]], statusline=False, dry_run=True, force=False)
+
+
+def test_cli_registers_session_strategy_by_default(env):
+    assert sc.cmd_setup_claude([]) == 0
+    settings = json.loads(env.settings.read_text())
+    assert [h["command"] for g in settings["hooks"]["SessionStart"] for h in g["hooks"]] == [
+        f"{MULLET} hook session-strategy"]
+
+
+def test_cli_hooks_none_adds_no_hooks(env):
+    assert sc.cmd_setup_claude(["--hooks", "none"]) == 0
+    assert not env.settings.exists()

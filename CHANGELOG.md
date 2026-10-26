@@ -4,6 +4,12 @@ All notable changes to Mullet are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-10-26
+
+### Changed
+
+- `mullet setup-claude` registers the `session-strategy` hook by default, in the user-level settings, so every session in every directory opens with the budget and delegation question. `--hooks none` skips it, and `--hooks <names>` replaces the default list.
+
 ## [2.4.0] - 2026-10-26
 
 ### Changed

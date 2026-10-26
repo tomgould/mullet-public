@@ -141,7 +141,7 @@ Mullet tells you when a job blocks, pauses or finishes. Desktop notifications ar
 
 `mullet paths` prints every directory. Settings and keys go in `~/.config/mullet/.env` (`$MULLET_CONFIG_DIR` if set). State, data and caches follow the XDG directories. An older `~/.mullet` still works, and `mullet migrate-state --dry-run` shows what moving it would do. Your stored job profile for each repo is in the `projects` folder of the config directory. A repo can add `.mullet/project.yaml`, which can only tighten it.
 
-`mullet setup-claude` registers the MCP server and Mullet's skills with Claude Code for every project. Run it with `--dry-run` first, and `--uninstall` removes exactly what it added. It never edits `CLAUDE.md`. Hooks are opt-in: `--hooks list` describes them, and `mullet hook <name>` runs one. `--hooks session-strategy` opens each session with one question about budget and delegation, which `mullet strategy set` records and `mullet job plan` follows.
+`mullet setup-claude` registers the MCP server and Mullet's skills with Claude Code for every project. Run it with `--dry-run` first, and `--uninstall` removes exactly what it added. It never edits `CLAUDE.md`. `session-strategy` is added by default (`--hooks none` skips it); the other hooks are opt-in: `--hooks list` describes them, and `mullet hook <name>` runs one. `--hooks session-strategy` opens each session with one question about budget and delegation, which `mullet strategy set` records and `mullet job plan` follows.
 
 ## Trawl and MCP
 

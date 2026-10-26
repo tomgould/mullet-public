@@ -86,7 +86,7 @@ By default it:
 
 It does not touch `CLAUDE.md`, adds no hooks and never writes into the current repository. `<mullet>` is the `mullet` on your PATH. Restart Claude Code afterwards.
 
-**Hooks are opt-in.** `mullet setup-claude --hooks list` shows what each one does; add the ones you want with `--hooks skill-activator,observation-capture` (or `--hooks all`). They run as `mullet hook <name>` from the installed Mullet, so they keep working after an update.
+**One hook is on by default.** `mullet setup-claude` adds `session-strategy`, which opens every Claude Code session, in any directory, with the budget and delegation question; `--hooks none` skips it. The rest are opt-in: `mullet setup-claude --hooks list` shows what each one does; name the ones you want with `--hooks session-strategy,skill-activator` (or `--hooks all`), which replaces the default list. They run as `mullet hook <name>` from the installed Mullet, so they keep working after an update.
 
 **Status line:** `--statusline` sets Claude Code's status line to `mullet-hud`, if you don't have one already.
 

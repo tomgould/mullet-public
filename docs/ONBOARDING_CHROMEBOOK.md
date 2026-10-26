@@ -455,7 +455,7 @@ mullet setup-claude
 **What this does:**
 - Registers the **MCP server** for every project (`claude mcp add --scope user mullet -- <mullet> mcp`), so Claude Code can call Mullet's tools
 - Installs the `mullet-job` and `pool-improve` **skills** into `~/.claude/skills/`
-- Adds **hooks** only if you ask: `mullet setup-claude --hooks list` describes them, and `--hooks name1,name2` adds the ones you name
+- Adds the `session-strategy` **hook** by default, and others only if you ask: `mullet setup-claude --hooks list` describes them, and `--hooks name1,name2` adds the ones you name
 - Sets the status line only if you add `--statusline`
 - Never edits your `CLAUDE.md`. `mullet setup-claude --uninstall` removes exactly what it added
 

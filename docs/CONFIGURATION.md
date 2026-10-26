@@ -40,7 +40,7 @@ At the start and end of a job Mullet records each paid provider's own usage or r
 
 ## Session start: budget and delegation
 
-The `session-strategy` hook (`mullet setup-claude --hooks session-strategy`) opens each Claude Code session with one short question: this session's budget in dollars, and the delegation strategy. It gives Claude local facts only (envelope left today and this week, Claude's weekly use, the active preset, night mode) and a recommendation, then Claude records the answer:
+The `session-strategy` hook (added by `mullet setup-claude` by default, for every directory; `--hooks none` skips it) opens each Claude Code session with one short question: this session's budget in dollars, and the delegation strategy. It gives Claude local facts only (envelope left today and this week, Claude's weekly use, the active preset, night mode) and a recommendation, then Claude records the answer:
 
 ```bash
 mullet strategy set --budget 3 --delegation ladder   # also --note TEXT
@@ -127,7 +127,7 @@ Every command a job runs on your machine (setup, checks, gates and the opencode 
 ```yaml
 sandbox:
   backend: bubblewrap         # bubblewrap, docker, podman or auto (default bubblewrap)
-  image: mullet-sandbox:2.4.0 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
+  image: mullet-sandbox:2.4.1 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
   memory: 8g                  # docker and podman: each container's memory limit, swap included (default 8g, at least 64m)
   pids_limit: 4096            # docker and podman: the most processes and threads per container (default 4096, 64 to 1000000)
 ```

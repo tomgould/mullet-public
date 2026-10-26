@@ -12,8 +12,8 @@ USAGE = """\
 Usage: mullet hook <name>     run a hook (Claude Code sends its JSON on stdin)
        mullet hook list       show the hooks
 
-Register hooks with `mullet setup-claude --hooks <name>,<name>`. None are
-registered by default.
+Register hooks with `mullet setup-claude --hooks <name>,<name>`. Only
+`session-strategy` is registered by default (`--hooks none` skips it).
 
 Hooks:"""
 

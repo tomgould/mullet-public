@@ -15,7 +15,7 @@ Returns server status, provider availability.
 ```json
 {
   "status": "ok",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "active_tasks": 0,
   "providers": {"local": {"available": true, "model": "default"}}
 }
@@ -78,7 +78,7 @@ Current system state: providers, task count and `active_modes`, which is normall
 ```json
 {
   "status": "ok",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "active_tasks": 0,
   "providers": {"local": true, "anthropic": false, "openrouter": false},
   "active_modes": [],

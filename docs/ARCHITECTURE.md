@@ -162,7 +162,7 @@ Live subcommands:
 - **mullet mcp** — stdio MCP server for Claude Code and other MCP clients.
 - **mullet doctor**: read-only checks of Python, the `claude` CLI, git, the job sandbox (bubblewrap and `socat` on Linux), the Claude Code setup, providers and pools.
 - **mullet init** — initialize a new project profile (writes `.mullet/`).
-- **mullet setup-claude**: registers the MCP server and skills with Claude Code, adds hooks only with `--hooks`, and records every change so `--uninstall` removes exactly those.
+- **mullet setup-claude**: registers the MCP server and skills with Claude Code, adds the `session-strategy` hook and any others named with `--hooks`, and records every change so `--uninstall` removes exactly those.
 - **mullet hook**: runs one of the Claude Code hooks in `mullet/hooks/` (`mullet hook list`).
 - **mullet job**: plan, approve, run and merge gated jobs in a sandboxed clone.
 - **mullet config** — read/write user + project config keys (get/set/list/edit/reset/budget).
