@@ -1082,7 +1082,7 @@ class OpencodeExecutor:
         if not nested_sandbox_ok():
             raise ExecutorUnavailable(
                 "opencode needs a nested sandbox for the worker's shell (no network, no API key), "
-                "and bubblewrap can't start one inside another here")
+                f"and the {sandbox.selection().name} sandbox backend can't start one inside another here")
         if not shutil.which("socat"):
             raise ExecutorUnavailable("opencode reaches its provider through socat, which isn't installed "
                                       "(for example: sudo apt install socat)")

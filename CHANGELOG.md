@@ -6,31 +6,7 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [2.3.0] - 2026-10-25
-
-### Added
-- **Planner.** A plan step can say what it comes `after`, mark itself a one-way `door`
-  (public API, removal, stored format; treated as risky and Claude-first), and the plan can
-  carry `open_questions` that are shown before you approve. Plans with unknown, forward or
-  circular `after` ids are rejected. The planner is asked once more, in the same session,
-  when its reply is unusable (`jobs.reask_attempts`).
-- **Reviewer.** G7 also checks tests for new behaviour, named edge cases and secrets or
-  injection, and returns findings (path, line, problem) that are fed to the next attempt.
-  A repo profile's `review_standards` file is read from the base commit and given to the
-  reviewer only. A missing verdict is asked for once more.
-- **Workers.** A worker that goes silent is stopped (`jobs.idle_minutes`, derived from the
-  profile when unset) and one that has finished is given `jobs.grace_seconds` to exit. The
-  commit body names the step, the gates passed and the worker's claim, fenced and marked
-  unverified; each reply is recorded as a `worker_claim` ledger event.
-- **Sandbox backends.** `sandbox.backend` (`bubblewrap`, the default, or `auto`) selects the
-  sandbox behind one interface with a shared contract test suite. `docker`, `podman` and
-  `seatbelt` are reserved and refuse to run rather than run unsandboxed.
-- **Python API.** `mullet.api` plans, runs, stops and merges jobs without the CLI
-  (`docs/API_PYTHON.md`).
-- **Decision records.** `docs/adr/` explains the main choices (0001 to 0010).
-- `mullet job show <job> --attempt N [--diff]` and `mullet job export <job> --attempt N --branch NAME` to inspect a failed attempt and copy its work out as a branch; `mullet ladder report` gains a "Why attempts failed" section; git commands on a job clone stop after `jobs.git_timeout_seconds`.
-- `jobs.commit_body`: `full` (default) or `minimal`, which commits each step with its subject
-  alone, for repos whose rules forbid tool lines in commit messages.
+## [2.3.0] - 2026-10-26
 
 ### Fixed
 - The reviewer is asked again for a verdict only when its session finished without one. A
@@ -53,6 +29,71 @@ Versioning: [Semver](https://semver.org/spec/v2.0.0.html).
   terminal and stays exact when piped.
 - `mullet job export --branch` takes only a plain branch name, not `refs/...`, `heads/...`,
   `HEAD` or `@{-1}`.
+
+### Added
+- **Planner.** A plan step can say what it comes `after`, mark itself a one-way `door`
+  (public API, removal, stored format; treated as risky and Claude-first), and the plan can
+  carry `open_questions` that are shown before you approve. Plans with unknown, forward or
+  circular `after` ids are rejected. The planner is asked once more, in the same session,
+  when its reply is unusable (`jobs.reask_attempts`).
+- **Reviewer.** G7 also checks tests for new behaviour, named edge cases and secrets or
+  injection, and returns findings (path, line, problem) that are fed to the next attempt.
+  A repo profile's `review_standards` file is read from the base commit and given to the
+  reviewer only. A missing verdict is asked for once more.
+- **Workers.** A worker that goes silent is stopped (`jobs.idle_minutes`, derived from the
+  profile when unset) and one that has finished is given `jobs.grace_seconds` to exit. The
+  commit body names the step, the gates passed and the worker's claim, fenced and marked
+  unverified; each reply is recorded as a `worker_claim` ledger event.
+- **Sandbox backends.** `sandbox.backend` (`bubblewrap`, the default, `docker`, `podman` or
+  `auto`) selects the sandbox behind one interface with a shared contract test suite.
+  `seatbelt` is reserved and refuses to run rather than run unsandboxed.
+- **Docker and Podman sandbox.** Each command runs in a throwaway container from a local image
+  (`sandbox.image`, built by `mullet sandbox build-image`) as your own uid, with no capabilities,
+  a read-only root, no network, `sandbox.memory` and `sandbox.pids_limit`, and the environment
+  passed on stdin rather than a command line. The container dies with Mullet. The opencode
+  worker still needs bubblewrap. Linux only; see `docs/adr/0011-container-sandbox-backend.md`.
+- **Python API.** `mullet.api` plans, runs, stops and merges jobs without the CLI
+  (`docs/API_PYTHON.md`).
+- **Decision records.** `docs/adr/` explains the main choices (0001 to 0010).
+- `mullet job show <job> --attempt N [--diff]` and `mullet job export <job> --attempt N --branch NAME` to inspect a failed attempt and copy its work out as a branch; `mullet ladder report` gains a "Why attempts failed" section; git commands on a job clone stop after `jobs.git_timeout_seconds`.
+- `jobs.commit_body`: `full` (default) or `minimal`, which commits each step with its subject
+  alone, for repos whose rules forbid tool lines in commit messages.
+
+### Security
+- **Docker and Podman sandbox, from an independent review.**
+  - A command could kill the stdin watcher, so a hard Mullet crash left its container running.
+    Each container's PID 1 is now Mullet's own init (`pid1.py`, in place of `--init`). Nothing
+    inside can kill it or stop it, and it is non-dumpable, so it can't be traced. Every container
+    carries owner labels (pid, start time, boot, machine). Runner start and resume, `mullet job
+    stop` and `mullet doctor` remove containers whose owner has died.
+  - `check()` refuses a daemon without seccomp, and a container whose probe doesn't show
+    `Seccomp: 2`, a zero `CapEff` and `NoNewPrivs: 1`.
+  - A mount with a symlinked component inside a writable path is refused. The check runs when
+    the command line is built and again just before `docker run`.
+  - The environment is written once the client runs, with a 30 s deadline, so a small pipe can
+    no longer hang a run.
+  - The Dockerfile's base image is pinned by digest, and the image is labelled
+    `org.opencontainers.image.title=mullet-sandbox` and `mullet.sandbox.version`. `check()`
+    requires both, so an image built by 2.3.0 must be rebuilt once with `mullet sandbox build-image`.
+- **Container reaper and PID 1, from a second independent review.**
+  - A live job's container could be removed by another Mullet process after the wall clock was
+    stepped (NTP, a resume from suspend), since the owner's start time came from the wall clock.
+    Owners are now named by their start in clock ticks since boot, compared exactly; `runner.pid`
+    and `children.json` use the same, so a stop or a crash cleanup no longer misses its processes
+    and the opencode reaper no longer takes a live runner for dead after a clock step.
+  - Only your own containers are reaped (a new `mullet.owner.uid` label), so another user's live
+    containers on a shared daemon are safe even when /proc hides their processes. Only containers
+    named `mullet-sbx-*` are reaped, so one started from a `docker commit` of a sandbox is safe.
+  - Without `/etc/machine-id`, the host label adds your uid and a random id kept in Mullet's state
+    directory, so two WSL2 distros on one Docker Desktop daemon can't reap each other's containers.
+  - `mullet job stop` signals the runner before reaping, and a reap gives each engine call 5 s and
+    gives up after 15 s, so a wedged daemon can no longer delay a stop by minutes.
+  - The check just before `docker run` now covers the exact bind strings in the command line,
+    not the spec's paths resolved again.
+  - PID 1 refuses an environment execve can't take (exit 125, with the reason) and its child
+    exits 126 or 127 whatever exec raises; a SIGCHLD flood can't make it block on stderr.
+  - Containers started by 2.3.0 lack the new labels and are never reaped; remove any left over
+    with `docker rm -f` once no job runs.
 
 ## [2.2.0] - 2026-10-25
 

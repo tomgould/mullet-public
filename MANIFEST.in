@@ -7,3 +7,4 @@ include .env.example
 recursive-include mullet/core/skills/builtin *.md
 recursive-include mullet/knowledge/engine *.py
 recursive-include mullet/autopilot_templates *.md
+include mullet/jobs/sandbox_backends/Dockerfile

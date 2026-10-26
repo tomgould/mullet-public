@@ -2,7 +2,9 @@
 
 The contract tests (`test_contract_*`) are what every backend must pass. They
 take the `backend` fixture, so a new backend joins them by adding its name to
-CONTRACT_BACKENDS; one that can't run on this machine is skipped.
+CONTRACT_BACKENDS; one that can't run on this machine is skipped, unless
+MULLET_REQUIRE_SANDBOX (comma-separated backend names, set in CI) names it.
+The docker and podman backends need the image `mullet sandbox build-image` builds.
 """
 
 from __future__ import annotations
@@ -22,12 +24,14 @@ from mullet.cli import doctor_checks as dc
 from mullet.cli.config_cli import cmd_config
 from mullet.config.validate import validate_config
 from mullet.jobs import sandbox
-from mullet.jobs.sandbox_backends import BACKENDS, BubblewrapBackend, SandboxBackend, get_backend
+from mullet.jobs.sandbox_backends import (
+    BACKENDS, BubblewrapBackend, DockerBackend, PodmanBackend, SandboxBackend, get_backend,
+)
 from mullet.jobs.sandbox_backends import settings as sb_settings
 from mullet.jobs.sandbox_backends.base import PASSTHROUGH_ENV, SandboxCheck, SandboxSpec, SandboxUnavailable
 from mullet.jobs.sandbox_backends.settings import SandboxSettings, load_settings, parse_settings
 
-CONTRACT_BACKENDS = ["bubblewrap"]
+CONTRACT_BACKENDS = ["bubblewrap", "docker", "podman"]
 # Variables a shell sets for itself, which no backend can keep out.
 _SHELL_OWN = {"PWD", "OLDPWD", "SHLVL", "_"}
 
@@ -92,6 +96,25 @@ def test_parse_reports_a_non_mapping_and_unknown_keys():
     assert settings.problems == ["sandbox.extra: unknown setting; ignored"]
 
 
+def test_parse_the_container_settings():
+    settings = parse_settings({"image": " registry.local/team/tools:1.2 ", "memory": "512M", "pids_limit": 64})
+    assert (settings.image, settings.memory, settings.pids_limit) == ("registry.local/team/tools:1.2", "512m", 64)
+    assert settings.problems == [] and not settings.from_config
+    defaults = parse_settings({})
+    assert (defaults.image, defaults.memory, defaults.pids_limit) == (sb_settings.DEFAULT_IMAGE, "8g", 4096)
+    assert sb_settings.DEFAULT_IMAGE.startswith("mullet-sandbox:")
+
+
+@pytest.mark.parametrize("key, value", [("image", ""), ("image", "a b"), ("image", "--privileged"),
+                                        ("image", 3), ("memory", "8"), ("memory", "1m"), ("memory", "8t"),
+                                        ("memory", 8), ("pids_limit", 10), ("pids_limit", True),
+                                        ("pids_limit", "100"), ("pids_limit", 2_000_000)])
+def test_parse_reports_bad_container_settings_and_keeps_defaults(key, value):
+    settings = parse_settings({key: value})
+    assert getattr(settings, key) == getattr(SandboxSettings(), key)
+    assert len(settings.problems) == 1 and settings.problems[0].startswith(f"sandbox.{key}:")
+
+
 def test_load_settings_reads_the_config_file(tmp_path):
     path = tmp_path / "config.yaml"
     assert load_settings(path) == SandboxSettings()
@@ -136,9 +159,13 @@ def test_auto_picks_bubblewrap_when_it_works(monkeypatch):
 
 
 def test_auto_refuses_when_no_backend_works(monkeypatch, config, no_processes):
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(BubblewrapBackend, "check", lambda self: SandboxCheck(False, "bwrap", "no userns"))
+    monkeypatch.setattr(DockerBackend, "check", lambda self: SandboxCheck(False, "docker", "no daemon"))
+    monkeypatch.setattr(PodmanBackend, "check", lambda self: SandboxCheck(False, "podman", "no podman"))
     chosen = sandbox.select(SandboxSettings(backend="auto", from_config=True), platform="linux")
     assert chosen.backend is None and "no userns" in chosen.error
+    assert "docker: no daemon" in chosen.error and "podman: no podman" in chosen.error
     config("sandbox:\n  backend: auto\n")
     assert not sandbox.check().ok and "no backend works here" in sandbox.check().reason
     with pytest.raises(SandboxUnavailable, match="no userns"):
@@ -156,17 +183,17 @@ def test_unknown_backend_name_raises():
         get_backend("nope")
 
 
-@pytest.mark.parametrize("name", ["docker", "podman", "seatbelt"])
+@pytest.mark.parametrize("name", ["seatbelt"])
 def test_reserved_backends_are_unavailable(name):
     with pytest.raises(SandboxUnavailable, match=f"sandbox.backend is {name}.*does not have yet"):
         get_backend(name)
 
 
 def test_unavailable_backend_refuses_every_entry_point(config, tmp_path, no_processes):
-    config("sandbox:\n  backend: docker\n")
+    config("sandbox:\n  backend: seatbelt\n")
     spec = SandboxSpec(cwd=tmp_path, writable=[tmp_path])
     status = sandbox.check()
-    assert not status.ok and status.backend == "docker" and "does not have yet" in status.reason
+    assert not status.ok and status.backend == "seatbelt" and "does not have yet" in status.reason
     calls = [
         lambda: sandbox.backend(),
         lambda: sandbox.run(["true"], spec, timeout=5, log_path=tmp_path / "a.log"),
@@ -175,7 +202,7 @@ def test_unavailable_backend_refuses_every_entry_point(config, tmp_path, no_proc
         lambda: sandbox.nested_argv([], []),
     ]
     for call in calls:
-        with pytest.raises(SandboxUnavailable, match="docker"):
+        with pytest.raises(SandboxUnavailable, match="seatbelt"):
             call()
     assert sandbox.nested_check() is False
     assert not (tmp_path / "a.log").exists() and not (tmp_path / "b.log").exists()
@@ -261,12 +288,18 @@ def test_opencode_launches_and_nests_through_the_facade(monkeypatch, tmp_path):
 def test_config_show_has_a_sandbox_section(config, capsys):
     import json
 
-    config("sandbox:\n  backend: auto\n  extra: 1\n")
+    config("sandbox:\n  backend: auto\n  extra: 1\n  pids_limit: 512\n")
     assert cmd_config(["show", "--json", "sandbox"]) == 0
     data = json.loads(capsys.readouterr().out)
-    (row,) = data["sections"]["sandbox"]
-    assert row["setting"] == "sandbox.backend" and row["value"] == "auto" and row["default"] == "bubblewrap"
+    rows = {row["setting"]: row for row in data["sections"]["sandbox"]}
+    assert list(rows) == ["sandbox.backend", "sandbox.image", "sandbox.memory", "sandbox.pids_limit"]
+    row = rows["sandbox.backend"]
+    assert row["value"] == "auto" and row["default"] == "bubblewrap"
     assert row["source"].endswith("config.yaml")
+    assert rows["sandbox.pids_limit"]["value"] == 512 and rows["sandbox.pids_limit"]["default"] == 4096
+    assert rows["sandbox.pids_limit"]["source"].endswith("config.yaml")
+    assert rows["sandbox.image"]["value"] == sb_settings.DEFAULT_IMAGE and rows["sandbox.image"]["source"] == "default"
+    assert rows["sandbox.memory"]["value"] == "8g"
     assert cmd_config(["show", "--json"]) == 0
     assert "sandbox.extra" in json.loads(capsys.readouterr().out)["unrecognised"]
 
@@ -284,6 +317,11 @@ def test_validate_checks_the_sandbox_block():
     warned = validate_config({"sandbox": {"backend": "bubblewrap", "x": 1}})
     assert warned.valid and warned.issues[0].severity == "warning"
     assert not any(i.path == "sandbox" for i in validate_config({"sandbox": {}}).issues)
+    good = validate_config({"sandbox": {"backend": "docker", "image": "mine:1", "memory": "4g", "pids_limit": 256}})
+    assert good.valid and not good.issues
+    for key, value in (("image", "bad image"), ("memory", "lots"), ("pids_limit", 5)):
+        bad = validate_config({"sandbox": {key: value}})
+        assert not bad.valid and bad.issues[0].path == f"sandbox.{key}"
 
 
 def test_doctor_shows_the_backend_and_why(config, monkeypatch):
@@ -309,11 +347,21 @@ def test_doctor_warns_for_a_bad_setting(config, monkeypatch):
 # The contract every backend must satisfy
 
 
+_PROBED: dict[str, SandboxCheck] = {}
+
+
 @pytest.fixture(params=CONTRACT_BACKENDS)
 def backend(request) -> SandboxBackend:
-    candidate = get_backend(request.param)
-    status = candidate.check()
+    # Defaults, not the throwaway config: the container backends need the image that
+    # `mullet sandbox build-image` builds. A probe starts a container, so it runs once per backend.
+    candidate = get_backend(request.param, SandboxSettings()) if request.param != "bubblewrap" \
+        else get_backend(request.param)
+    if request.param not in _PROBED:
+        _PROBED[request.param] = candidate.check()
+    status = _PROBED[request.param]
     if not status.ok:
+        if request.param in os.environ.get("MULLET_REQUIRE_SANDBOX", "").split(","):
+            pytest.fail(f"MULLET_REQUIRE_SANDBOX names {request.param}, which is unavailable: {status.reason}")
         pytest.skip(f"{request.param}: {status.reason}")
     return candidate
 
@@ -437,12 +485,26 @@ def test_contract_spawn_confines_a_long_lived_worker(backend, work, tmp_path, mo
     assert not (outside / "escape").exists() and "contract-secret-value" not in out
 
 
+# Per backend: the launcher's name, a flag that must always be there (a cleared
+# environment), and the argv slice that means "no network".
+_ARGV_MARKERS = {
+    "bubblewrap": ("bwrap", "--clearenv", ["--unshare-net"]),
+    "docker": ("docker", "--read-only", ["--network", "none"]),
+    "podman": ("podman", "--read-only", ["--network", "none"]),
+}
+
+
+def _has(argv: list[str], part: list[str]) -> bool:
+    return any(argv[i:i + len(part)] == part for i in range(len(argv)))
+
+
 def test_contract_build_argv_is_never_the_bare_command(backend, work):
+    launcher, always, no_net = _ARGV_MARKERS[backend.name]
     off = backend.build_argv(["true"], SandboxSpec(cwd=work, writable=[work]))
     assert off[-1] == "true" and len(off) > 1 and off[0] != "true"
-    assert Path(off[0]).name == "bwrap" and "--clearenv" in off and "--unshare-net" in off
+    assert Path(off[0]).name == launcher and always in off and _has(off, no_net)
     on = backend.build_argv(["true"], SandboxSpec(cwd=work, writable=[work], network=True))
-    assert Path(on[0]).name == "bwrap" and "--clearenv" in on and "--unshare-net" not in on
+    assert Path(on[0]).name == launcher and always in on and not _has(on, no_net)
 
 
 def test_contract_the_host_filesystem_is_read_only(backend, work, tmp_path):
@@ -461,7 +523,11 @@ def test_contract_process_environments_hold_no_parent_secret(backend, work, tmp_
     result = _shell(backend, script, spec, tmp_path)
     log = result.log_path.read_text()
     first, _, second = log.partition("---")
-    assert "PATH=" in first and "PATH=" in second, log
+    # The container backends' PID 1 is non-dumpable, so its environ can't be read at all.
+    if backend.name in ("docker", "podman"):
+        assert "Permission denied" in first and "PATH=" in second, log
+    else:
+        assert "PATH=" in first and "PATH=" in second, log
     for secret in ("sk-contract-launcher-leak", "contract-launcher-secret", "OPENROUTER_API_KEY",
                    "MULLET_CONTRACT_SECRET"):
         assert secret not in log
@@ -570,6 +636,7 @@ def test_the_executor_checks_the_sandbox_before_building_the_shell_wrapper(monke
 
 def test_bubblewrap_reports_its_own_name(monkeypatch):
     backend_ = BubblewrapBackend()
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("shutil.which", lambda name: None)
     assert backend_.check() == SandboxCheck(False, "bubblewrap", "bubblewrap (bwrap) is not installed")
     monkeypatch.setattr(sys, "platform", "darwin")

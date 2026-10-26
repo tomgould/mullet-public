@@ -192,19 +192,29 @@ def _jobs_rows(raw: dict[str, Any], path: Path, problems: list[str], unknown: li
 
 
 def _sandbox_rows(raw: dict[str, Any], path: Path, problems: list[str], unknown: list[str]) -> list[Row]:
-    """The ``sandbox:`` settings: which backend confines job commands."""
+    """The ``sandbox:`` settings: which backend confines job commands, and the container backends' image and limits."""
     from mullet.jobs.sandbox_backends.settings import (
-        AUTO, AVAILABLE, DEFAULT_BACKEND, KEYS, RESERVED, parse_settings,
+        AUTO, AVAILABLE, DEFAULT_BACKEND, KEYS, RESERVED, SandboxSettings, parse_settings,
     )
 
     block = _block(raw, "sandbox")
     active = parse_settings(raw.get("sandbox"), "sandbox")
+    default = SandboxSettings()
     problems.extend(p for p in active.problems if "unknown setting" not in p)
     unknown += [f"sandbox.{k}" for k in block if k not in KEYS]
-    return [_row("sandbox.backend", active.backend, DEFAULT_BACKEND,
+    rows = [_row("sandbox.backend", active.backend, DEFAULT_BACKEND,
                  str(path) if active.from_config else "default",
                  f"{' or '.join([*AVAILABLE, AUTO])} ({', '.join(RESERVED)} reserved); "
                  "never falls back to running unsandboxed")]
+    notes = {"image": "docker and podman: the image commands run in; mullet sandbox build-image builds it",
+             "memory": "docker and podman: each container's memory limit, swap included",
+             "pids_limit": "docker and podman: the most processes and threads in one container"}
+    for name, note in notes.items():
+        # A bad value is reported and its default used, so its source is the default.
+        rejected = any(p.startswith(f"sandbox.{name}:") for p in active.problems)
+        source = str(path) if block.get(name) is not None and not rejected else "default"
+        rows.append(_row(f"sandbox.{name}", getattr(active, name), getattr(default, name), source, note))
+    return rows
 
 
 def _provider_rows(raw: dict[str, Any], config: Any, path: Path) -> list[Row]:

@@ -20,6 +20,7 @@
   ```bash
   sudo apt install bubblewrap socat     # Debian and Ubuntu
   ```
+  Where bubblewrap can't run, Docker or Podman can confine checks and gates instead: `mullet sandbox build-image`, then `sandbox.backend: docker` (see [CONFIGURATION.md](CONFIGURATION.md#sandbox)). opencode jobs still need bubblewrap.
 
 Provider API keys are optional. Jobs need none. They matter only for Mullet's delegation tools and model-backed knowledge features (section 6).
 

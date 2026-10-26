@@ -1,5 +1,7 @@
 # ADR 0007: Sandbox backends
 
+Status: Accepted. The `docker` and `podman` backends reserved below are built: see 0011.
+
 ## Context
 
 Mullet runs code a model has just written: setup, checks, gates and the

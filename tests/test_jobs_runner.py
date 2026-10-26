@@ -243,6 +243,27 @@ def test_stop_request_pauses_and_resume_finishes(env):
     assert JobRunner(env["ledger"], job_id, FakeExecutor([lambda w, t: good_change(w)])).run() is JobStatus.DONE
 
 
+def test_the_runner_names_itself_by_a_start_a_clock_step_does_not_move(env, monkeypatch):
+    from mullet.cli import job_cli
+    from mullet.jobs import reaper
+
+    job_id = make_job(env, [NodeSpec(id="n1", goal="add sub()")])
+    seen = {}
+    real = psutil.Process.create_time
+
+    def step(work, task):
+        seen["pid"] = (env["tmp"] / "jobs" / job_id / "runner.pid").read_text()
+        # NTP or a resume steps the wall clock, which moves psutil's create_time.
+        monkeypatch.setattr(psutil.Process, "create_time", lambda self: real(self) + 3600.0)
+        seen["state"] = reaper.runner_state(job_id)
+        seen["confirmed"] = job_cli._runner_pid(job_id)
+        good_change(work)
+
+    assert JobRunner(env["ledger"], job_id, FakeExecutor([step])).run() is JobStatus.DONE
+    assert seen["pid"] == f"{os.getpid()} {children.start_ticks(os.getpid())}@{children.boot_id()}"
+    assert seen["state"] == "live" and seen["confirmed"] == os.getpid()
+
+
 def _crashing_runner(jobs_dir: str, db: str, job_id: str, marker: str) -> None:
     os.environ["MULLET_JOBS_DIR"] = jobs_dir
 

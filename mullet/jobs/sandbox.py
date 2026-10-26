@@ -26,8 +26,8 @@ arbitrary network-capable commands during setup.
 There is no unsandboxed fallback. If the sandbox can't start,
 `SandboxUnavailable` is raised and the caller must refuse the work.
 
-The backends live in `mullet.jobs.sandbox_backends`: bubblewrap is the default
-and the only one so far. This module keeps the names every caller uses,
+The backends live in `mullet.jobs.sandbox_backends`: bubblewrap is the default;
+docker and podman run each command in a hardened container. This module keeps the names every caller uses,
 selects one backend per process and refuses all work when it can't run, so
 no caller needs to know which backend that is.
 """
@@ -55,7 +55,7 @@ from mullet.jobs.sandbox_backends.base import (
 from mullet.jobs.sandbox_backends.settings import AUTO, SandboxSettings, load_settings
 
 # Which backends `auto` tries on each platform, best first.
-AUTO_ORDER: dict[str, tuple[str, ...]] = {"linux": ("bubblewrap",)}
+AUTO_ORDER: dict[str, tuple[str, ...]] = {"linux": ("bubblewrap", "docker", "podman")}
 
 __all__ = [
     "AUTO_ORDER", "RunResult", "SandboxBackend", "SandboxCheck", "SandboxSpec", "SandboxUnavailable",
@@ -83,13 +83,13 @@ def select(settings: SandboxSettings, platform: str | None = None) -> Selection:
     if requested != AUTO:
         why = "set in the config file" if settings.from_config else "the default"
         try:
-            return Selection(requested, why, get_backend(requested), problems=problems)
+            return Selection(requested, why, get_backend(requested, settings), problems=problems)
         except SandboxUnavailable as exc:
             return Selection(requested, why, None, error=str(exc), problems=problems)
     platform = platform or sys.platform
     tried = []
     for name in AUTO_ORDER.get(platform, ()):
-        candidate = get_backend(name)
+        candidate = get_backend(name, settings)
         probe = candidate.check()
         if probe.ok:
             return Selection(name, "sandbox.backend is auto, and it works here", candidate, probe=probe,

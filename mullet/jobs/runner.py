@@ -56,8 +56,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-import psutil
-
 from mullet.jobs import children, context, reconcile
 from mullet.jobs.budget import earliest_start, headroom as budget_headroom, load_budget
 from mullet.jobs.clone import JobClone, Snapshot
@@ -505,8 +503,8 @@ class JobRunner:
         """Run the job until it is done, blocked, paused or stopped."""
         self.logs.mkdir(parents=True, exist_ok=True)
         with _flock(self.root / "runner.lock", blocking=False):
-            # The start time lets `mullet job stop` tell this process from a recycled pid.
-            (self.root / "runner.pid").write_text(f"{os.getpid()} {psutil.Process().create_time()}")
+            # The start (in clock ticks since boot) lets `mullet job stop` tell this process from a recycled pid.
+            (self.root / "runner.pid").write_text(children.pid_record())
             children.kill_stale(self.root / "children.json")
             children.configure(self.root / "children.json")
             try:

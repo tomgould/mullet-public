@@ -1493,6 +1493,9 @@ def _main_inner():
     if len(sys.argv) >= 2 and sys.argv[1] == "night":
         from mullet.cli.night_cli import cmd_night
         sys.exit(cmd_night(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "sandbox":
+        from mullet.cli.sandbox_cli import cmd_sandbox
+        sys.exit(cmd_sandbox(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "ladder":
         from mullet.cli.ladder_cli import cmd_ladder
         sys.exit(cmd_ladder(sys.argv[2:]))

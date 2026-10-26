@@ -23,10 +23,10 @@ def test_save_and_recall_no_ttl(memory):
 
 def test_save_with_ttl_and_expire(memory):
     """Test saving with TTL and automatic expiration."""
-    memory.save("temp_key", "temp_value", ttl_seconds=0.01)
+    memory.save("temp_key", "temp_value", ttl_seconds=0.3)
     assert memory.recall_all() == {"temp_key": "temp_value"}
     
-    time.sleep(0.05)
+    time.sleep(0.4)
     # Should be cleaned up on next access
     assert memory.recall_all() == {}
     assert memory.count == 0

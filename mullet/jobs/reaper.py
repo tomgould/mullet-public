@@ -38,6 +38,7 @@ import psutil
 
 from mullet.core.env import local_llm_host
 from mullet.core.paths import state_dir
+from mullet.jobs import children
 from mullet.jobs.ledger import Ledger, valid_job_id
 from mullet.jobs.paths import job_dir, jobs_home
 from mullet.jobs.types import JobStatus
@@ -421,7 +422,8 @@ def runner_state(job_id: str, process_factory: Callable[[int], Any] = psutil.Pro
     """Whether the runner named in the job's runner.pid is still the live process that wrote it.
 
     No pid file, a vanished pid or a different start time give `dead`; an
-    unreadable file or process gives `unknown`.
+    unreadable file or process gives `unknown`. The start is in clock ticks
+    since boot; a bare number is a create_time an older runner wrote.
     """
     try:
         text = (job_dir(job_id) / "runner.pid").read_text()
@@ -432,6 +434,15 @@ def runner_state(job_id: str, process_factory: Callable[[int], Any] = psutil.Pro
     parts = text.split()
     if len(parts) != 2:
         return "unknown"
+    if "@" in parts[1]:  # <start ticks>@<boot id>, which a clock step doesn't move
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            return "unknown"
+        if children.same_process(pid, parts[1]):
+            return "live"
+        unreadable = children.process_identity(pid) is None and os.path.exists(f"/proc/{pid}")
+        return "unknown" if unreadable else "dead"
     try:
         pid, started = int(parts[0]), float(parts[1])
     except ValueError:

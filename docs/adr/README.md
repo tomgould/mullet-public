@@ -27,5 +27,6 @@ Consequences: what this makes easy, what it costs, what to watch.
 | [0008](0008-planner-dependencies-and-risk.md) | The planner states dependencies, one-way doors and open questions |
 | [0009](0009-reviewer-findings-and-standards.md) | The reviewer gives findings and reads the repo's own review standards |
 | [0010](0010-worker-idle-timeout-and-grace.md) | Silent workers are stopped and finished ones are given a short grace window |
+| [0011](0011-container-sandbox-backend.md) | Docker and Podman run each command in a hardened, throwaway container |
 
 Settings are in [../CONFIGURATION.md](../CONFIGURATION.md).

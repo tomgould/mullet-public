@@ -16,19 +16,27 @@ from mullet.jobs.sandbox_backends.base import (
     SandboxUnavailable,
 )
 from mullet.jobs.sandbox_backends.bubblewrap import BubblewrapBackend
-from mullet.jobs.sandbox_backends.settings import AUTO, RESERVED
+from mullet.jobs.sandbox_backends.container import DockerBackend, PodmanBackend
+from mullet.jobs.sandbox_backends.settings import AUTO, RESERVED, SandboxSettings
 
-# The order is `auto`'s order of preference.
-BACKENDS: dict[str, Callable[[], SandboxBackend]] = {
+# `auto`'s order of preference is AUTO_ORDER in mullet.jobs.sandbox.
+BACKENDS: dict[str, Callable[..., SandboxBackend]] = {
     "bubblewrap": BubblewrapBackend,
+    "docker": DockerBackend,
+    "podman": PodmanBackend,
 }
+# Backends that read the image and limits from the ``sandbox:`` settings.
+_TAKES_SETTINGS = {"docker", "podman"}
 
 
-def get_backend(name: str) -> SandboxBackend:
-    """A new backend called `name`; `SandboxUnavailable` when this Mullet has none by that name."""
+def get_backend(name: str, settings: SandboxSettings | None = None) -> SandboxBackend:
+    """A new backend called `name`; `SandboxUnavailable` when this Mullet has none by that name.
+
+    The container backends take `settings` (the user's config file when None).
+    """
     factory = BACKENDS.get(name)
     if factory is not None:
-        return factory()
+        return factory(settings) if name in _TAKES_SETTINGS else factory()
     if name in RESERVED:
         raise SandboxUnavailable(
             f"sandbox.backend is {name}, which this version of Mullet does not have yet; "
@@ -37,6 +45,6 @@ def get_backend(name: str) -> SandboxBackend:
 
 
 __all__ = [
-    "BACKENDS", "BubblewrapBackend", "RunResult", "SandboxBackend", "SandboxCheck", "SandboxSpec",
+    "BACKENDS", "BubblewrapBackend", "DockerBackend", "PodmanBackend", "RunResult", "SandboxBackend", "SandboxCheck", "SandboxSpec",
     "SandboxUnavailable", "get_backend",
 ]

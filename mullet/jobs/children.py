@@ -7,6 +7,12 @@ so `kill_all()` can stop them on a stop request and `kill_stale()` can clean
 up after a runner that crashed. A recorded process is only killed if its
 start time still matches, so a recycled PID is never hit.
 
+A process is recorded by its start in clock ticks since boot (field 22 of
+/proc/<pid>/stat) and the boot's id, not by psutil's create_time: that adds
+the boot time the kernel derives from the wall clock, so it moves when the
+clock is stepped (NTP, a resume from suspend) and a live process would look
+like another one.
+
 Each owner has its own `Tracker`. The module-level functions act on the
 tracker bound to the calling thread with `use()`, or on the process default
 when none is bound, so a runner that never binds one keeps working as before.
@@ -14,6 +20,7 @@ when none is bound, so a runner that never binds one keeps working as before.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import signal
@@ -30,15 +37,73 @@ class Stopped(RuntimeError):
     """A stop was requested, so no new child process may start."""
 
 
-def _start_time(pid: int) -> float | None:
+@functools.cache
+def boot_id() -> str:
+    """This boot's random id: a start in ticks from another boot names no live process."""
     try:
-        return psutil.Process(pid).create_time()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip() or "unknown"
+    except (OSError, UnicodeDecodeError):
+        return "unknown"
+
+
+def parse_start_ticks(stat: bytes) -> int | None:
+    """Field 22 (starttime) of a /proc/<pid>/stat line, or None.
+
+    The fields are counted after the last ')', since the command name before
+    it may hold spaces and parentheses.
+    """
+    _, paren, rest = stat.rpartition(b")")
+    fields = rest.split()
+    if not paren or len(fields) < 20:
+        return None
+    try:
+        return int(fields[19])
+    except ValueError:
         return None
 
 
-def _kill_group(pgid: int, started: float) -> bool:
-    if _start_time(pgid) != started:
+def start_ticks(pid: int) -> int | None:
+    """When `pid` started, in clock ticks since boot; None when it is gone or unreadable."""
+    try:
+        return parse_start_ticks(Path(f"/proc/{pid}/stat").read_bytes())
+    except OSError:
+        return None
+
+
+def process_identity(pid: int) -> str | None:
+    """`<start ticks>@<boot id>` for a live `pid`, which a clock step doesn't change; None when it is gone.
+
+    Without /proc (not Linux) it is psutil's create_time instead.
+    """
+    if not os.path.isdir("/proc/self"):
+        try:
+            return repr(psutil.Process(pid).create_time())
+        except psutil.Error:
+            return None
+    ticks = start_ticks(pid)
+    return None if ticks is None else f"{ticks}@{boot_id()}"
+
+
+def same_process(pid: int, recorded: object) -> bool:
+    """True when `pid` is still the process `recorded` (from `process_identity`) names. Never raises.
+
+    A bare number is a create_time an older Mullet recorded, compared as it was.
+    """
+    if isinstance(recorded, str) and "@" in recorded:
+        return process_identity(pid) == recorded
+    try:
+        return abs(psutil.Process(pid).create_time() - float(recorded)) <= 0.01  # type: ignore[arg-type]
+    except (TypeError, ValueError, psutil.Error):
+        return False
+
+
+def pid_record() -> str:
+    """`<pid> <identity>` of this process, the line a runner writes to its runner.pid."""
+    return f"{os.getpid()} {process_identity(os.getpid())}"
+
+
+def _kill_group(pgid: int, started: object) -> bool:
+    if not same_process(pgid, started):
         return False
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
@@ -64,7 +129,7 @@ class Tracker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._live: dict[int, float] = {}  # pgid -> leader start time
+        self._live: dict[int, str] = {}  # pgid -> the leader's process_identity
         self._record_path: Path | None = None
         self._stopping = threading.Event()
 
@@ -95,7 +160,7 @@ class Tracker:
     @contextmanager
     def track(self, proc: Popen) -> Iterator[None]:
         """Record `proc`'s process group for as long as the block runs."""
-        started = _start_time(proc.pid)
+        started = process_identity(proc.pid)
         with self._lock:
             if started is not None:
                 self._live[proc.pid] = started
@@ -195,11 +260,18 @@ def kill_in_dir(directory: Path, since: float) -> int:
 
 
 def kill_stale(record_path: Path) -> int:
-    """Kill groups left behind by a previous runner for this job."""
+    """Kill groups left behind by a previous runner for this job, and remove orphaned sandbox containers.
+
+    A container belongs to the daemon, not to a process group, so it is
+    found by the owner labels the docker and podman backends give it.
+    """
+    from mullet.jobs.sandbox_backends import container
+
+    container.reap_orphans()
     try:
         groups = json.loads(record_path.read_text())
     except (OSError, ValueError):
         return 0
-    killed = sum(_kill_group(int(pgid), float(started)) for pgid, started in groups.items())
+    killed = sum(_kill_group(int(pgid), started) for pgid, started in groups.items())
     record_path.unlink(missing_ok=True)
     return killed

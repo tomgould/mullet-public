@@ -126,13 +126,19 @@ Every command a job runs on your machine (setup, checks, gates and the opencode 
 
 ```yaml
 sandbox:
-  backend: bubblewrap         # bubblewrap or auto (default bubblewrap)
+  backend: bubblewrap         # bubblewrap, docker, podman or auto (default bubblewrap)
+  image: mullet-sandbox:2.2.0 # docker and podman: the image (default mullet-sandbox:<Mullet version>)
+  memory: 8g                  # docker and podman: each container's memory limit, swap included (default 8g, at least 64m)
+  pids_limit: 4096            # docker and podman: the most processes and threads per container (default 4096, 64 to 1000000)
 ```
 
 - `bubblewrap` uses Linux user namespaces through `bwrap`, with no daemon and no root.
-- `auto` takes the first backend that works on this machine, and refuses all work when none does. Today that is bubblewrap on Linux.
-- `docker`, `podman` and `seatbelt` are reserved for backends still to come. Choosing one refuses all work with a message that says so.
-- A value Mullet doesn't recognise is reported by `mullet config show` and `mullet doctor`, and bubblewrap is used.
+- `docker` and `podman` run each command in a throwaway container from a local image, as your own uid, with every capability dropped, no-new-privileges, a read-only root, no network (setup commands get the engine's default network), only the clone and the job's paths mounted, and the environment passed on the container's stdin, never on a command line. Each container's PID 1 is Mullet's own init, which kills the container when Mullet goes away, and every container is labelled with the Mullet process and user that started it, so runner start and resume, `mullet job stop` and `mullet doctor` remove your containers whose owner has died (each gives up after 15 s if the daemon is wedged). Without `/etc/machine-id`, a random id kept in Mullet's state directory (`sandbox-host-id`) tells this install's containers from those of another sharing the daemon, such as a second WSL2 distro. If the engine or its daemon is missing, the daemon runs without seccomp, or the image is missing or lacks the `mullet-sandbox` labels, jobs are refused with the reason. Build the image once with `mullet sandbox build-image` (`--engine podman`, `--tag NAME`, `--print` to show the command); for toolchains it lacks, build your own image `FROM` it (it keeps the labels; keep `/usr/bin/python3` too) and name it in `sandbox.image`. An image built by an older Mullet needs rebuilding once, as it has no labels. The opencode worker can't run under these backends, since it needs a sandbox nested inside the container; use bubblewrap for opencode jobs. Linux only for now.
+- `auto` takes the first backend that works on this machine, and refuses all work when none does: bubblewrap, then docker, then podman.
+- `seatbelt` is reserved for a backend still to come. Choosing it refuses all work with a message that says so.
+- A value Mullet doesn't recognise is reported by `mullet config show` and `mullet doctor`, and its default is used.
+
+The container backend's design is in `docs/adr/0011-container-sandbox-backend.md`.
 
 ## Job protections
 

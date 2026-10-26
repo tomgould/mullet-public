@@ -23,14 +23,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import psutil
 import yaml
 
 from mullet.errors import (
     JobError, MulletError, NotApproved, NotRunnable, PlanFailed, RunnerBusy, SpendLimit, StrategyOff,
     Unavailable, Unverified,
 )
-from mullet.jobs import sandbox
+from mullet.jobs import children, sandbox
 from mullet.jobs.clone import GitError, JobClone, resolve_commit
 from mullet.jobs.executors.base import ExecutorUnavailable
 from mullet.jobs.ladder import ORDERS, Ladder, MachineState, RungChoice, plan_rungs, spend_state
@@ -98,11 +97,9 @@ def _runner_pid(job_id: str) -> int | None:
     try:
         pid_text, started = (job_dir(job_id) / "runner.pid").read_text().split()
         pid = int(pid_text)
-        if abs(psutil.Process(pid).create_time() - float(started)) > 0.01:
-            return None
-    except (OSError, ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+    except (OSError, ValueError):
         return None
-    return pid
+    return pid if children.same_process(pid, started) else None
 
 
 def _load_nodes(path: str) -> tuple[list[tuple[NodeSpec, str | None]], str, list[str]]:
@@ -625,8 +622,9 @@ def preflight(job_status: JobStatus, job: JobRecord | None = None) -> None:
             if not shutil.which("opencode"):
                 raise Unavailable("opencode is not on PATH; install it first (npm i -g opencode-ai)")
             if not nested_sandbox_ok():
-                raise Unavailable("opencode needs a nested sandbox for the worker's shell, and bubblewrap "
-                               "can't start one inside another here")
+                raise Unavailable("opencode needs a nested sandbox for the worker's shell, and the "
+                                  f"{sandbox.selection().name} sandbox backend can't start one inside "
+                                  "another here")
             if not shutil.which("socat"):
                 raise Unavailable("opencode reaches its provider through socat (for example: sudo apt install socat)")
             try:
@@ -751,7 +749,14 @@ def stop_runner(job_id: str) -> None:
 
 
 def cmd_stop(args: argparse.Namespace, ledger: Ledger) -> int:
-    stop_runner(args.job_id)
+    from mullet.jobs.sandbox_backends import container
+
+    try:
+        stop_runner(args.job_id)
+    finally:
+        # Then sandbox containers whose Mullet process died, whatever the runner's
+        # state. Bounded and never raises, so a wedged daemon can't hold up the stop.
+        container.reap_orphans()
     print("Asked the runner to stop. The job will be paused; resume it with: "
           f"mullet job resume {args.job_id}")
     return 0

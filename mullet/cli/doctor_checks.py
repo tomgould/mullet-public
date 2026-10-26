@@ -100,14 +100,19 @@ def sandbox_backend_row() -> Row:
 
 
 def sandbox_checks() -> list[Row]:
-    """Linux: the backend, bubblewrap and Mullet's sandbox self-test, plus socat for Claude Code's own sandbox."""
+    """Linux: the backend, bubblewrap (or docker/podman) and Mullet's sandbox self-test, plus socat for Claude Code's own sandbox."""
     from mullet.jobs import sandbox
 
     if not sys.platform.startswith("linux"):
         status = sandbox.check()
         return [("Job sandbox", "ok" if status.ok else f"Unavailable: {status.reason}",
                  "ok" if status.ok else "info")]
+    from mullet.jobs.sandbox_backends.settings import CONTAINER_BACKENDS
+
     rows: list[Row] = [sandbox_backend_row()]
+    chosen = sandbox.selection().name
+    if chosen in CONTAINER_BACKENDS:
+        return [*rows, *_container_rows(chosen, sandbox.check()), *orphan_container_rows(), *_socat_rows()]
     bwrap = shutil.which("bwrap")
     if bwrap:
         rows.append(("Bubblewrap", _version([bwrap, "--version"]) or bwrap, "ok"))
@@ -122,11 +127,36 @@ def sandbox_checks() -> list[Row]:
         if "Can't mount proc" in status.reason or "Operation not permitted" in status.reason:
             detail += f"\n      Hint: {_CONTAINER_SANDBOX_HINT}"
         rows.append(("Job sandbox", detail, "warn"))
+    return [*rows, *_socat_rows()]
+
+
+def orphan_container_rows() -> list[Row]:
+    """Remove sandbox containers left by a Mullet process that died, on every installed engine; a row if any were."""
+    from mullet.jobs.sandbox_backends import container
+
+    removed = container.reap_orphans([e for e in container.ENGINES if shutil.which(e)])
+    if not removed:
+        return []
+    return [("Sandbox containers", f"Removed {removed} left behind by a Mullet process that died", "info")]
+
+
+def _socat_rows() -> list[Row]:
     if shutil.which("socat"):
-        rows.append(("socat", "Found (Claude Code's sandbox needs it on Linux)", "ok"))
-    else:
-        rows.append(("socat", "Not found: Claude Code's sandbox needs it on Linux "
-                     "(for example: sudo apt install socat)", "warn"))
+        return [("socat", "Found (Claude Code's sandbox needs it on Linux)", "ok")]
+    return [("socat", "Not found: Claude Code's sandbox needs it on Linux "
+             "(for example: sudo apt install socat)", "warn")]
+
+
+def _container_rows(engine: str, status: Any) -> list[Row]:
+    """The docker or podman engine, the self-test (which also checks the image), and what can't run there."""
+    binary = shutil.which(engine)
+    title = engine.capitalize()
+    rows: list[Row] = [(title, _version([binary, "--version"]) or binary, "ok") if binary
+                       else (title, f"Not found: sandbox.backend is {engine}", "warn")]
+    rows.append(("Job sandbox", "Self-test passed" if status.ok else f"Self-test failed: {status.reason}",
+                 "ok" if status.ok else "warn"))
+    rows.append(("opencode worker", f"Not available under {engine}: it needs a nested sandbox, which a "
+                 "container can't start without loosening its seccomp and AppArmor profiles", "info"))
     return rows
 
 

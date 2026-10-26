@@ -112,7 +112,7 @@ Long, unattended work runs as a `mullet job`: a planned set of nodes, each run b
 
 - **planner.py**: task tree (at most three levels and 40 nodes).
 - **clone.py**: private clone; the worker never sees its git directory.
-- **sandbox.py**: bubblewrap on Linux, no unsandboxed fallback. Jobs refuse to start on macOS for now.
+- **sandbox.py**: picks a backend from `sandbox_backends/` (bubblewrap by default on Linux, or a hardened Docker or Podman container per command), no unsandboxed fallback. Jobs refuse to start on macOS for now.
 - **gates.py**, **review.py**: gates G0 to G7.
 - **ledger.py**: SQLite ledger; **report.py** builds the report from it, and **ladder_report.py** sums the ladder across jobs.
 - **profile.py**: per-repo setup, checks and protected paths. The stored profile lives in the `projects` folder of the config directory.
